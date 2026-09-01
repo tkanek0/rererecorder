@@ -1,0 +1,15 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+.mypy_cache/
+.pytest_cache/
+
+# Recorded sessions and logs
+/var/
+
+# Loose recording artefacts, in case anything is written outside var/
+*.rsdb
+*.db3
+*.wav
+*.jsonl

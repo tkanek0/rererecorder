@@ -1,0 +1,41 @@
+[project]
+name = "rererecorder"
+version = "0.1.0"
+description = "Synchronised recording from a RealSense D455 and a ReSpeaker USB Mic Array"
+requires-python = "==3.12.*"
+dependencies = [
+    # Self-contained wheel bundling librealsense. Pinned to the same series the
+    # realsense-playground checkout uses, and chosen because 2.58.3 ships a
+    # cp312 manylinux2014_aarch64 wheel - which is what makes a Raspberry Pi
+    # possible without building librealsense from source.
+    "pyrealsense2==2.58.3.*",
+    "numpy>=2.0",
+    # headless: nothing here opens a window - the GUI is a browser page - and
+    # the full opencv-python drags in GTK and its dependencies, which is dead
+    # weight in a container and slow to install on a Pi.
+    "opencv-python-headless>=4.10",
+    "sounddevice>=0.5.1",
+    "pyusb>=1.3.1",
+    "fastapi>=0.141.1",
+    "uvicorn[standard]>=0.52.4",
+]
+
+[tool.uv]
+# Follow pyenv rather than letting uv download its own interpreter, matching the
+# two playground repositories this borrows from.
+python-preference = "only-system"
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]
+addopts = "-q --strict-markers"
+# Nothing under tests/ touches a device. The camera admits one process at a
+# time and the array is not much better, so a suite that needed either could
+# not run beside the server. The clock arithmetic - which is the part of this
+# repository most worth testing - needs neither.
+
+[dependency-groups]
+dev = [
+    "httpx2>=2.12.0",
+    "pytest>=9.1.1",
+]

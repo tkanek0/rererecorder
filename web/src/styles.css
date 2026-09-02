@@ -1,0 +1,229 @@
+/* One stylesheet. The page is four panels; it does not need a framework. */
+
+:root {
+  --bg: #14161a;
+  --panel: #1c1f26;
+  --line: #2c313b;
+  --text: #e6e8ec;
+  --dim: #98a0ae;
+  --accent: #6aa9ff;
+  --good: #5ec98a;
+  --warn: #e8b446;
+  --bad: #e8695f;
+  color-scheme: dark;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font: 14px/1.5 system-ui, -apple-system, 'Segoe UI', sans-serif;
+}
+
+.app {
+  max-width: 1400px;
+  margin: 0 auto;
+  padding: 16px;
+  display: grid;
+  gap: 16px;
+  grid-template-columns: 2fr 1fr;
+}
+
+header {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+}
+
+header h1 {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 600;
+}
+
+header .sub {
+  color: var(--dim);
+  font-size: 12px;
+}
+
+.panel {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 12px 14px;
+}
+
+.panel h2 {
+  margin: 0 0 10px;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--dim);
+}
+
+.previews {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: 1fr 1fr;
+}
+
+.preview figure {
+  margin: 0;
+}
+
+.preview img {
+  width: 100%;
+  display: block;
+  background: #000;
+  border-radius: 4px;
+  aspect-ratio: 16 / 10;
+  object-fit: contain;
+}
+
+.preview figcaption {
+  color: var(--dim);
+  font-size: 11px;
+  padding-top: 4px;
+  display: flex;
+  justify-content: space-between;
+}
+
+.rows {
+  display: grid;
+  gap: 6px;
+}
+
+.row {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.row .label {
+  color: var(--dim);
+}
+
+.row .value.good {
+  color: var(--good);
+}
+.row .value.warn {
+  color: var(--warn);
+}
+.row .value.bad {
+  color: var(--bad);
+}
+
+button {
+  font: inherit;
+  color: var(--text);
+  background: #262b34;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 8px 14px;
+  cursor: pointer;
+}
+
+button:hover:not(:disabled) {
+  border-color: var(--accent);
+}
+
+button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+button.record {
+  width: 100%;
+  padding: 12px;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+button.record.armed {
+  background: #3a1f1f;
+  border-color: var(--bad);
+  color: #ffb4ad;
+}
+
+input[type='text'] {
+  font: inherit;
+  color: var(--text);
+  background: #10131a;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 7px 9px;
+  width: 100%;
+}
+
+.field {
+  display: flex;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.field input {
+  flex: 1;
+  min-width: 0;
+}
+
+.note {
+  color: var(--dim);
+  font-size: 11px;
+  margin-top: 8px;
+}
+
+.error {
+  color: var(--bad);
+  font-size: 12px;
+  margin-top: 8px;
+  white-space: pre-wrap;
+}
+
+.dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  display: inline-block;
+  background: var(--dim);
+}
+.dot.live {
+  background: var(--good);
+}
+.dot.rec {
+  background: var(--bad);
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-variant-numeric: tabular-nums;
+}
+
+th,
+td {
+  text-align: left;
+  padding: 5px 8px 5px 0;
+  border-bottom: 1px solid var(--line);
+  font-size: 12px;
+}
+
+th {
+  color: var(--dim);
+  font-weight: 500;
+}
+
+@media (max-width: 1000px) {
+  .app {
+    grid-template-columns: 1fr;
+  }
+  .previews {
+    grid-template-columns: 1fr;
+  }
+}

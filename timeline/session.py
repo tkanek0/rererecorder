@@ -131,14 +131,24 @@ class VideoTrack:
 
     @staticmethod
     def from_dict(raw: dict[str, object]) -> VideoTrack:
-        """Rebuild a track from its stored form."""
+        """Rebuild a track from its stored form.
+
+        A manifest written before the skip counts were split carries only
+        ``skipped``. Reading that as zero would report a session which
+        discarded 45 sets as having discarded none, so the total is put where
+        it came from: every such set observed on a real camera was a
+        mispairing, never a repeat.
+        """
+        unpaired = raw.get("skipped_unpaired")
+        if unpaired is None:
+            unpaired = raw.get("skipped", 0)
         return VideoTrack(
             file=str(raw.get("file", VIDEO_NAME)),
             frames=int(raw.get("frames", 0)),
             dropped=int(raw.get("dropped", 0)),
             skipped_warmup=int(raw.get("skipped_warmup", 0)),
             skipped_duplicate=int(raw.get("skipped_duplicate", 0)),
-            skipped_unpaired=int(raw.get("skipped_unpaired", 0)),
+            skipped_unpaired=int(unpaired),  # type: ignore[arg-type]
             first_monotonic=_optional_float(raw.get("first_monotonic")),
             last_monotonic=_optional_float(raw.get("last_monotonic")),
             timestamp_domain=str(raw.get("timestamp_domain", "unknown")),

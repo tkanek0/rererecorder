@@ -118,6 +118,33 @@ def to_bgr(frames: FrameSet) -> np.ndarray | None:
     return cv2.cvtColor(frames.color, cv2.COLOR_RGB2BGR)
 
 
+def to_bgr_from_planes(
+    y: np.ndarray, u: np.ndarray, v: np.ndarray
+) -> np.ndarray:
+    """Convert stored YUYV planes to BGR without rebuilding the packed buffer.
+
+    Args:
+        y: Luma, ``(height, width)`` uint8.
+        u: First chroma plane, half width.
+        v: Second chroma plane, half width.
+
+    Returns:
+        ``(height, width, 3)`` uint8 BGR.
+
+    Used when playing a recording back, where the planes are what is on disk.
+    Interleaving them first and calling COLOR_YUV2BGR_YUY2 would give the same
+    answer and cost an extra pass over 2 MB.
+    """
+    height, width = y.shape
+    yuv = np.empty((height, width, 3), np.uint8)
+    yuv[:, :, 0] = y
+    # Each chroma sample covers two pixels, which is what 4:2:2 means; repeat
+    # rather than interpolate so the result matches the packed conversion.
+    yuv[:, :, 1] = np.repeat(u, 2, axis=1)
+    yuv[:, :, 2] = np.repeat(v, 2, axis=1)
+    return cv2.cvtColor(yuv, cv2.COLOR_YUV2BGR)
+
+
 def render(
     frames: FrameSet,
     kind: Kind,

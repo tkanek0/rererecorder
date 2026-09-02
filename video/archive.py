@@ -108,6 +108,16 @@ COMMIT_EVERY = 30
 #: Blob columns in the order the INSERT lists them.
 _BLOB_COLUMNS = ("depth", "color", "color_y", "color_u", "color_v", "ir1", "ir2")
 
+#: Which blob columns each stream needs, for reading one at a time.
+#:
+#: Infrared is a pair even when only one side is wanted: ``FrameSet.infrared``
+#: holds both or neither, and the second image costs 5 ms.
+_STREAM_COLUMNS: dict[str, tuple[str, ...]] = {
+    "depth": ("depth",),
+    "color": ("color", "color_y", "color_u", "color_v"),
+    "infrared": ("ir1", "ir2"),
+}
+
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS meta(
     key   TEXT PRIMARY KEY,
@@ -744,6 +754,93 @@ class ArchiveSource:
             return 0
         return int(self._connection.execute("SELECT COUNT(*) FROM frames").fetchone()[0])
 
+    def frame_at(self, index: int, *, only: str | None = None) -> FrameSet | None:
+        """Return one frame set by its index, without reading the others.
+
+        Args:
+            index: The archive's own ``idx``, as :meth:`bounds` reports the
+                range of.
+            only: Decode just one stream - ``"depth"``, ``"color"`` or
+                ``"infrared"`` - leaving the rest None. What playback wants: a
+                player shows one image at a time, and decoding all five to
+                produce one costs 30 ms against 11.
+
+        Returns:
+            The set, or None if there is no frame with that index.
+
+        Raises:
+            StreamError: If the archive is not open.
+            ValueError: If ``only`` names no stream this format has.
+
+        What playback needs. ``frames()`` is a forward iterator, so seeking
+        through it would mean decoding everything up to the point of interest -
+        seconds of work to answer a question about one frame. ``idx`` is the
+        primary key, so this is a single row lookup.
+        """
+        if self._connection is None:
+            raise StreamError("open the archive before reading frames")
+        if only is not None and only not in _STREAM_COLUMNS:
+            raise ValueError(f"no stream called {only!r}")
+
+        wanted = (
+            set(_BLOB_COLUMNS) if only is None else set(_STREAM_COLUMNS[only])
+        )
+        monotonic = "f.capture_monotonic" if self._has_monotonic else "NULL"
+        blobs = ", ".join(
+            f"f.{name}" if name in self._columns and name in wanted else "NULL"
+            for name in _BLOB_COLUMNS
+        )
+        row = self._connection.execute(
+            "SELECT f.idx, f.timestamp_ms, f.received_at, f.metadata,"
+            f"       {monotonic}, {blobs},"
+            "       m.ax, m.ay, m.az, m.gx, m.gy, m.gz "
+            "FROM frames f LEFT JOIN motion m ON m.idx = f.idx WHERE f.idx = ?",
+            (index,),
+        ).fetchone()
+        return None if row is None else self._to_frame_set(row)
+
+    def bounds(self) -> tuple[int, int, float, float] | None:
+        """Describe the range of frames the archive holds.
+
+        Returns:
+            ``(first_index, last_index, first_monotonic, last_monotonic)``, or
+            None if it is empty. Indices are not assumed contiguous: a set the
+            source discarded leaves a gap, so a player has to know both the
+            range and that it may have holes in it.
+
+        Raises:
+            StreamError: If the archive is not open.
+        """
+        if self._connection is None:
+            raise StreamError("open the archive before reading frames")
+        monotonic = "capture_monotonic" if self._has_monotonic else "NULL"
+        row = self._connection.execute(
+            f"SELECT MIN(idx), MAX(idx), MIN({monotonic}), MAX({monotonic}) FROM frames"
+        ).fetchone()
+        if row is None or row[0] is None:
+            return None
+        first, last, start, end = row
+        return int(first), int(last), float(start or 0.0), float(end or 0.0)
+
+    def indices(self) -> list[int]:
+        """Every frame index the archive holds, in order.
+
+        Returns:
+            The indices. About 8 KB of JSON for a 30 second recording and 860 KB
+            for an hour, which is why a player seeks by index and asks the
+            server for the time of the frame it landed on rather than fetching
+            this.
+
+        Raises:
+            StreamError: If the archive is not open.
+        """
+        if self._connection is None:
+            raise StreamError("open the archive before reading frames")
+        return [
+            int(row[0])
+            for row in self._connection.execute("SELECT idx FROM frames ORDER BY idx")
+        ]
+
     def _decode_depth(self, blob: bytes | None) -> np.ndarray | None:
         """Decode a depth blob according to what the recording says it is.
 
@@ -770,6 +867,60 @@ class ArchiveSource:
                 "the image shape is unknown"
             )
         return decode_depth_zlib(blob, (intrinsics.height, intrinsics.width))
+
+    def _to_frame_set(self, row: tuple, *, realtime: bool = False) -> FrameSet:
+        """Turn one selected row into a FrameSet.
+
+        Args:
+            row: The columns in the order both queries select them.
+            realtime: Stamp ``received_at`` with now rather than with what was
+                recorded, which is what a paced replay wants.
+
+        Returns:
+            The frame set, with every stream decoded.
+        """
+        idx, timestamp_ms, received_at, metadata = row[:4]
+        capture_monotonic = row[4]
+        depth_blob, color_blob, y_blob, u_blob, v_blob, ir1, ir2 = row[5:12]
+        accel = row[12:15]
+        gyro = row[15:18]
+        motion = (
+            Motion(
+                accel=tuple(accel) if accel[0] is not None else None,
+                gyro=tuple(gyro) if gyro[0] is not None else None,
+            )
+            if any(value is not None for value in row[12:18])
+            else None
+        )
+        color, color_format = self._decode_color(color_blob, y_blob, u_blob, v_blob)
+        return FrameSet(
+            index=idx,
+            timestamp_ms=timestamp_ms,
+            received_at=time.monotonic() if realtime else received_at,
+            color=color,
+            color_format=color_format,
+            depth=self._decode_depth(depth_blob),
+            infrared=(
+                (decode_plane(ir1), decode_plane(ir2))
+                if ir1 is not None and ir2 is not None
+                else None
+            ),
+            calibration=self.calibration,
+            motion=motion,
+            metadata=json.loads(metadata) if metadata else None,
+            # Rebuilt so that FrameSet.capture_monotonic returns the value that
+            # was stored rather than recomputing it from an offset that no
+            # longer applies. The pair holds one instant expressed on both axes,
+            # which is all the conversion needs.
+            clock=(
+                ClockPair(
+                    monotonic=capture_monotonic, realtime=timestamp_ms / 1000.0
+                )
+                if capture_monotonic is not None
+                else None
+            ),
+            timestamp_domain=self._meta.get("timestamp_domain") or "unknown",
+        )
 
     @staticmethod
     def _decode_color(
@@ -840,49 +991,6 @@ class ArchiveSource:
                         time.sleep(delay)
                 previous = timestamp_ms
 
-                capture_monotonic = row[4]
-                depth_blob, color_blob, y_blob, u_blob, v_blob, ir1, ir2 = row[5:12]
-                accel = row[12:15]
-                gyro = row[15:18]
-                motion = (
-                    Motion(
-                        accel=tuple(accel) if accel[0] is not None else None,
-                        gyro=tuple(gyro) if gyro[0] is not None else None,
-                    )
-                    if any(value is not None for value in row[12:18])
-                    else None
-                )
-                color, color_format = self._decode_color(
-                    color_blob, y_blob, u_blob, v_blob
-                )
-                yield FrameSet(
-                    index=idx,
-                    timestamp_ms=timestamp_ms,
-                    received_at=time.monotonic() if self._realtime else received_at,
-                    color=color,
-                    color_format=color_format,
-                    depth=self._decode_depth(depth_blob),
-                    infrared=(
-                        (decode_plane(ir1), decode_plane(ir2))
-                        if ir1 is not None and ir2 is not None
-                        else None
-                    ),
-                    calibration=self.calibration,
-                    motion=motion,
-                    metadata=json.loads(metadata) if metadata else None,
-                    # Rebuilt so that FrameSet.capture_monotonic returns the
-                    # value that was stored rather than recomputing it from an
-                    # offset that no longer applies. The pair holds one instant
-                    # expressed on both axes, which is all the conversion needs.
-                    clock=(
-                        ClockPair(
-                            monotonic=capture_monotonic,
-                            realtime=timestamp_ms / 1000.0,
-                        )
-                        if capture_monotonic is not None
-                        else None
-                    ),
-                    timestamp_domain=self._meta.get("timestamp_domain") or "unknown",
-                )
+                yield self._to_frame_set(row, realtime=self._realtime)
             if empty or not self._loop:
                 return

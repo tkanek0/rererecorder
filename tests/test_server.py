@@ -160,3 +160,82 @@ def test_an_unknown_stream_is_a_404(client) -> None:
     response = client.get("/stream/nope.mjpg")
     assert response.status_code == 404
     assert "nope" in response.json()["detail"]
+
+
+# -- one session in detail, and deleting it ----------------------------------
+
+
+def _write_session(root: str, name: str) -> SessionPaths:
+    """A session directory with a manifest and a stand-in archive."""
+    paths = SessionPaths.create(root, name)
+    write_manifest(
+        paths,
+        SessionManifest(
+            session_id=name,
+            started_at=ClockPair(1_000.0, 1_788_000_000.0),
+            stopped_at=ClockPair(1_030.0, 1_788_000_030.0),
+        ),
+    )
+    with open(paths.video, "wb") as handle:
+        handle.write(b"x" * 2048)
+    return paths
+
+
+def test_detail_reports_an_unreadable_archive_rather_than_failing(client) -> None:
+    """A session whose archive is broken still has a manifest worth showing."""
+    _write_session(server_app.state.sessions_root, "broken")
+    body = client.get("/api/sessions/broken").json()
+
+    assert body["session_id"] == "broken"
+    assert body["size_bytes"] > 0
+    assert "error" in body["archive"], "said so rather than raising"
+
+
+def test_detail_of_a_missing_session_is_a_404(client) -> None:
+    assert client.get("/api/sessions/nothing").status_code == 404
+
+
+def test_a_session_id_cannot_escape_the_recordings_root(client, tmp_path) -> None:
+    """The one check between a path parameter and the filesystem."""
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    for attempt in ("..", "../outside", "..%2Foutside", "a/b"):
+        assert client.get(f"/api/sessions/{attempt}").status_code in (404, 307), attempt
+    assert outside.exists(), "and nothing outside was touched"
+
+
+def test_a_session_can_be_deleted(client) -> None:
+    """Offered because a session costs 1.7 GB for 34 seconds."""
+    paths = _write_session(server_app.state.sessions_root, "unwanted")
+    body = client.request("DELETE", "/api/sessions/unwanted").json()
+
+    assert body["deleted"] == "unwanted"
+    assert body["freed_bytes"] > 0
+    assert not os.path.exists(paths.directory)
+
+
+def test_deleting_the_running_session_is_refused(client) -> None:
+    """Removing the file being written is not a recoverable mistake."""
+    _write_session(server_app.state.sessions_root, "live")
+    recorder = server_app.state.recorder
+    recorder.recording = True
+    recorder.state = lambda: {  # type: ignore[method-assign]
+        "recording": True,
+        "session_id": "live",
+        "directory": None,
+        "seconds": 1.0,
+        "size_bytes": 1,
+        "video": None,
+        "audio": None,
+        "errors": [],
+    }
+
+    response = client.request("DELETE", "/api/sessions/live")
+    assert response.status_code == 409
+    assert os.path.isdir(
+        os.path.join(server_app.state.sessions_root, "live")
+    ), "still there"
+
+
+def test_deleting_a_missing_session_is_a_404(client) -> None:
+    assert client.request("DELETE", "/api/sessions/nothing").status_code == 404

@@ -22,15 +22,15 @@ import time
 from contextlib import asynccontextmanager
 from typing import Any
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
 from recorder import RecorderBusy, SessionRecorder
 from recorder import config as recording_config
-from timeline import SessionError, listing
-from video import FrameHub, LiveSource
+from timeline import SessionError, SessionPaths, listing, read_manifest
+from video import ArchiveSource, FrameHub, LiveSource, StreamError
 
 from . import config, preview
 
@@ -63,6 +63,11 @@ class State:
             codecs=recording_config.CODECS,
             hub=self.hub,
         )
+        #: Bytes per second the last recording achieved. Kept so that the
+        #: remaining-time estimate survives the recording ending: the number is
+        #: what makes free space meaningful, and "measured while recording" is
+        #: not an answer to "how long can I record".
+        self.last_write_rate: float | None = None
 
     def _open_camera(self) -> LiveSource:
         """Open the camera. Called by the hub, and again after a failure."""
@@ -155,13 +160,20 @@ def _storage() -> dict[str, Any]:
     except OSError as error:
         return {"sessions_dir": root, "error": str(error)}
 
-    rate = _write_rate()
+    live = _write_rate()
+    if live:
+        state.last_write_rate = live
+    # Falls back to what the last recording achieved. Still measured, just not
+    # right now - and said so, because an estimate from a different scene is
+    # worth less than one from this one.
+    basis = live or state.last_write_rate
     return {
         "sessions_dir": root,
         "free_bytes": free,
         "total_bytes": total,
-        "write_bytes_per_s": rate,
-        "seconds_left": free / rate if rate else None,
+        "write_bytes_per_s": live,
+        "rate_is_live": live is not None,
+        "seconds_left": free / basis if basis else None,
     }
 
 
@@ -231,6 +243,188 @@ def sessions() -> dict[str, Any]:
         "sessions_dir": state.sessions_root,
         "sessions": [manifest.as_dict() for manifest in listing(state.sessions_root)],
     }
+
+
+def _resolve(session_id: str) -> SessionPaths:
+    """Turn a session id from a URL into paths, or a 404.
+
+    Args:
+        session_id: What the client asked for.
+
+    Returns:
+        The paths.
+
+    Raises:
+        HTTPException: 404 if it is not a session id or no such session exists.
+            ``SessionPaths.resolve`` is the only thing between a path parameter
+            and the filesystem, and it rejects rather than sanitises.
+    """
+    try:
+        return SessionPaths.resolve(state.sessions_root, session_id)
+    except SessionError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+
+
+@app.get("/api/sessions/{session_id}")
+def session_detail(session_id: str) -> dict[str, Any]:
+    """Everything known about one session, enough to play it back.
+
+    Args:
+        session_id: Directory name.
+
+    Returns:
+        The manifest, plus the archive's frame range and which streams it
+        holds - a player needs the range to seek within, and the stream list to
+        know what it can show.
+
+    Raises:
+        HTTPException: 404 if the session or its manifest cannot be read.
+    """
+    paths = _resolve(session_id)
+    try:
+        manifest = read_manifest(paths)
+    except SessionError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+
+    detail = manifest.as_dict()
+    detail["size_bytes"] = paths.size_bytes()
+    detail["archive"] = _archive_detail(paths.video)
+    return detail
+
+
+def _archive_detail(path: str) -> dict[str, Any]:
+    """Describe an archive's frames without decoding any of them.
+
+    Args:
+        path: The archive to open.
+
+    Returns:
+        Its frame range, count and available streams, or an ``error``. A
+        session whose archive is unreadable still has a manifest worth showing,
+        so this reports rather than raises.
+    """
+    if not os.path.isfile(path):
+        return {"error": "no archive in this session"}
+    try:
+        with ArchiveSource(path) as archive:
+            bounds = archive.bounds()
+            config = archive.meta.get("config") or {}
+            return {
+                "frames": len(archive),
+                "first_index": bounds[0] if bounds else None,
+                "last_index": bounds[1] if bounds else None,
+                "first_monotonic": bounds[2] if bounds else None,
+                "last_monotonic": bounds[3] if bounds else None,
+                "streams": {
+                    "color": config.get("color") is not None,
+                    "depth": config.get("depth") is not None,
+                    "infrared": bool(config.get("infrared")),
+                },
+                "aligned": archive.calibration.aligned,
+                "codecs": archive.meta.get("codecs"),
+                "color_format": archive.meta.get("color_format"),
+            }
+    except StreamError as error:
+        return {"error": str(error)}
+
+
+@app.get("/api/sessions/{session_id}/frame/{index}.jpg")
+def session_frame(session_id: str, index: int, request: Request) -> Response:
+    """Render one recorded frame as a JPEG.
+
+    Args:
+        session_id: Directory name.
+        index: The archive's own frame index.
+        request: Used for ``kind``, ``width``, ``near``, ``far`` and
+            ``colormap``.
+
+    Returns:
+        The JPEG, with the frame's own capture time in ``X-Capture-Monotonic``.
+        A player reads that rather than assuming frames are evenly spaced: they
+        are not, because a set the camera mispaired leaves a gap.
+
+    Raises:
+        HTTPException: 404 for an unknown session, stream or frame.
+
+    The archive is opened per request. Measured: opening, reading one colour
+    frame and closing costs 15.7 ms against 16.3 ms with the archive already
+    open - the open is 1.3 ms and the operating system's page cache absorbs the
+    rest. Keeping one open would save nothing measurable and would need a lock,
+    because a synchronous endpoint runs on whichever thread is free.
+    """
+    kind = request.query_params.get("kind", "color")
+    if kind not in ("color", "depth", "ir1", "ir2"):
+        raise HTTPException(status_code=404, detail=f"no stream {kind!r}")
+    only = "infrared" if kind.startswith("ir") else kind
+
+    paths = _resolve(session_id)
+    query = request.query_params
+    try:
+        with ArchiveSource(paths.video) as archive:
+            frames = archive.frame_at(index, only=only)
+    except StreamError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+    if frames is None:
+        raise HTTPException(status_code=404, detail=f"no frame {index}")
+
+    image = preview.render(
+        frames,
+        kind,  # type: ignore[arg-type]
+        near_m=float(query.get("near", config.DEPTH_NEAR_M)),
+        far_m=float(query.get("far", config.DEPTH_FAR_M)),
+        colormap=query.get("colormap", config.DEPTH_COLORMAP),
+    )
+    if image is None:
+        raise HTTPException(
+            status_code=404, detail=f"this recording has no {kind} stream"
+        )
+    jpeg = preview.encode_jpeg(
+        preview.downscale(image, int(query.get("width", config.PREVIEW_WIDTH))),
+        config.JPEG_QUALITY,
+    )
+    return Response(
+        content=jpeg,
+        media_type="image/jpeg",
+        headers={
+            "X-Frame-Index": str(frames.index),
+            "X-Capture-Monotonic": repr(frames.capture_monotonic),
+            # A recorded frame never changes, so the browser may keep it. This
+            # is what makes seeking backwards and looping feel immediate.
+            "Cache-Control": "public, max-age=3600",
+        },
+    )
+
+
+@app.delete("/api/sessions/{session_id}")
+async def delete_session(session_id: str) -> dict[str, Any]:
+    """Delete a session and everything in it.
+
+    Args:
+        session_id: Directory name.
+
+    Returns:
+        What was removed.
+
+    Raises:
+        HTTPException: 404 if there is no such session, 409 if it is the one
+            being recorded.
+
+    Deleting is offered because a session costs 1.7 GB for 34 seconds: without
+    it, the only way to reclaim space is a shell. It removes the directory and
+    its contents and nothing else - the id cannot name anything outside the
+    recordings root, which ``SessionPaths.resolve`` enforces.
+    """
+    paths = _resolve(session_id)
+    running = state.recorder.state()
+    if running.get("recording") and running.get("session_id") == session_id:
+        raise HTTPException(
+            status_code=409, detail="this session is being recorded right now"
+        )
+
+    size = paths.size_bytes()
+    await asyncio.to_thread(shutil.rmtree, paths.directory)
+    logger.info("deleted session %s (%.1f MB)", session_id, size / 1e6)
+    return {"deleted": session_id, "freed_bytes": size}
 
 
 # -- settings ----------------------------------------------------------------

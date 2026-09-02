@@ -270,3 +270,29 @@ def test_listing_skips_a_session_without_a_readable_manifest(tmp_path) -> None:
 
 def test_listing_of_a_missing_root_is_empty(tmp_path) -> None:
     assert listing(str(tmp_path / "nothing")) == []
+
+
+def test_a_manifest_from_before_the_split_keeps_its_skip_count() -> None:
+    """Reading it as zero would call a lossy recording clean.
+
+    Sessions recorded before the counts were separated have only `skipped`.
+    Real ones exist with 45 in that field.
+    """
+    track = VideoTrack.from_dict({"frames": 290, "dropped": 0, "skipped": 45})
+    assert track.skipped == 45
+    assert track.skipped_unpaired == 45
+    assert track.skipped_warmup == 0
+
+
+def test_split_counts_are_preferred_when_present() -> None:
+    track = VideoTrack.from_dict(
+        {
+            "frames": 300,
+            "skipped": 99,  # stale total, must not win
+            "skipped_unpaired": 1,
+            "skipped_duplicate": 0,
+            "skipped_warmup": 3,
+        }
+    )
+    assert track.skipped == 1
+    assert track.skipped_warmup == 3

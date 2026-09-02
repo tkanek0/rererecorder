@@ -41,7 +41,7 @@ from timeline import (
     read_clocks,
     write_manifest,
 )
-from video import FrameSource, LiveSource, StreamConfig
+from video import FrameHub, FrameSource, LiveSource, StreamConfig
 
 from .audio_writer import AudioWriter
 from .video_writer import VideoWriter
@@ -78,6 +78,7 @@ class SessionRecorder:
         record_audio: bool = True,
         record_doa: bool = True,
         codecs: dict[str, str] | None = None,
+        hub: FrameHub | None = None,
         source_factory: Any = None,
     ) -> None:
         """Prepare a recorder. Nothing is opened until :meth:`start`.
@@ -92,8 +93,14 @@ class SessionRecorder:
             record_audio: Whether to record the array at all.
             record_doa: Whether to record the direction beside the audio.
             codecs: Overrides for the archive's default codecs.
-            source_factory: Callable returning a :class:`FrameSource`, for tests
-                and for a future replay source. Defaults to opening the camera.
+            hub: Frame hub to record from, or None to make one. The server
+                passes its own so that the preview and the recording share one
+                pipeline - opening the camera again for a recording would take
+                a second, drop the preview and leave auto-exposure settling in
+                the middle of what was being recorded.
+            source_factory: Callable returning a :class:`FrameSource`, for
+                tests and for a future replay source. Ignored when a hub is
+                given.
         """
         self._root = root
         self._streams = streams or StreamConfig()
@@ -103,6 +110,8 @@ class SessionRecorder:
         self._record_doa = record_doa
         self._codecs = codecs
         self._source_factory = source_factory or self._open_camera
+        self._owns_hub = hub is None
+        self._hub = hub or FrameHub(self._source_factory)
 
         # Whether this recorder made the taps, and so has to close them. A tap
         # passed in belongs to whoever passed it - the server holds its own
@@ -186,7 +195,7 @@ class SessionRecorder:
         if not self._record_video or self._paths is None:
             return None
         writer = VideoWriter(
-            self._source_factory(),
+            self._hub,
             self._paths.video,
             config=self._streams,
             codecs=self._codecs,
@@ -243,6 +252,8 @@ class SessionRecorder:
         # keep recording audio through all of it, for no reason.
         if self._audio is not None:
             self._audio.stop(timeout=timeout)
+        # Kept, not cleared: _collect_tracks below reads the final statistics
+        # off it, and start() replaces it anyway.
         if self._video is not None:
             self._video.stop(timeout=timeout)
 
@@ -264,9 +275,8 @@ class SessionRecorder:
     def close(self) -> None:
         """Release the devices for good, if this recorder opened them.
 
-        The array needs this and the camera does not. Its taps run on daemon
-        threads, so a process that exits while a capture stream is still open
-        never closes it - and the array is then in a state where the next
+        The array needs this most. Its taps run on daemon threads, so a process
+        that exits while a capture stream is still open never closes it - and the array is then in a state where the next
         ``InputStream`` open fails, silently producing a session with an empty
         WAV and no error to explain it. Observed exactly that, twice in a row,
         before this existed.
@@ -274,6 +284,8 @@ class SessionRecorder:
         Releasing is not enough: a release only starts an idle countdown, and
         the process is usually gone before it expires.
         """
+        if self._owns_hub:
+            self._hub.stop()
         if not self._owns_taps:
             return
         if self._tap is not None:
@@ -292,6 +304,32 @@ class SessionRecorder:
         self.close()
 
     # -- state -------------------------------------------------------------
+
+    @property
+    def root(self) -> str:
+        """Where session directories are created."""
+        return self._root
+
+    @root.setter
+    def root(self, value: str) -> None:
+        """Move where future sessions are created.
+
+        Args:
+            value: The new directory. Applies to the next session; the one
+                being written stays where it is.
+
+        Raises:
+            RecorderBusy: If a recording is running. Moving the directory
+                mid-session would leave half a session on one disk and half on
+                another, and the manifest would describe neither.
+
+        Settable because the choice of disk is a per-session decision here: a
+        recording costs 195 GB an hour, so which volume it lands on is not
+        something to fix at deployment time.
+        """
+        if self.recording:
+            raise RecorderBusy("cannot move the directory while recording")
+        self._root = value
 
     @property
     def recording(self) -> bool:
@@ -338,6 +376,8 @@ class SessionRecorder:
                     "dropped": video.dropped,
                     "skipped": video.skipped,
                     "skipped_unpaired": video.skipped_unpaired,
+                    "skipped_duplicate": video.skipped_duplicate,
+                    "skipped_warmup": video.skipped_warmup,
                     "fps": round(video.fps, 2) if video.fps else None,
                     "timestamp_domain": video.timestamp_domain,
                     "error": video.error,

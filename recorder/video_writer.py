@@ -1,16 +1,20 @@
 """Writing the camera to an archive, and saying what it cost.
 
-The recording is the primary consumer of the camera here, not a side effect of a
-preview - which is the opposite of realsense-playground, where a recorder reads
-whatever the hub last published. That matters: a hub hands out the newest frame,
-so a recorder reading from one can silently miss frames when it is late. Reading
-``source.frames()`` directly cannot skip anything, because the iterator yields
-every set the SDK delivers.
+The writer is a *listener* on the frame hub, not a poller. That distinction is
+the whole design: ``FrameHub.latest`` returns the newest set, so anything
+reading it that falls a frame behind loses one and cannot tell - fine for a
+preview, useless for a recorder. A listener is called for every set, in order,
+on the hub's own thread.
 
-What can still be lost is a frame the encoder queue has no room for, which means
-the disk or the CPU could not keep up. That is counted and reported, never
-hidden: a recording with holes is usable, and one that claims to have none is
-not.
+The price is that this code runs inside the hub's read loop, so it has to be
+quick: ``ArchiveWriter.append`` is a bounded queue put, tens of microseconds,
+and the encoding happens on the archive's own pool. If the queue is full the
+frame is counted as dropped rather than waited for, because blocking here would
+stall the camera for the preview as well.
+
+Reading the source directly - which an earlier version did - would also work
+and lose nothing, but then recording from the CLI and recording from the server
+would be two different code paths, and only one of them would be exercised.
 """
 
 from __future__ import annotations
@@ -19,7 +23,7 @@ import logging
 import threading
 from dataclasses import dataclass
 
-from video import ArchiveWriter, FrameSource, StreamConfig
+from video import ArchiveWriter, FrameHub, FrameSet, StreamConfig
 
 logger = logging.getLogger(__name__)
 
@@ -32,15 +36,14 @@ class VideoStats:
         frames: Frame sets written.
         dropped: Sets the encoder queue could not accept. Non-zero means the
             disk or the CPU fell behind, and the recording has holes.
-        skipped_warmup: Sets discarded before the first one was delivered,
-            while the SDK's syncer settled. Every recording has a few; they are
-            not a loss and are reported apart from the rest for that reason.
-        skipped_duplicate: Sets the source discarded because every frame in
+        skipped_warmup: Sets the source discarded before delivering its first,
+            while the SDK's syncer settled. Measured on a D455: three, every
+            time, within the same millisecond as ``pipeline.start``. Not a
+            loss, and reported apart from the rest for that reason.
+        skipped_duplicate: Sets discarded mid-stream because every frame in
             them had already been delivered.
-        skipped_unpaired: Sets discarded because their streams disagreed about
-            when they were taken. Not a loss - these were never one instant -
-            but the count says how often the camera is re-pairing frames, which
-            is worth seeing next to the frame rate.
+        skipped_unpaired: Sets discarded mid-stream because their streams
+            disagreed about when they were taken.
         bytes_written: Size of the archive at the last commit.
         first_monotonic: Capture time of the first set written, or None.
         last_monotonic: Capture time of the last set written.
@@ -80,9 +83,9 @@ class VideoStats:
         Returns:
             The rate, or None with fewer than two frames.
 
-        Computed as intervals over span rather than as the mean of ``1 / dt``,
-        which jitter biases high - a trap documented in realsense-playground
-        after it made a struggling recorder look healthy.
+        Intervals over span, not the mean of ``1 / dt``: jitter biases the
+        latter high, a trap documented in realsense-playground after it made a
+        struggling recorder look healthy.
         """
         span = self.span_s
         if span is None or span <= 0 or self.frames < 2:
@@ -91,100 +94,125 @@ class VideoStats:
 
 
 class VideoWriter:
-    """An open archive, fed from a frame source by a thread of its own."""
+    """An open archive, fed by the frame hub."""
 
     def __init__(
         self,
-        source: FrameSource,
+        hub: FrameHub,
         path: str,
         *,
         config: StreamConfig,
         codecs: dict[str, str] | None = None,
     ) -> None:
-        """Bind a writer to its source and its output file.
+        """Bind a writer to the hub and its output file.
 
         Args:
-            source: Where frames come from. Opened and closed by this writer,
-                because a RealSense device admits one owner and this is it.
+            hub: Where frames come from. Held open for as long as the archive
+                is - a recording is a consumer of the camera in its own right,
+                and putting it on the preview's reference count would stop a
+                recording the moment the last browser tab closed.
             path: Archive to write.
             config: Stream configuration to record alongside the frames.
             codecs: Overrides for the archive's default codecs.
         """
-        self._source = source
+        self._hub = hub
         self._path = path
         self._config = config
         self._codecs = codecs
 
         self._lock = threading.Lock()
-        self._stop = threading.Event()
-        self._thread: threading.Thread | None = None
         self._stats = VideoStats()
         self._writer: ArchiveWriter | None = None
-        self._ready = threading.Event()
+        self._running = False
 
     # -- control -----------------------------------------------------------
 
     def start(self, timeout: float = 15.0) -> None:
-        """Open the camera, start the archive and begin writing.
+        """Open the archive and begin writing every frame the hub delivers.
 
         Args:
-            timeout: Seconds to wait for the camera to deliver its first frame.
-                Generous: opening a RealSense pipeline costs about a second, and
+            timeout: Seconds to wait for the camera's first frame. Generous:
+                opening a RealSense pipeline costs about a second, and
                 auto-exposure takes longer than that to settle.
 
         Raises:
             RuntimeError: If this writer is already running, or the camera did
-                not start. Raised rather than reported, because the caller is
-                deciding whether a session can begin at all - and a session
-                that silently records nothing from the camera is worse than one
-                that refuses to start.
+                not produce a frame. Raised rather than reported, because the
+                caller is deciding whether a session can begin at all - and a
+                session that silently records no video is worse than one that
+                refuses to start.
+
+        The first frame is waited for rather than assumed: its calibration is
+        what the archive stores, and an archive without one is not worth having
+        because its depth values would have no scale.
         """
         with self._lock:
-            if self._thread is not None and self._thread.is_alive():
+            if self._running:
                 raise RuntimeError("this video writer is already running")
             self._stats = VideoStats()
-            self._stop.clear()
-            self._ready.clear()
 
-        self._source.open()
-        self._thread = threading.Thread(
-            target=self._run, name="video-writer", daemon=True
-        )
-        self._thread.start()
-
-        if not self._ready.wait(timeout):
-            self.stop()
-            raise RuntimeError(
-                f"the camera produced no frames within {timeout:.0f}s: "
-                f"{self._stats.error or 'no error reported'}"
+        self._hub.acquire()
+        try:
+            frames = self._hub.latest(timeout=timeout)
+            if frames is None:
+                raise RuntimeError(
+                    self._hub.error or f"no frames within {timeout:.0f}s"
+                )
+            self._writer = ArchiveWriter(
+                self._path,
+                calibration=frames.calibration,
+                config=self._config,
+                device=self._hub.device,
+                options=self._read_options(),
+                codecs=self._codecs,
             )
+        except Exception:
+            self._hub.release()
+            raise
 
-    def stop(self, timeout: float = 15.0) -> VideoStats:
-        """Stop writing, finish the archive and release the camera.
+        self._running = True
+        self._hub.add_listener(self._on_frame)
+        logger.info("recording video to %s", self._path)
+
+    def stop(self, timeout: float = 30.0) -> VideoStats:
+        """Stop writing, finish the archive and let go of the camera.
 
         Args:
-            timeout: Seconds to wait for the writer thread and the encoders.
+            timeout: Seconds to wait for the encoder queue to drain.
 
         Returns:
             The final statistics.
         """
-        self._stop.set()
-        # Wakes the frames() iterator, which otherwise blocks for up to a
-        # second per call waiting on the SDK.
-        try:
-            self._source.close()
-        except Exception:  # noqa: BLE001 - closing must not mask the recording
-            logger.warning("could not close the frame source", exc_info=True)
-        thread = self._thread
-        if thread is not None:
-            thread.join(timeout)
+        if not self._running:
+            return self.stats
+        self._running = False
+        # Detached first: nothing new arrives while the queue drains.
+        self._hub.remove_listener(self._on_frame)
+        writer = self._writer
+        if writer is not None:
+            if not writer.drain(timeout=timeout):
+                logger.warning("the encoder queue did not drain within %.0fs", timeout)
+            writer.close()
+            # Copy the counters out before letting go of the writer: they live
+            # in the archive, and `stats` reads them from there. Dropping the
+            # reference first loses every frame written since the last time
+            # anything asked - measured at 30 of 240 on a real recording.
+            with self._lock:
+                final = writer.stats
+                self._stats.frames = final.frames
+                self._stats.dropped = final.dropped
+                self._stats.bytes_written = final.bytes_written
+        self._writer = None
+        self._hub.release()
+        logger.info(
+            "video recording stopped: %s, %d frames", self._path, self._stats.frames
+        )
         return self.stats
 
     @property
     def running(self) -> bool:
-        """Whether the writer thread is alive."""
-        thread = self._thread
-        return thread is not None and thread.is_alive()
+        """Whether frames are currently being written."""
+        return self._running
 
     @property
     def path(self) -> str:
@@ -202,57 +230,32 @@ class VideoWriter:
             snapshot.frames = written.frames
             snapshot.dropped = written.dropped
             snapshot.bytes_written = written.bytes_written
-        snapshot.skipped_warmup = getattr(self._source, "skipped_warmup", 0)
-        snapshot.skipped_duplicate = getattr(self._source, "skipped_duplicate", 0)
-        snapshot.skipped_unpaired = getattr(self._source, "skipped_unpaired", 0)
-        snapshot.timestamp_domain = getattr(
-            self._source, "timestamp_domain", snapshot.timestamp_domain
-        )
+        source = self._hub.source
+        if source is not None:
+            snapshot.skipped_warmup = getattr(source, "skipped_warmup", 0)
+            snapshot.skipped_duplicate = getattr(source, "skipped_duplicate", 0)
+            snapshot.skipped_unpaired = getattr(source, "skipped_unpaired", 0)
+            snapshot.timestamp_domain = getattr(
+                source, "timestamp_domain", snapshot.timestamp_domain
+            )
         return snapshot
 
-    # -- writer thread -----------------------------------------------------
+    # -- the hub's thread --------------------------------------------------
 
-    def _run(self) -> None:
-        """Open the archive from the first frame, then feed it everything."""
-        try:
-            options = self._read_options()
-            self._writer = ArchiveWriter(
-                self._path,
-                calibration=self._source.calibration,
-                config=self._config,
-                device=getattr(self._source, "device", None),
-                options=options,
-                codecs=self._codecs,
-            )
-            try:
-                for frames in self._source.frames():
-                    if self._stop.is_set():
-                        break
-                    # Not waiting for room: a full queue means the disk cannot
-                    # keep up, and blocking here would stall the camera for
-                    # every other consumer. The drop is counted instead.
-                    self._writer.append(frames)
-                    with self._lock:
-                        if self._stats.first_monotonic is None:
-                            self._stats.first_monotonic = frames.capture_monotonic
-                            self._stats.timestamp_domain = frames.timestamp_domain
-                        self._stats.last_monotonic = frames.capture_monotonic
-                    self._ready.set()
-            finally:
-                self._writer.drain(timeout=30.0)
-                self._writer.close()
-        except Exception as error:  # noqa: BLE001 - reported through stats
-            logger.exception("video recording failed")
-            with self._lock:
-                self._stats.error = str(error)
-        finally:
-            # Unblocks a caller waiting on the first frame that never came.
-            self._ready.set()
-            # self.stats, not self._stats: the frame count lives in the
-            # archive writer, and the local copy is never updated.
-            logger.info(
-                "video recording stopped: %s, %d frames", self._path, self.stats.frames
-            )
+    def _on_frame(self, frames: FrameSet) -> None:
+        """Hand one set to the archive. Runs on the hub's reader thread."""
+        writer = self._writer
+        if writer is None or not self._running:
+            return
+        # Not waiting for room: a full queue means the disk or the encoders
+        # cannot keep up, and blocking here would stall the camera for the
+        # preview too. The drop is counted instead.
+        writer.append(frames)
+        with self._lock:
+            if self._stats.first_monotonic is None:
+                self._stats.first_monotonic = frames.capture_monotonic
+                self._stats.timestamp_domain = frames.timestamp_domain
+            self._stats.last_monotonic = frames.capture_monotonic
 
     def _read_options(self) -> dict[str, float]:
         """Read the camera's sensor options, if the source can report them.
@@ -262,7 +265,8 @@ class VideoWriter:
             logged and swallowed: the options make a recording interpretable,
             but they are not the measurements.
         """
-        reader = getattr(self._source, "options", None)
+        source = self._hub.source
+        reader = getattr(source, "options", None) if source is not None else None
         if reader is None:
             return {}
         try:

@@ -42,6 +42,17 @@ RUN cmake -S librealsense -B build \
     && cmake --build build --parallel ${BUILD_JOBS:-$(nproc)} \
     && cmake --install build
 
+# -- frontend stage -----------------------------------------------------------
+FROM node:24-slim AS web
+
+WORKDIR /web
+COPY web/package.json web/package-lock.json ./
+RUN npm ci
+COPY web/ ./
+# Built here so the runtime image needs no node at all: what ships is a few
+# hundred kilobytes of static files, and a Raspberry Pi never compiles them.
+RUN npm run build
+
 # -- runtime stage ------------------------------------------------------------
 FROM python:3.12-slim-bookworm
 
@@ -70,6 +81,8 @@ ENV UV_PROJECT_ENVIRONMENT=/usr/local \
 RUN uv sync --frozen --no-install-package pyrealsense2 --inexact
 
 COPY . .
+# After COPY, so a stale local web/dist cannot shadow the one just built.
+COPY --from=web /web/dist ./web/dist
 
 # Fail loudly at start if the wrong backend somehow ended up in the image: a
 # silent fallback to V4L2 would look like a working recorder that drops 8% of
@@ -77,4 +90,7 @@ COPY . .
 RUN python -c "import pyrealsense2 as rs; print('librealsense', rs.__version__)"
 
 ENV PYTHONPATH=/app
-CMD ["python", "-m", "tools.record", "--seconds", "10"]
+EXPOSE 8040
+# The server rather than the CLI: the image is the recorder, and the recorder
+# has a page. `docker run ... python -m tools.record` still works.
+CMD ["python", "-m", "server"]

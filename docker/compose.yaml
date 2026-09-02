@@ -18,7 +18,9 @@ services:
     devices:
       - /dev/bus/usb:/dev/bus/usb
     volumes:
-      - ../var:/app/var
+      # Where recordings go. 54 MB/s with every stream on, so this wants a disk
+      # with room - 195 GB an hour.
+      - ${RRR_DATA:-/mnt/dataspace02/rererecorder}:/data
       # Bind the source during development so a code change does not need a
       # rebuild. The image already contains a copy; this shadows it.
       - ..:/app
@@ -27,7 +29,12 @@ services:
       # measured through this image they lose no frames at 30 fps.
       RRR_DEPTH: ${RRR_DEPTH:-1280x720@30}
       RRR_COLOR: ${RRR_COLOR:-1280x800@30}
-      RRR_SESSIONS_DIR: /app/var/sessions
+      RRR_SESSIONS_DIR: ${RRR_SESSIONS_DIR:-/data/sessions}
+      # Off until the array is wired into the container: recording it needs
+      # /dev/snd passed through, and ALSA inside a container is unverified
+      # here. With it on and the device absent, every session reports an audio
+      # failure it cannot do anything about.
+      RRR_AUDIO: ${RRR_AUDIO:-0}
     # Run as the invoking user, so recordings under var/ do not come out owned
     # by root. The camera stays reachable because the RealSense udev rule makes
     # its node world-writable (crw-rw-rw- root plugdev), so no group membership

@@ -13,3 +13,8 @@ __pycache__/
 *.db3
 *.wav
 *.jsonl
+
+# Node (web frontend)
+node_modules/
+dist/
+*.tsbuildinfo

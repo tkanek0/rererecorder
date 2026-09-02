@@ -7,9 +7,14 @@ for the most recent result.
 
 Two decisions shape it, both borrowed from what the THETA playground learned:
 
-* Only the newest set is kept. Every consumer here wants "what the camera sees
-  now"; a queue would add latency and memory pressure to deliver frames nobody
-  will look at.
+* Only the newest set is kept **for readers that poll**. A preview wants "what
+  the camera sees now" and gains nothing from a queue of stale frames.
+* A recorder wants the opposite, and polling cannot give it: ``latest`` hands
+  back whatever arrived most recently, so a reader that falls a frame behind
+  loses one and cannot tell. Recording is what this repository is for, so
+  there is a second way out - a listener, called on the hub's own thread for
+  every set, in order, with nothing dropped. What it must not do is take long:
+  it runs before the next frame can be published.
 * The source is reference counted. It opens when the first consumer arrives and
   closes shortly after the last one leaves, so an idle server does not hold the
   camera - which matters more here than it did there, because holding it stops
@@ -96,6 +101,10 @@ class FrameHub:
         #: average to 30.8 fps but their reciprocals average to 108.
         self._interval = 0.0
         self._last_at = 0.0
+        #: Called for every set, in order. Held under its own lock so that
+        #: adding one cannot deadlock against a publish in progress.
+        self._listeners: list[Callable[[FrameSet], None]] = []
+        self._listener_lock = threading.Lock()
 
     # -- lifecycle ---------------------------------------------------------
 
@@ -118,6 +127,44 @@ class FrameHub:
             An object usable in a ``with`` statement, releasing on exit.
         """
         return _Hold(self)
+
+    def add_listener(self, listener: Callable[[FrameSet], None]) -> None:
+        """Call ``listener`` for every frame set, in order, dropping none.
+
+        Args:
+            listener: Called on the hub's reader thread with each set as it
+                arrives. It must return quickly - the next frame cannot be
+                published until it does - and must not raise. A raise is
+                logged and swallowed, because one broken consumer taking the
+                camera away from the others would be a worse failure than
+                whatever it was complaining about.
+
+        This is what recording uses. ``latest`` cannot: it returns the newest
+        set, so a consumer that is briefly late silently misses one, and a
+        recorder that misses frames without knowing is worse than useless.
+
+        Registering does not hold the source open; pair it with ``acquire``.
+        """
+        with self._listener_lock:
+            self._listeners.append(listener)
+
+    def remove_listener(self, listener: Callable[[FrameSet], None]) -> None:
+        """Stop calling a listener.
+
+        Args:
+            listener: The callable passed to :meth:`add_listener`. Removing one
+                that was never added is not an error - a recorder that failed
+                to start still tidies up.
+        """
+        with self._listener_lock:
+            if listener in self._listeners:
+                self._listeners.remove(listener)
+
+    @property
+    def listeners(self) -> int:
+        """How many listeners are registered."""
+        with self._listener_lock:
+            return len(self._listeners)
 
     def restart(self) -> None:
         """Close the current source and open a fresh one.
@@ -275,7 +322,18 @@ class FrameHub:
                         else 0.9 * self._interval + 0.1 * interval
                     )
             self._last_at = now
+            published = self._latest
             self._updated.notify_all()
+
+        # Outside the condition: a listener runs arbitrary code, and holding
+        # the lock across it would block every poller for its duration.
+        with self._listener_lock:
+            listeners = list(self._listeners)
+        for listener in listeners:
+            try:
+                listener(published)
+            except Exception:  # noqa: BLE001 - one consumer is not the camera
+                logger.exception("a frame listener failed")
 
     def _run(self) -> None:
         """Open the source, publish its frames, reopen it when it breaks."""

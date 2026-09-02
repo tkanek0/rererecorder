@@ -974,6 +974,32 @@ class ArchiveSource:
                 rates[stream] = (count - 1) / span
         return rates
 
+    def frame_times(self) -> list[tuple[int, float]]:
+        """Every frame's index and capture time, without decoding anything.
+
+        Returns:
+            ``(index, capture_monotonic)`` pairs in order. Empty if the archive
+            stores no capture times.
+
+        Raises:
+            StreamError: If the archive is not open.
+
+        What turns an instant into a frame to fetch. Interpolating from
+        :meth:`bounds` would be close but not exact - a set the camera mispaired
+        leaves a gap - and this costs one query over an integer column.
+        """
+        if self._connection is None:
+            raise StreamError("open the archive before reading frames")
+        if not self._has_monotonic:
+            return []
+        return [
+            (int(idx), float(t))
+            for idx, t in self._connection.execute(
+                "SELECT idx, capture_monotonic FROM frames "
+                "WHERE capture_monotonic IS NOT NULL ORDER BY idx"
+            )
+        ]
+
     def indices(self) -> list[int]:
         """Every frame index the archive holds, in order.
 

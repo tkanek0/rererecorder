@@ -43,16 +43,21 @@ IMAGE     ?= rererecorder:latest
 #: --user: recordings under var/ would otherwise come out owned by root.
 #: --device: the RSUSB backend needs the USB bus and nothing else - no
 #: /dev/video*, no kernel module, nothing privileged.
-#: RRR_AUDIO=0: the array is not wired into the container yet. Recording it
-#: needs /dev/snd passed through as well, and that pairing is unverified - the
-#: camera and the array are on different USB controllers here, but ALSA inside
-#: a container is its own question. Until it is answered, this records the
-#: camera and says nothing about audio, rather than reporting a failure on
-#: every session.
+#: The audio group, because /dev/snd/* is root:audio 0660. On the host an ACL
+#: lets the desktop user in; inside a container the ACL does not apply, so the
+#: group has to be granted explicitly. Without it PortAudio simply reports no
+#: devices - no error, just an empty list.
+AUDIO_GID = $(shell getent group audio | cut -d: -f3)
+
+#: --device /dev/bus/usb: the camera (RSUSB, libusb) and the array's direction
+#: readout (a vendor control transfer) both need the USB bus. No /dev/video*,
+#: no kernel module, nothing privileged.
+#: --device /dev/snd: the array's audio, which goes through ALSA.
 DOCKER_RUN = docker run --rm -it --user $(shell id -u):$(shell id -g) \
-	--device /dev/bus/usb:/dev/bus/usb \
+	--group-add $(AUDIO_GID) \
+	--device /dev/bus/usb:/dev/bus/usb --device /dev/snd:/dev/snd \
 	-v $(CURDIR):/app -v $(DATA):/data \
-	-e RRR_SESSIONS_DIR=/data/sessions -e RRR_AUDIO=0
+	-e RRR_SESSIONS_DIR=/data/sessions
 
 .DEFAULT_GOAL := help
 .PHONY: help setup check server web web-build record inspect devices \

@@ -181,13 +181,27 @@ def test_colour_survives_exactly(written) -> None:
             assert np.array_equal(original.color, restored.color)
 
 
-def test_motion_and_metadata_survive(written) -> None:
+def test_metadata_survives(written) -> None:
     path, originals = written()
 
     with ArchiveSource(path) as archive:
         for original, restored in zip(originals, archive.frames(), strict=True):
-            assert restored.motion.accel == pytest.approx(original.motion.accel)
-            assert restored.motion.gyro == pytest.approx(original.motion.gyro)
+            assert restored.metadata == original.metadata
+
+
+def test_a_frames_own_motion_is_not_stored(written) -> None:
+    """FrameSet.motion is a convenience, not the inertial data.
+
+    It holds whichever samples were newest when the frame was assembled - one
+    per frame against the sensor's 480 Hz. Storing it would put a fourteenth of
+    the data in the file twice; the samples themselves go to `imu`, and
+    ``motion_samples`` is what reads them.
+    """
+    path, _ = written()
+
+    with ArchiveSource(path) as archive:
+        assert next(archive.frames()).motion is None
+        assert list(archive.motion_samples()) == []
 
 
 def test_calibration_and_device_survive(written, calibration) -> None:
@@ -246,16 +260,17 @@ def test_the_column_is_declared_in_the_meta(written) -> None:
 
 
 def test_written_files_declare_the_current_version(written) -> None:
-    """v2 changes what existing columns mean, so it must announce itself.
+    """Each version changed what an existing structure means.
 
     ``capture_monotonic`` was an added column and left the version alone, on
-    the grounds that an older reader could ignore it. This is different:
-    colour moved to three columns and depth may be zlib rather than PNG, so a
-    v1 reader opening one of these would misread it. Better that it refuses.
+    the grounds that an older reader could ignore it. v2 and v3 are different:
+    colour moved to three columns, depth may be zlib rather than PNG, and the
+    per-frame ``motion`` table became ``imu`` at the sensor's own rate. A reader
+    of an older version would misread or silently miss those, so it refuses.
     """
     path, _ = written()
     with ArchiveSource(path) as archive:
-        assert archive.meta["format_version"] == 2
+        assert archive.meta["format_version"] == 3
 
 
 def test_the_file_is_readable_as_plain_sql(written) -> None:

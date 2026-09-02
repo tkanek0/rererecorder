@@ -146,12 +146,67 @@ class DeviceInfo:
 
 
 @dataclass(frozen=True)
+class MotionSample:
+    """One inertial reading, as the sensor produced it.
+
+    Distinct from :class:`Motion`, which holds whichever samples happened to be
+    current when a video frame was assembled. This is the sample itself, with
+    its own timestamp, and a recording keeps all of them: measured on a D455,
+    the accelerometer runs at 482 Hz and the gyroscope at 478, so taking one of
+    each per 30 fps frame discards 93% of what the sensor measured.
+
+    Attributes:
+        stream: ``"accel"`` or ``"gyro"``.
+        timestamp_ms: The sensor's own timestamp in milliseconds. Epoch
+            milliseconds while the motion module's timestamp domain is
+            ``global_time``, which is set explicitly when it is opened - the
+            same axis the video frames are on.
+        x: Acceleration in m/s^2, or angular velocity in rad/s.
+        y: The same, second axis.
+        z: The same, third axis.
+        clock: Host clocks for converting ``timestamp_ms`` onto the monotonic
+            axis. Not read per sample - that would mean two syscalls 960 times a
+            second - but attached when a recording is read back, from the
+            archive's own anchor.
+    """
+
+    stream: str
+    timestamp_ms: float
+    x: float
+    y: float
+    z: float
+    clock: ClockPair | None = None
+
+    @property
+    def capture_monotonic(self) -> float | None:
+        """When this sample was taken, on the axis everything else uses.
+
+        Returns:
+            The instant, or None if no clock pair is attached.
+        """
+        if self.clock is None:
+            return None
+        return self.clock.epoch_ms_to_monotonic(self.timestamp_ms)
+
+    @property
+    def values(self) -> tuple[float, float, float]:
+        """The reading as a tuple."""
+        return (self.x, self.y, self.z)
+
+
+@dataclass(frozen=True)
 class Motion:
     """One sample from the inertial sensors.
 
     The D455 runs its IMU far faster than the video streams, so these are
     whichever samples were most recent when the frame was assembled rather than
-    a value measured at the frame's own instant.
+    a value measured at the frame's own instant. Measured: 482 Hz accelerometer
+    against 30 fps video.
+
+    Kept for convenience - a preview or a quick attitude estimate wants one
+    number per frame - but a recording stores every sample separately as
+    :class:`MotionSample`. Reading this out of an archive and calling it the
+    inertial data would be using a fourteenth of it.
 
     Attributes:
         accel: Acceleration in m/s^2, including gravity, as (x, y, z).

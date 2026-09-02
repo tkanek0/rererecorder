@@ -378,6 +378,8 @@ class SessionRecorder:
                     "skipped_unpaired": video.skipped_unpaired,
                     "skipped_duplicate": video.skipped_duplicate,
                     "skipped_warmup": video.skipped_warmup,
+                    "motion": video.motion,
+                    "motion_overrun": video.motion_overrun,
                     "fps": round(video.fps, 2) if video.fps else None,
                     "timestamp_domain": video.timestamp_domain,
                     "error": video.error,
@@ -438,6 +440,8 @@ class SessionRecorder:
             self._manifest.video = VideoTrack(
                 frames=stats.frames,
                 dropped=stats.dropped,
+                motion=stats.motion,
+                motion_overrun=stats.motion_overrun,
                 skipped_warmup=stats.skipped_warmup,
                 skipped_duplicate=stats.skipped_duplicate,
                 skipped_unpaired=stats.skipped_unpaired,

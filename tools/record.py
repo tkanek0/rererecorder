@@ -160,6 +160,16 @@ def _report(manifest: SessionManifest, directory: str) -> None:
             + (f" at {video.fps:.2f} fps" if video.fps else "")
         )
         print(f"  timestamps      {video.timestamp_domain}")
+        if video.motion:
+            rate = video.motion_hz
+            print(
+                f"  inertial        {video.motion} samples"
+                + (f" = {rate:.0f} Hz across both streams" if rate else "")
+            )
+        elif config.DEFAULT_STREAMS.motion:
+            print("  inertial NONE   the sensor was asked for and gave nothing")
+        if video.motion_overrun:
+            print(f"  inertial LOST   {video.motion_overrun} (the buffer overran)")
         if video.dropped:
             print(f"  video dropped   {video.dropped} (the disk could not keep up)")
         if video.skipped:

@@ -48,6 +48,7 @@ from .types import (
     FrameSet,
     Intrinsics,
     Motion,
+    MotionSample,
     join_yuyv,
     split_yuyv,
 )
@@ -62,9 +63,17 @@ logger = logging.getLogger(__name__)
 #: mean, so a v1 reader must not open a v2 file. It cannot: realsense-playground
 #: refuses any version but its own.
 #:
-#: The reader here still opens v1, because there are real recordings in that
-#: format and nothing about them became wrong.
-FORMAT_VERSION = 2
+#: 3 replaces the ``motion`` table with ``imu``. The old one held one
+#: accelerometer and one gyroscope reading per video frame, which is a
+#: fourteenth of what the sensor produces - measured at 482 Hz against 30 fps.
+#: The new one holds every sample with its own timestamp. A v2 reader opening a
+#: v3 file would find no ``motion`` table and conclude there was no inertial
+#: data, which is why the version moves rather than the table merely being
+#: added.
+#:
+#: The reader here still opens v1 and v2, because there are real recordings in
+#: those formats and nothing about them became wrong.
+FORMAT_VERSION = 3
 
 #: The oldest format this reader accepts.
 MIN_READABLE_VERSION = 1
@@ -137,12 +146,16 @@ CREATE TABLE IF NOT EXISTS frames(
     ir2               BLOB,          -- PNG, right infrared
     metadata          TEXT           -- JSON, per stream
 );
-CREATE TABLE IF NOT EXISTS motion(
-    idx          INTEGER PRIMARY KEY,
-    timestamp_ms REAL NOT NULL,
-    ax REAL, ay REAL, az REAL,
-    gx REAL, gy REAL, gz REAL
+CREATE TABLE IF NOT EXISTS imu(
+    id           INTEGER PRIMARY KEY,
+    stream       TEXT NOT NULL,   -- 'accel' or 'gyro'
+    timestamp_ms REAL NOT NULL,   -- epoch ms while the domain is global_time
+    x REAL NOT NULL,
+    y REAL NOT NULL,
+    z REAL NOT NULL
 );
+-- Queried by time far more often than by id: "the samples around this frame".
+CREATE INDEX IF NOT EXISTS imu_time ON imu(timestamp_ms);
 """
 
 
@@ -282,11 +295,13 @@ class WriterStats:
         frames: Frames written.
         dropped: Frames the queue could not accept. Non-zero means the disk or
             the encoders could not keep up, and is reported rather than hidden.
+        motion: Inertial samples written.
         bytes_written: Size of the file on disk at the last commit.
     """
 
     frames: int = 0
     dropped: int = 0
+    motion: int = 0
     bytes_written: int = 0
 
 
@@ -328,9 +343,15 @@ class ArchiveWriter:
         """
         self._path = path
         self._codecs = {**DEFAULT_CODECS, **(codecs or {})}
+        self._motion_written = 0
         if self._codecs["depth"] not in ("zlib", "png16"):
             raise ValueError(f"unknown depth codec {self._codecs['depth']!r}")
-        self._queue: queue.Queue[FrameSet | None] = queue.Queue(QUEUE_DEPTH)
+        # Frames and inertial samples share one queue, so they share the
+        # writer thread, its transactions and its commit interval. Two queues
+        # would mean two writers contending for one SQLite connection.
+        self._queue: queue.Queue[FrameSet | list[MotionSample] | None] = queue.Queue(
+            QUEUE_DEPTH
+        )
         self._pool = ThreadPoolExecutor(workers, thread_name_prefix="archive-encode")
         self._stats = WriterStats()
         self._lock = threading.Lock()
@@ -386,6 +407,7 @@ class ArchiveWriter:
             return WriterStats(
                 frames=self._stats.frames,
                 dropped=self._stats.dropped,
+                motion=self._motion_written,
                 bytes_written=self._stats.bytes_written,
             )
 
@@ -423,6 +445,31 @@ class ArchiveWriter:
                 self._queue.put_nowait(frames)
             else:
                 self._queue.put(frames, timeout=None if timeout == float("inf") else timeout)
+            return True
+        except queue.Full:
+            with self._lock:
+                self._stats.dropped += 1
+            return False
+
+    def append_motion(self, samples: list[MotionSample]) -> bool:
+        """Queue inertial samples to be written.
+
+        Args:
+            samples: What ``LiveSource.drain_motion`` returned. An empty list is
+                accepted and does nothing.
+
+        Returns:
+            Whether they were accepted. False means the queue was full and they
+            were dropped, which is counted like a dropped frame.
+
+        Never waits for room. At 960 samples a second and 48 bytes each this is
+        30 KB/s against the video's 54 MB/s, so a full queue means the video is
+        already in trouble and blocking here would make it worse.
+        """
+        if self._closed or not samples:
+            return not samples
+        try:
+            self._queue.put_nowait(samples)
             return True
         except queue.Full:
             with self._lock:
@@ -472,13 +519,19 @@ class ArchiveWriter:
         """Encode and insert, until told to stop."""
         pending = 0
         while True:
-            frames = self._queue.get()
-            if frames is None:
+            item = self._queue.get()
+            if item is None:
                 break
+            if isinstance(item, list):
+                try:
+                    self._insert_motion(item)
+                except Exception:  # noqa: BLE001 - inertial data is not the video
+                    logger.exception("could not write %d inertial samples", len(item))
+                continue
             try:
-                self._insert(frames)
+                self._insert(item)
             except Exception:  # noqa: BLE001 - one bad frame is not the session
-                logger.exception("could not write frame %d", frames.index)
+                logger.exception("could not write frame %d", item.index)
                 continue
             pending += 1
             if pending >= COMMIT_EVERY:
@@ -522,17 +575,30 @@ class ArchiveWriter:
                 json.dumps(frames.metadata) if frames.metadata else None,
             ),
         )
-        if frames.motion is not None:
-            accel = frames.motion.accel or (None, None, None)
-            gyro = frames.motion.gyro or (None, None, None)
-            self._connection.execute(
-                "INSERT OR REPLACE INTO motion"
-                "(idx, timestamp_ms, ax, ay, az, gx, gy, gz) "
-                "VALUES(?, ?, ?, ?, ?, ?, ?, ?)",
-                (frames.index, frames.timestamp_ms, *accel, *gyro),
-            )
+        # No per-frame inertial row: FrameSet.motion is the newest buffered
+        # sample, and writing it here would store a fourteenth of the data
+        # twice over. The samples go to `imu` through append_motion.
         with self._lock:
             self._stats.frames += 1
+
+    def _insert_motion(self, samples: list[MotionSample]) -> None:
+        """Add inertial samples to the open transaction.
+
+        Args:
+            samples: Samples to write, in any order.
+
+        One executemany rather than a statement each: at 960 samples a second
+        the per-statement overhead is what would matter, not the bytes.
+        """
+        self._connection.executemany(
+            "INSERT INTO imu(stream, timestamp_ms, x, y, z) VALUES(?, ?, ?, ?, ?)",
+            [
+                (sample.stream, sample.timestamp_ms, sample.x, sample.y, sample.z)
+                for sample in samples
+            ],
+        )
+        with self._lock:
+            self._motion_written += len(samples)
 
     def _submit(self, frames: FrameSet) -> dict[str, Any]:
         """Start encoding every image in a set, returning one future per column.
@@ -623,6 +689,7 @@ class ArchiveSource:
         self._calibration: Calibration | None = None
         self._has_monotonic = False
         self._columns: set[str] = set()
+        self._tables: set[str] = set()
         self._codecs: dict[str, str] = {}
 
     def __enter__(self) -> ArchiveSource:
@@ -682,6 +749,13 @@ class ArchiveSource:
             for row in connection.execute("PRAGMA table_info(frames)").fetchall()
         }
         self._has_monotonic = "capture_monotonic" in self._columns
+        # Which inertial table this file has: `imu` from v3, `motion` before it.
+        self._tables = {
+            row[0]
+            for row in connection.execute(
+                "SELECT name FROM sqlite_master WHERE type = 'table'"
+            ).fetchall()
+        }
         self._connection = connection
         self._stop = False
 
@@ -793,8 +867,8 @@ class ArchiveSource:
         row = self._connection.execute(
             "SELECT f.idx, f.timestamp_ms, f.received_at, f.metadata,"
             f"       {monotonic}, {blobs},"
-            "       m.ax, m.ay, m.az, m.gx, m.gy, m.gz "
-            "FROM frames f LEFT JOIN motion m ON m.idx = f.idx WHERE f.idx = ?",
+            f"       {self._motion_columns()} "
+            f"FROM frames f {self._motion_join()} WHERE f.idx = ?",
             (index,),
         ).fetchone()
         return None if row is None else self._to_frame_set(row)
@@ -821,6 +895,84 @@ class ArchiveSource:
             return None
         first, last, start, end = row
         return int(first), int(last), float(start or 0.0), float(end or 0.0)
+
+    def motion_samples(self) -> Iterator[MotionSample]:
+        """Yield every inertial sample, oldest first.
+
+        Yields:
+            The samples, each carrying the archive's clock anchor so that
+            ``capture_monotonic`` works.
+
+        Raises:
+            StreamError: If the archive is not open.
+
+        Reads whichever table the recording has. A v3 file holds every sample
+        the sensor produced in ``imu``; a v1 or v2 file holds one accelerometer
+        and one gyroscope reading per video frame in ``motion``, which is a
+        fourteenth of them. Both are yielded the same way, and
+        :meth:`motion_rate` is how a consumer tells which it got.
+        """
+        if self._connection is None:
+            raise StreamError("open the archive before reading samples")
+        anchor = self.clock_anchor
+
+        if "imu" in self._tables:
+            rows = self._connection.execute(
+                "SELECT stream, timestamp_ms, x, y, z FROM imu ORDER BY timestamp_ms"
+            )
+            for stream, timestamp_ms, x, y, z in rows:
+                yield MotionSample(
+                    stream=stream,
+                    timestamp_ms=timestamp_ms,
+                    x=x,
+                    y=y,
+                    z=z,
+                    clock=anchor,
+                )
+            return
+
+        if "motion" not in self._tables:
+            return
+        # One row held both readings; split it back into two samples so that
+        # consumers see one shape whichever format they were handed.
+        rows = self._connection.execute(
+            "SELECT timestamp_ms, ax, ay, az, gx, gy, gz FROM motion ORDER BY idx"
+        )
+        for timestamp_ms, ax, ay, az, gx, gy, gz in rows:
+            if ax is not None:
+                yield MotionSample("accel", timestamp_ms, ax, ay, az, clock=anchor)
+            if gx is not None:
+                yield MotionSample("gyro", timestamp_ms, gx, gy, gz, clock=anchor)
+
+    def motion_rate(self) -> dict[str, float]:
+        """Measured sample rate of each inertial stream, in Hz.
+
+        Returns:
+            Stream name to rate, empty if there are no samples. Measured from
+            the timestamps rather than taken from the configuration, which is
+            how a recording that stored one sample per frame gives itself away:
+            it reports 30 Hz where the sensor runs at 480.
+
+        Raises:
+            StreamError: If the archive is not open.
+        """
+        if self._connection is None:
+            raise StreamError("open the archive before reading samples")
+        table, column = (
+            ("imu", "stream") if "imu" in self._tables else ("motion", "'both'")
+        )
+        if table not in self._tables:
+            return {}
+        rows = self._connection.execute(
+            f"SELECT {column}, COUNT(*), MIN(timestamp_ms), MAX(timestamp_ms) "
+            f"FROM {table} GROUP BY {column}"
+        ).fetchall()
+        rates: dict[str, float] = {}
+        for stream, count, first, last in rows:
+            span = (last - first) / 1000.0 if last and first else 0.0
+            if span > 0 and count > 1:
+                rates[stream] = (count - 1) / span
+        return rates
 
     def indices(self) -> list[int]:
         """Every frame index the archive holds, in order.
@@ -867,6 +1019,24 @@ class ArchiveSource:
                 "the image shape is unknown"
             )
         return decode_depth_zlib(blob, (intrinsics.height, intrinsics.width))
+
+    def _motion_columns(self) -> str:
+        """The six inertial columns to select, or nulls in their place.
+
+        Returns:
+            SQL. A v3 file has no per-frame inertial row - the samples live in
+            ``imu`` at their own rate - so ``FrameSet.motion`` is None there and
+            :meth:`motion_samples` is what a consumer wants.
+        """
+        if "motion" in self._tables:
+            return "m.ax, m.ay, m.az, m.gx, m.gy, m.gz"
+        return "NULL, NULL, NULL, NULL, NULL, NULL"
+
+    def _motion_join(self) -> str:
+        """The join onto the old per-frame inertial table, if there is one."""
+        if "motion" in self._tables:
+            return "LEFT JOIN motion m ON m.idx = f.idx"
+        return ""
 
     def _to_frame_set(self, row: tuple, *, realtime: bool = False) -> FrameSet:
         """Turn one selected row into a FrameSet.
@@ -976,8 +1146,8 @@ class ArchiveSource:
             rows = self._connection.execute(
                 "SELECT f.idx, f.timestamp_ms, f.received_at, f.metadata,"
                 f"       {monotonic_column}, {blobs},"
-                "       m.ax, m.ay, m.az, m.gx, m.gy, m.gz "
-                "FROM frames f LEFT JOIN motion m ON m.idx = f.idx ORDER BY f.idx"
+                f"       {self._motion_columns()} "
+                f"FROM frames f {self._motion_join()} ORDER BY f.idx"
             )
             empty = True
             for row in rows:

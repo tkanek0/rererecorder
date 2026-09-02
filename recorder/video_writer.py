@@ -36,6 +36,12 @@ class VideoStats:
         frames: Frame sets written.
         dropped: Sets the encoder queue could not accept. Non-zero means the
             disk or the CPU fell behind, and the recording has holes.
+        motion: Inertial samples written. About 960 a second on a D455 - both
+            streams at 480 Hz - against 30 video frames, which is why they are
+            recorded separately rather than one per frame.
+        motion_overrun: Samples the source discarded because this writer did
+            not drain them in time. Should be zero: draining happens once per
+            frame and the buffer holds eight seconds.
         skipped_warmup: Sets the source discarded before delivering its first,
             while the SDK's syncer settled. Measured on a D455: three, every
             time, within the same millisecond as ``pipeline.start``. Not a
@@ -55,6 +61,8 @@ class VideoStats:
 
     frames: int = 0
     dropped: int = 0
+    motion: int = 0
+    motion_overrun: int = 0
     skipped_warmup: int = 0
     skipped_duplicate: int = 0
     skipped_unpaired: int = 0
@@ -190,6 +198,9 @@ class VideoWriter:
         self._hub.remove_listener(self._on_frame)
         writer = self._writer
         if writer is not None:
+            # Whatever arrived since the last frame. Without this the tail of
+            # every recording is missing up to a frame of inertial data.
+            self._drain_motion(writer)
             if not writer.drain(timeout=timeout):
                 logger.warning("the encoder queue did not drain within %.0fs", timeout)
             writer.close()
@@ -201,6 +212,7 @@ class VideoWriter:
                 final = writer.stats
                 self._stats.frames = final.frames
                 self._stats.dropped = final.dropped
+                self._stats.motion = final.motion
                 self._stats.bytes_written = final.bytes_written
         self._writer = None
         self._hub.release()
@@ -229,9 +241,11 @@ class VideoWriter:
             written = writer.stats
             snapshot.frames = written.frames
             snapshot.dropped = written.dropped
+            snapshot.motion = written.motion
             snapshot.bytes_written = written.bytes_written
         source = self._hub.source
         if source is not None:
+            snapshot.motion_overrun = getattr(source, "motion_overrun", 0)
             snapshot.skipped_warmup = getattr(source, "skipped_warmup", 0)
             snapshot.skipped_duplicate = getattr(source, "skipped_duplicate", 0)
             snapshot.skipped_unpaired = getattr(source, "skipped_unpaired", 0)
@@ -251,11 +265,31 @@ class VideoWriter:
         # cannot keep up, and blocking here would stall the camera for the
         # preview too. The drop is counted instead.
         writer.append(frames)
+        self._drain_motion(writer)
         with self._lock:
             if self._stats.first_monotonic is None:
                 self._stats.first_monotonic = frames.capture_monotonic
                 self._stats.timestamp_domain = frames.timestamp_domain
             self._stats.last_monotonic = frames.capture_monotonic
+
+    def _drain_motion(self, writer: ArchiveWriter) -> None:
+        """Move buffered inertial samples into the archive.
+
+        Args:
+            writer: The open archive.
+
+        Drained from the frame listener rather than on a timer of its own: this
+        runs 30 times a second, so about 32 samples accumulate against a buffer
+        that holds 4096. One drainer only - the preview peeks at the newest
+        sample instead, because whoever drains owns every sample it takes.
+        """
+        source = self._hub.source
+        drain = getattr(source, "drain_motion", None) if source is not None else None
+        if drain is None:
+            return
+        samples = drain()
+        if samples:
+            writer.append_motion(samples)
 
     def _read_options(self) -> dict[str, float]:
         """Read the camera's sensor options, if the source can report them.

@@ -12,7 +12,8 @@ session 2026-09-02_15-28-36
 ```
 
 Depth at 1280x720, colour at 1280x800, both raw infrared images, all at 30 fps,
-all lossless, with nothing dropped. 54 MB/s, or 195 GB an hour.
+all lossless, with nothing dropped - plus the inertial sensor at its own 480 Hz
+rather than sampled once per frame. 54 MB/s, or 195 GB an hour.
 
 ## Recording needs the container
 
@@ -84,7 +85,6 @@ cross-checked. Three things are not:
 - **The ReSpeaker** is built and tested but not wired into the container, and the
   offset between the two devices is unmeasured - `session.json` says so rather
   than claiming zero.
-- **The IMU** is recorded at frame rate (30 Hz) though the sensor offers 400.
 - **A Raspberry Pi** has not run this. Lossless at 54 MB/s will not fit there.
 
 Tests: `make check` - 152 of them, none needing a device.

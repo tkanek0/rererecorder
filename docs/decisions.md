@@ -197,16 +197,49 @@ For long recordings the slower drive is the steadier one.
 
 ---
 
-## Known limits
+## 12. Open the inertial sensor separately, at its own rate
 
-**The IMU is recorded at frame rate, not its own.** The motion module offers
-accel at 400/200/100 Hz and gyro at 400/200 Hz; a recording holds exactly one
-sample per frame set - measured, 1010 motion rows for 1010 frames, 33.4 ms apart
-= 30.0 Hz. `LiveSource` takes whichever inertial sample was most recent when the
-frame was assembled, inherited from realsense-playground. So between 85% and 93%
-of what the IMU produced is discarded, which contradicts this repository's own
-position on keeping the evidence. Fixing it means reading the motion sensor
-through its own callback rather than through the frameset.
+**Chosen:** open the motion module directly with `sensor.start(callback)`,
+outside the video pipeline, and record every sample it delivers.
+
+**Alternatives:** take it from the frameset, as realsense-playground does (one
+accelerometer and one gyroscope reading per video frame); use
+`rs.frame_queue` instead of a callback.
+
+**Why:** through the frameset a recording held exactly one sample per frame -
+measured, 1010 motion rows for 1010 frames, 33.4 ms apart = 30.0 Hz - while the
+sensor runs at 482 Hz accelerometer and 478 Hz gyroscope. That discarded 93% of
+what the IMU measured, which contradicts the position taken in decision 3 about
+keeping the evidence rather than the conclusion.
+
+The callback was chosen over a frame queue on measurement. Both keep the video
+intact, but the queue lost inertial samples:
+
+| Mode | depth lost | colour lost | video sets | Accel interval, max |
+|---|---|---|---|---|
+| no IMU | 0.0% | 0.0% | 28.92/s | - |
+| **callback** | **0.0%** | **0.0%** | **30.17/s** | **2.5 ms** |
+| frame_queue | 0.0% | 0.0% | 28.83/s | **70.8 ms** |
+
+The GIL contention a 960 Hz Python callback looks like it should cause does not
+materialise, because the callback only appends a tuple. (The first attempt at
+this measurement was run on the host and showed 12% loss in *all three* modes,
+including with no IMU at all - that was the V4L2 backend, not the IMU. Decision
+1 again.)
+
+**Cost:** the `motion` table is replaced by `imu`, which moves the format to
+version 3, and about 30 KB/s - 0.06% of the video. The samples start up to 0.7 s
+before the first frame and have gaps while the sensor settles; `tools/inspect`
+looks for gaps only inside the video's own span for that reason.
+
+`FrameSet.motion` still exists, holding the newest buffered sample of each
+stream, because a preview or a quick attitude estimate wants one number per
+frame. It is not written to the archive - storing a fourteenth of the data
+twice - and its docstring says what it is.
+
+---
+
+## Known limits
 
 **Nothing stops a recording when the disk fills.** At 195 GB an hour this will
 happen. `ArchiveWriter` logs a write failure and continues, which would leave a

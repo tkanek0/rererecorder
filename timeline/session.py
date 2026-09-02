@@ -88,6 +88,13 @@ class VideoTrack:
         first_monotonic: Capture time of the first frame written, on the
             monotonic axis, or None if nothing was written.
         last_monotonic: Capture time of the last frame written.
+        motion: Inertial samples written. About 960 a second against 30
+            frames, because the sensor is recorded at its own rate rather than
+            sampled once per frame - measured 482 Hz accelerometer, 478 Hz
+            gyroscope. Zero means inertial recording was off, or the sensor
+            could not be opened.
+        motion_overrun: Samples discarded because the writer did not drain the
+            source's buffer in time. Should be zero.
         timestamp_domain: What the SDK said its timestamps mean, as
             ``frame.get_frame_timestamp_domain()`` reports it. Expected to be
             ``global_time``, which is epoch milliseconds fitted to the host
@@ -100,6 +107,8 @@ class VideoTrack:
     file: str = VIDEO_NAME
     frames: int = 0
     dropped: int = 0
+    motion: int = 0
+    motion_overrun: int = 0
     skipped_warmup: int = 0
     skipped_duplicate: int = 0
     skipped_unpaired: int = 0
@@ -113,6 +122,23 @@ class VideoTrack:
         """Sets discarded mid-stream, for either reason. Excludes startup."""
         return self.skipped_duplicate + self.skipped_unpaired
 
+    @property
+    def motion_hz(self) -> float | None:
+        """Inertial samples per second across the recording, both streams.
+
+        Returns:
+            The rate, or None if there is nothing to divide. Approximate: the
+            span is the video's, and the sensor runs a little before and after
+            it, so the figure reads slightly high. It is precise enough for
+            what it is for - telling roughly 800 Hz (the sensor's own rate)
+            from roughly 60 (one sample of each per video frame). For the
+            measured rate, ask the archive: ``ArchiveSource.motion_rate``.
+        """
+        first, last = self.first_monotonic, self.last_monotonic
+        if not self.motion or first is None or last is None or last <= first:
+            return None
+        return self.motion / (last - first)
+
     def as_dict(self) -> dict[str, object]:
         """Return a JSON-serialisable view of this track."""
         return {
@@ -120,6 +146,8 @@ class VideoTrack:
             "frames": self.frames,
             "dropped": self.dropped,
             "skipped": self.skipped,
+            "motion": self.motion,
+            "motion_overrun": self.motion_overrun,
             "skipped_warmup": self.skipped_warmup,
             "skipped_duplicate": self.skipped_duplicate,
             "skipped_unpaired": self.skipped_unpaired,
@@ -146,6 +174,8 @@ class VideoTrack:
             file=str(raw.get("file", VIDEO_NAME)),
             frames=int(raw.get("frames", 0)),
             dropped=int(raw.get("dropped", 0)),
+            motion=int(raw.get("motion", 0)),
+            motion_overrun=int(raw.get("motion_overrun", 0)),
             skipped_warmup=int(raw.get("skipped_warmup", 0)),
             skipped_duplicate=int(raw.get("skipped_duplicate", 0)),
             skipped_unpaired=int(unpaired),  # type: ignore[arg-type]

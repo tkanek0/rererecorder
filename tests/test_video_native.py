@@ -272,3 +272,148 @@ def test_startup_discards_are_counted_apart_from_losses() -> None:
     assert source.skipped == 2
     assert source.skipped_unpaired == 1
     assert source.skipped_duplicate == 1
+
+
+# -- the inertial sensor at its own rate --------------------------------------
+
+
+def _imu_burst(count: int, *, start_ms: float = 1_788_000_000_000.0) -> list:
+    """Samples at the rates a D455 actually produces: 482 and 478 Hz."""
+    from video.types import MotionSample
+
+    samples = []
+    for n in range(count):
+        samples.append(
+            MotionSample("accel", start_ms + n * 1000.0 / 482.0, 0.01 * n, -9.63, -0.91)
+        )
+        samples.append(
+            MotionSample("gyro", start_ms + n * 1000.0 / 478.0, 0.001, 0.002, -0.003)
+        )
+    return samples
+
+
+def test_every_inertial_sample_survives(tmp_path, native) -> None:
+    """The point of the change: 480 Hz in, 480 Hz out.
+
+    The old format stored one sample per video frame, which at 30 fps against a
+    482 Hz accelerometer discarded 93% of what the sensor measured.
+    """
+    path = str(tmp_path / "video.rrdb")
+    original = _imu_burst(500)
+
+    with ArchiveWriter(
+        path, calibration=native, config=StreamConfig(motion=True)
+    ) as writer:
+        # In batches, as a recorder drains once per frame.
+        for start in range(0, len(original), 32):
+            assert writer.append_motion(original[start : start + 32])
+        assert writer.drain()
+        assert writer.stats.motion == 1000
+
+    with ArchiveSource(path) as archive:
+        restored = list(archive.motion_samples())
+
+    assert len(restored) == 1000
+    by_stream = {"accel": [], "gyro": []}
+    for sample in restored:
+        by_stream[sample.stream].append(sample)
+    assert len(by_stream["accel"]) == 500
+    assert len(by_stream["gyro"]) == 500
+    assert by_stream["accel"][7].y == pytest.approx(-9.63)
+    assert by_stream["accel"][7].x == pytest.approx(0.07)
+
+
+def test_the_measured_rate_is_reported(tmp_path, native) -> None:
+    """Measured from the timestamps, not taken from the configuration.
+
+    That is how a recording which stored one sample per frame gives itself
+    away: it reports 30 Hz where the sensor runs at 480.
+    """
+    path = str(tmp_path / "video.rrdb")
+    with ArchiveWriter(
+        path, calibration=native, config=StreamConfig(motion=True)
+    ) as writer:
+        assert writer.append_motion(_imu_burst(500))
+        assert writer.drain()
+
+    with ArchiveSource(path) as archive:
+        rates = archive.motion_rate()
+
+    assert rates["accel"] == pytest.approx(482.0, rel=0.01)
+    assert rates["gyro"] == pytest.approx(478.0, rel=0.01)
+
+
+def test_samples_carry_the_clock_so_they_can_be_placed(tmp_path, native, make_frames) -> None:
+    """An inertial sample is only useful if it lands on the common axis."""
+    from .conftest import OFFSET
+
+    path = str(tmp_path / "video.rrdb")
+    with ArchiveWriter(
+        path, calibration=native, config=StreamConfig(motion=True)
+    ) as writer:
+        # A frame first: the clock anchor is written from it.
+        assert writer.append(
+            make_frames(index=1, depth=np.zeros((DEPTH_H, DEPTH_W), np.uint16)),
+            timeout=10.0,
+        )
+        assert writer.append_motion(_imu_burst(10))
+        assert writer.drain()
+
+    with ArchiveSource(path) as archive:
+        sample = next(archive.motion_samples())
+
+    assert sample.clock is not None
+    assert sample.capture_monotonic == pytest.approx(
+        sample.timestamp_ms / 1000.0 - OFFSET, abs=1e-6
+    )
+
+
+def test_a_v2_recording_still_yields_its_samples(tmp_path, native, make_frames) -> None:
+    """One per frame is a fourteenth of the data, but it is not wrong.
+
+    Recordings in that format exist. They are read through the same call and
+    split back into one sample per stream, so a consumer sees one shape either
+    way - and `motion_rate` tells it which it got.
+    """
+    path = str(tmp_path / "video.rrdb")
+    with ArchiveWriter(
+        path, calibration=native, config=StreamConfig(motion=True)
+    ) as writer:
+        assert writer.append(
+            make_frames(index=1, depth=np.zeros((DEPTH_H, DEPTH_W), np.uint16)),
+            timeout=10.0,
+        )
+        assert writer.drain()
+
+    # Rebuild the file as v2 left it: a per-frame motion table, no imu.
+    with sqlite3.connect(path) as connection:
+        connection.executescript(
+            """
+            DROP TABLE imu;
+            CREATE TABLE motion(
+                idx INTEGER PRIMARY KEY, timestamp_ms REAL NOT NULL,
+                ax REAL, ay REAL, az REAL, gx REAL, gy REAL, gz REAL);
+            INSERT INTO motion VALUES(1, 1788000000000.0, 0.0, -9.65, -0.9,
+                                      0.001, 0.002, 0.003);
+            INSERT INTO motion VALUES(2, 1788000000033.4, 0.1, -9.66, -0.9,
+                                      0.001, 0.002, 0.003);
+            """
+        )
+        connection.execute("UPDATE meta SET value = '2' WHERE key = 'format_version'")
+
+    with ArchiveSource(path) as archive:
+        restored = list(archive.motion_samples())
+        rates = archive.motion_rate()
+
+    assert [s.stream for s in restored] == ["accel", "gyro", "accel", "gyro"]
+    assert restored[0].y == pytest.approx(-9.65)
+    assert restored[1].z == pytest.approx(0.003)
+    # 33.4 ms apart - the video frame interval, which is the give-away.
+    assert rates["both"] == pytest.approx(29.94, rel=0.01)
+
+
+def test_an_archive_without_inertial_data_says_so(written_native) -> None:
+    path, _ = written_native()
+    with ArchiveSource(path) as archive:
+        assert list(archive.motion_samples()) == []
+        assert archive.motion_rate() == {}

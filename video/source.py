@@ -12,7 +12,9 @@ camera has to get them from somewhere else.
 
 from __future__ import annotations
 
+import collections
 import logging
+import threading
 import time
 from collections.abc import Iterator
 from typing import Protocol
@@ -30,6 +32,7 @@ from .types import (
     FrameSet,
     Intrinsics,
     Motion,
+    MotionSample,
 )
 
 logger = logging.getLogger(__name__)
@@ -43,6 +46,15 @@ FRAME_TIMEOUT_MS = 1000
 #: The USB link recovers from the odd missed frame on its own; five seconds of
 #: silence is a device that has gone away or wedged.
 STALL_LIMIT_S = 5.0
+
+#: Inertial samples held between drains, per stream.
+#:
+#: Measured on a D455: 482 Hz accelerometer, 478 Hz gyroscope. A recorder drains
+#: once per video frame, so about 16 of each accumulate; 4096 is eight seconds
+#: of slack, which covers a stalled writer without letting the memory grow
+#: without bound. Older samples are discarded first and counted, because a
+#: reader that has stopped draining is not a reason to stop capturing.
+MOTION_BUFFER = 4096
 
 #: How far apart the depth and colour timestamps of one set may be before the
 #: set is discarded as mispaired.
@@ -148,12 +160,6 @@ def _read_metadata(frame: rs.frame, fields: tuple[rs.frame_metadata_value, ...])
     return values
 
 
-def _vector(frame: rs.frame) -> tuple[float, float, float]:
-    """Read an SDK motion frame as a plain tuple."""
-    data = frame.as_motion_frame().get_motion_data()
-    return (float(data.x), float(data.y), float(data.z))
-
-
 class LiveSource:
     """Frames from an attached RealSense device.
 
@@ -197,6 +203,23 @@ class LiveSource:
         #: counter then restarts at 1. Reporting those beside a mid-stream drop
         #: makes a healthy recording look damaged.
         self._skipped_warmup = 0
+
+        #: The motion sensor, opened separately from the video pipeline.
+        #:
+        #: Not through the frameset: the syncer delivers one inertial sample per
+        #: video frame, which is a fourteenth of what the sensor produces. A
+        #: callback on the sensor itself receives every one. Measured: with the
+        #: callback running at 960 Hz, video still arrived at 30.17 fps with no
+        #: frames lost - the GIL contention this looked like it would cause does
+        #: not materialise, because the callback only appends a tuple.
+        self._motion_sensor: rs.sensor | None = None
+        self._motion: collections.deque[MotionSample] = collections.deque(
+            maxlen=MOTION_BUFFER
+        )
+        self._motion_lock = threading.Lock()
+        self._motion_received = 0
+        self._motion_overrun = 0
+        self._motion_domain = "unknown"
         self._timestamp_domain = "unknown"
 
     # -- lifecycle ---------------------------------------------------------
@@ -239,10 +262,9 @@ class LiveSource:
                     rs_config.enable_stream(
                         rs.stream.infrared, index, width, height, rs.format.y8, fps
                     )
-        if cfg.motion:
-            # No resolution to choose; the SDK picks the sensor's default rate.
-            rs_config.enable_stream(rs.stream.accel)
-            rs_config.enable_stream(rs.stream.gyro)
+        # Motion is deliberately NOT enabled on the pipeline. Through the
+        # frameset the syncer hands over one sample per video frame; opened
+        # directly, the sensor delivers all of them. See _open_motion.
         if cfg.record_path:
             # Checked here rather than left to the SDK so that the message names
             # the constraint. librealsense 2.56 moved recording from rosbag1
@@ -265,6 +287,8 @@ class LiveSource:
         self._enable_global_time(profile)
         self._calibration = self._read_calibration(profile)
         self._device = self._read_device(profile)
+        if cfg.motion:
+            self._open_motion(profile)
         if cfg.record_path:
             # Recording starts the moment the pipeline does; a caller who wants
             # to arm it later pauses it here and resumes on demand.
@@ -284,6 +308,10 @@ class LiveSource:
         generator notices within ``FRAME_TIMEOUT_MS`` and returns.
         """
         self._stop = True
+        # Before the pipeline: the sensor was opened from the pipeline's device,
+        # and stopping that first leaves the callback running against a device
+        # being torn down.
+        self._close_motion()
         pipeline, self._pipeline = self._pipeline, None
         self._recorder = None
         if pipeline is None:
@@ -433,6 +461,136 @@ class LiveSource:
             self._recorder.pause()
         self._recording = active
 
+    # -- motion ------------------------------------------------------------
+
+    def _open_motion(self, profile: rs.pipeline_profile) -> None:
+        """Start the inertial sensor at its highest rate, on its own callback.
+
+        Args:
+            profile: The started pipeline's profile, for the device.
+
+        A failure is logged and swallowed: video is the reason this exists, and
+        a recording without inertial data is worth more than no recording. The
+        session records that it has none.
+
+        The rate asked for is the highest each stream offers - 400 Hz nominal on
+        a D455, 482 and 478 measured. Not configurable: there is no reason to
+        record less of it, at 48 bytes a sample.
+        """
+        try:
+            sensor = next(
+                s
+                for s in profile.get_device().query_sensors()
+                if "Motion" in s.get_info(rs.camera_info.name)
+            )
+        except StopIteration:
+            logger.warning("this device has no motion sensor")
+            return
+
+        try:
+            if sensor.supports(rs.option.global_time_enabled):
+                sensor.set_option(rs.option.global_time_enabled, 1.0)
+            wanted = []
+            for stream in (rs.stream.accel, rs.stream.gyro):
+                candidates = [
+                    p for p in sensor.get_stream_profiles()
+                    if p.stream_type() == stream
+                ]
+                if candidates:
+                    wanted.append(max(candidates, key=lambda p: p.fps()))
+            if not wanted:
+                logger.warning("the motion sensor offers no streams")
+                return
+            sensor.open(wanted)
+            sensor.start(self._on_motion)
+        except RuntimeError as exc:
+            logger.warning("could not start the inertial sensor: %s", exc)
+            return
+
+        self._motion_sensor = sensor
+        logger.info(
+            "inertial sensor started: %s",
+            ", ".join(f"{p.stream_name()} at {p.fps()} Hz" for p in wanted),
+        )
+
+    def _close_motion(self) -> None:
+        """Stop and release the inertial sensor, if it was started."""
+        sensor, self._motion_sensor = self._motion_sensor, None
+        if sensor is None:
+            return
+        try:
+            sensor.stop()
+            sensor.close()
+        except RuntimeError as exc:  # noqa: BLE001 - closing must not raise
+            logger.warning("could not stop the inertial sensor: %s", exc)
+
+    def _on_motion(self, frame: rs.frame) -> None:
+        """Store one inertial sample. Runs on librealsense's own thread.
+
+        Args:
+            frame: The motion frame.
+
+        Kept to an append. It is called about 960 times a second - both streams
+        at 480 Hz - and anything expensive here would compete with whatever is
+        reading video frames. Measured with this implementation: video kept
+        30.17 fps and lost nothing.
+        """
+        motion_frame = frame.as_motion_frame()
+        if not motion_frame:
+            return
+        data = motion_frame.get_motion_data()
+        sample = MotionSample(
+            stream=frame.get_profile().stream_name().lower(),
+            timestamp_ms=float(frame.get_timestamp()),
+            x=float(data.x),
+            y=float(data.y),
+            z=float(data.z),
+        )
+        with self._motion_lock:
+            if self._motion_domain == "unknown":
+                self._motion_domain = str(
+                    frame.get_frame_timestamp_domain()
+                ).rsplit(".", 1)[-1]
+            if len(self._motion) == self._motion.maxlen:
+                # A deque with maxlen discards silently; count it instead.
+                self._motion_overrun += 1
+            self._motion.append(sample)
+            self._motion_received += 1
+
+    def drain_motion(self) -> list[MotionSample]:
+        """Take every inertial sample buffered since the last call.
+
+        Returns:
+            The samples, oldest first. Empty when motion is disabled or nothing
+            has arrived.
+
+        Draining rather than reading: whoever records them is responsible for
+        all of them, and leaving them buffered would mean either duplicating
+        them or losing them.
+        """
+        with self._motion_lock:
+            samples = list(self._motion)
+            self._motion.clear()
+        return samples
+
+    @property
+    def motion_received(self) -> int:
+        """Inertial samples the sensor has delivered since it opened."""
+        with self._motion_lock:
+            return self._motion_received
+
+    @property
+    def motion_overrun(self) -> int:
+        """Samples discarded because nobody drained the buffer in time."""
+        with self._motion_lock:
+            return self._motion_overrun
+
+    @property
+    def motion_domain(self) -> str:
+        """What the inertial timestamps mean, once samples have arrived."""
+        with self._motion_lock:
+            return self._motion_domain
+
     # -- timestamps --------------------------------------------------------
 
     @property
@@ -566,9 +724,11 @@ class LiveSource:
             * its streams disagreed about when they were taken by more than
               ``MAX_PAIR_SKEW_MS``.
         """
-        # Motion is read before alignment: rs.align rebuilds the composite from
-        # the video streams and the inertial frames do not survive the trip.
-        motion = self._read_motion(composite) if self._config.motion else None
+        # The newest buffered sample of each stream, for consumers that want one
+        # number per frame - a preview, a quick attitude estimate. The samples
+        # themselves are recorded separately and in full; this is a convenience
+        # and is documented as one.
+        motion = self._latest_motion() if self._config.motion else None
 
         # Infrared, for the same reason. The frames are held rather than copied
         # here - librealsense reference-counts them, so keeping the handles is
@@ -759,15 +919,27 @@ class LiveSource:
             logger.debug("%s frames carry %d metadata fields", stream, len(known))
         return known
 
-    @staticmethod
-    def _read_motion(composite: rs.composite_frame) -> Motion:
-        """Read the newest inertial samples out of a composite frame."""
-        accel = composite.first_or_default(rs.stream.accel)
-        gyro = composite.first_or_default(rs.stream.gyro)
-        return Motion(
-            accel=_vector(accel) if accel else None,
-            gyro=_vector(gyro) if gyro else None,
-        )
+    def _latest_motion(self) -> Motion | None:
+        """The newest buffered sample of each inertial stream.
+
+        Returns:
+            The pair, or None if nothing has arrived yet. Peeks at the buffer
+            rather than draining it: the samples belong to whoever is recording
+            them.
+        """
+        with self._motion_lock:
+            if not self._motion:
+                return None
+            accel: tuple[float, float, float] | None = None
+            gyro: tuple[float, float, float] | None = None
+            for sample in reversed(self._motion):
+                if accel is None and sample.stream == "accel":
+                    accel = sample.values
+                elif gyro is None and sample.stream == "gyro":
+                    gyro = sample.values
+                if accel is not None and gyro is not None:
+                    break
+        return Motion(accel=accel, gyro=gyro)
 
 
 def list_devices() -> list[DeviceInfo]:

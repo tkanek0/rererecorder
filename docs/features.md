@@ -13,7 +13,8 @@ no frames lost.
 | colour 1280x800 YUYV | `frames.color_y` / `_u` / `_v` | PNG each | 761 KB/frame |
 | IR left 1280x720 y8 | `frames.ir1` | PNG | 220 KB/frame |
 | IR right 1280x720 y8 | `frames.ir2` | PNG | 226 KB/frame |
-| accel + gyro | `motion` | plain columns | see limits |
+| accel 482 Hz | `imu` | plain columns | 48 B/sample |
+| gyro 478 Hz | `imu` | plain columns | 48 B/sample |
 | per-frame metadata | `frames.metadata` | JSON | 22 fields per stream |
 | calibration, device, 48 sensor options | `meta` | JSON | written once |
 
@@ -107,10 +108,17 @@ believed:
   arrival lag     16.8 ms median (12.7 to 22.5)
   conversion      agrees with the clock samples to 0.006 ms
   length          45.056 s by header, 45.056 s by clock points (0.5 ms apart)
+  inertial        8515 samples (accel 399 Hz, gyro 399 Hz)
+  gravity         9.69 m/s^2 median magnitude (9.81 if still)
   audio clock     16000.17 Hz fitted (+11 ppm) from 46 points
   residual        0.017 ms rms, 0.043 ms max
   every cross-check agreed
 ```
+
+The gravity line is the one check here that comes from physics rather than from
+the file agreeing with itself: a stationary accelerometer measures specific
+force, so its magnitude should be gravity. This camera reads 9.69, matching
+realsense-playground's independent measurement of the same unit.
 
 The two length figures come from different numbers - the WAV header's
 `frames / rate`, and a line fitted to measured clock points - so their agreeing
@@ -143,5 +151,4 @@ that stream alone - 11 ms against 30 ms for all of them.
 - **The ReSpeaker.** The audio path is built and tested (its clock work is the
   more delicate half) but is not wired into the container, and the offset between
   the two devices is unmeasured.
-- **The IMU at its own rate.** Recorded at 30 Hz; the sensor offers 400.
 - **A Raspberry Pi.** The image is built to be portable but has not run on one.

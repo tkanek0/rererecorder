@@ -35,6 +35,7 @@ from timeline import (
     SessionPaths,
     read_manifest,
 )
+from video import ArchiveSource, StreamError
 
 #: How far the two independent estimates of the audio's length may differ before
 #: it is called a disagreement, in milliseconds.
@@ -104,6 +105,7 @@ def main(argv: list[str] | None = None) -> int:
 
     audio = _check_audio(paths, manifest, check)
     video = _check_video(paths, manifest, check)
+    imu = _check_imu(paths, manifest, video, check)
     overlap = _check_overlap(audio, video, manifest, check)
     doa = _check_doa(paths, audio, check)
 
@@ -113,6 +115,7 @@ def main(argv: list[str] | None = None) -> int:
                 "session_id": manifest.session_id,
                 "audio": audio,
                 "video": video,
+                "imu": imu,
                 "overlap": overlap,
                 "doa": doa,
                 "problems": check.problems,
@@ -124,7 +127,7 @@ def main(argv: list[str] | None = None) -> int:
         )
         print()
     else:
-        _print(manifest, audio, video, overlap, doa, check)
+        _print(manifest, audio, video, imu, overlap, doa, check)
 
     return 1 if check.problems else 0
 
@@ -345,6 +348,151 @@ def _check_video(
     }
 
 
+# -- the inertial sensor ------------------------------------------------------
+
+#: Sample rate below which the recording clearly holds one sample per video
+#: frame rather than the sensor's own output.
+#:
+#: A D455 runs its accelerometer at 482 Hz and its gyroscope at 478. Anything
+#: near 30 is the old per-frame behaviour, which is a fourteenth of the data.
+MIN_IMU_HZ = 100.0
+
+#: How far the magnitude of a still accelerometer may sit from gravity, in
+#: m/s^2, before it is worth remarking on.
+#:
+#: A stationary accelerometer measures specific force, which is 9.81 upwards.
+#: This is the one check on the inertial data that comes from physics rather
+#: than from the file agreeing with itself - so it is worth making, even though
+#: a camera that was moving will fail it legitimately.
+GRAVITY_TOLERANCE = 0.5
+
+
+def _check_imu(
+    paths: SessionPaths,
+    manifest: SessionManifest,
+    video: dict[str, object] | None,
+    check: Check,
+) -> dict[str, object] | None:
+    """Read the inertial samples and see whether they describe this recording.
+
+    Args:
+        paths: Where the session lives.
+        manifest: What the recorder said.
+        video: What the video check measured, for the time range to compare to.
+        check: Where findings go.
+
+    Returns:
+        What was measured, or None if there is no inertial data.
+    """
+    if manifest.video is None:
+        return None
+    try:
+        with ArchiveSource(paths.video) as archive:
+            rates = archive.motion_rate()
+            samples = list(archive.motion_samples())
+    except StreamError as error:
+        check.fail(f"the inertial samples cannot be read: {error}")
+        return None
+
+    if not samples:
+        if manifest.video.motion:
+            check.fail(
+                f"the manifest claims {manifest.video.motion} inertial samples "
+                f"and the archive holds none"
+            )
+        return None
+
+    if manifest.video.motion and len(samples) != manifest.video.motion:
+        check.fail(
+            f"the manifest says {manifest.video.motion} inertial samples and "
+            f"the archive holds {len(samples)}"
+        )
+
+    result: dict[str, object] = {"samples": len(samples), "rates": rates}
+
+    for stream, rate in rates.items():
+        if rate < MIN_IMU_HZ:
+            check.note(
+                f"the {stream} stream was recorded at {rate:.0f} Hz, which is "
+                f"video frame rate rather than the sensor's own - this "
+                f"recording holds a fraction of what the IMU measured"
+            )
+
+    # The samples have to lie on the same axis as the frames, or they cannot be
+    # used with them. This is the check that would catch a timestamp domain
+    # mismatch, which would otherwise look perfectly self-consistent.
+    placed = [
+        s.capture_monotonic for s in samples if s.capture_monotonic is not None
+    ]
+    if not placed:
+        check.fail("inertial samples carry no clock, so they cannot be placed")
+    elif video is not None and "first_monotonic" in video:
+        slack = 2.0
+        first, last = min(placed), max(placed)
+        result["first_monotonic"] = first
+        result["last_monotonic"] = last
+        if (
+            first < video["first_monotonic"] - slack
+            or last > video["last_monotonic"] + slack
+        ):
+            check.fail(
+                f"inertial samples span {last - first:.1f} s but sit outside "
+                f"the video they are supposed to accompany"
+            )
+
+    accel = np.array(
+        [[s.x, s.y, s.z] for s in samples if s.stream == "accel"], dtype=np.float64
+    )
+    if accel.size:
+        magnitude = float(np.median(np.linalg.norm(accel, axis=1)))
+        result["accel_magnitude"] = magnitude
+        if abs(magnitude - 9.81) > GRAVITY_TOLERANCE:
+            check.note(
+                f"the accelerometer's median magnitude is {magnitude:.2f} m/s^2, "
+                f"not 9.81 - expected if the camera was moving, wrong if it was "
+                f"not"
+            )
+
+    # Gaps are looked for only inside the video's own span. The inertial sensor
+    # starts up to 0.7 s before the first frame and settles during that time -
+    # measured, four gaps of 12 to 70 ms, all of them before the video began and
+    # none after. Counting those would report every healthy recording as lossy.
+    window = (
+        (video["first_monotonic"], video["last_monotonic"])
+        if video is not None and "first_monotonic" in video
+        else None
+    )
+    gaps: dict[str, float] = {}
+    for stream in rates:
+        times = np.array(
+            [
+                s.capture_monotonic
+                for s in samples
+                if (s.stream == stream or stream == "both")
+                and s.capture_monotonic is not None
+                and (
+                    window is None
+                    or window[0] <= s.capture_monotonic <= window[1]
+                )
+            ]
+        )
+        if times.size > 2:
+            gaps[stream] = float(np.max(np.diff(np.sort(times)))) * 1000.0
+    result["largest_gap_ms"] = gaps
+    for stream, gap in gaps.items():
+        expected = 1000.0 / max(rates.get(stream, 1.0), 1.0)
+        # Ten intervals: a real drop shows up as a multiple, and the odd
+        # scheduling hiccup does not.
+        if gap > expected * 10:
+            check.fail(
+                f"the {stream} stream has a {gap:.0f} ms gap inside the "
+                f"recording, against a {expected:.1f} ms interval - samples "
+                f"were lost"
+            )
+
+    return result
+
+
 # -- the two together ---------------------------------------------------------
 
 
@@ -433,7 +581,7 @@ def _check_doa(
 # -- output -------------------------------------------------------------------
 
 
-def _print(manifest, audio, video, overlap, doa, check: Check) -> None:
+def _print(manifest, audio, video, imu, overlap, doa, check: Check) -> None:
     """Write the findings for a person to read."""
     print(f"session {manifest.session_id}")
     if manifest.started_at is not None:
@@ -473,6 +621,17 @@ def _print(manifest, audio, video, overlap, doa, check: Check) -> None:
             print(
                 f"  conversion      agrees with the clock samples to "
                 f"{video['conversion_worst_ms']:.3f} ms"
+            )
+
+    if imu is not None:
+        rates = ", ".join(
+            f"{stream} {rate:.0f} Hz" for stream, rate in sorted(imu["rates"].items())
+        )
+        print(f"  inertial        {imu['samples']} samples ({rates})")
+        if "accel_magnitude" in imu:
+            print(
+                f"  gravity         {imu['accel_magnitude']:.2f} m/s^2 median "
+                f"magnitude (9.81 if still)"
             )
 
     if audio is not None and "report" in audio:

@@ -116,6 +116,26 @@ export const RecordingPanel = ({ recording, writeRate, onChanged }: Props) => {
               value={video.timestamp_domain}
               tone={video.timestamp_domain === 'global_time' ? 'good' : 'bad'}
             />
+            {/* Roughly 800 Hz means the sensor is recorded at its own rate;
+                roughly 60 would mean one sample of each per video frame. */}
+            <Row
+              label="inertial"
+              value={
+                video.motion
+                  ? `${video.motion} samples`
+                  : recording.recording
+                    ? 'none'
+                    : '-'
+              }
+              tone={video.motion ? 'good' : undefined}
+            />
+            {video.motion_overrun ? (
+              <Row
+                label="inertial lost"
+                value={String(video.motion_overrun)}
+                tone="bad"
+              />
+            ) : null}
           </div>
         </>
       ) : null}

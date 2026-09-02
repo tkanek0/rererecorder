@@ -50,6 +50,9 @@ export type CameraStatus = {
 export type VideoState = {
   frames: number;
   dropped: number;
+  /** Inertial samples written - about 960 a second, against 30 frames. */
+  motion: number;
+  motion_overrun: number;
   skipped: number;
   skipped_unpaired: number;
   skipped_duplicate: number;
@@ -110,6 +113,7 @@ export type SessionSummary = {
     frames: number;
     dropped: number;
     skipped: number;
+    motion: number;
     fps: number | null;
     timestamp_domain: string;
   } | null;
@@ -129,6 +133,8 @@ export type ArchiveDetail = {
   aligned?: boolean;
   codecs?: Record<string, string> | null;
   color_format?: string | null;
+  /** Measured sample rate per inertial stream, in Hz. */
+  motion_rate?: Record<string, number>;
   error?: string;
 };
 

@@ -298,6 +298,17 @@ export const PlayerPanel = ({ sessionId, onClose }: Props) => {
           />
           <Fact label="colour" value={detail?.archive.color_format ?? '-'} />
           <Fact
+            label="inertial"
+            value={
+              detail?.archive.motion_rate &&
+              Object.keys(detail.archive.motion_rate).length > 0
+                ? Object.entries(detail.archive.motion_rate)
+                    .map(([stream, hz]) => `${stream} ${hz.toFixed(0)} Hz`)
+                    .join(', ')
+                : 'none'
+            }
+          />
+          <Fact
             label="depth codec"
             value={detail?.archive.codecs?.depth ?? '-'}
           />

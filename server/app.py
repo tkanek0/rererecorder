@@ -323,6 +323,10 @@ def _archive_detail(path: str) -> dict[str, Any]:
                 "aligned": archive.calibration.aligned,
                 "codecs": archive.meta.get("codecs"),
                 "color_format": archive.meta.get("color_format"),
+                # Measured from the stored timestamps, not read from the
+                # configuration: a recording that kept one sample per frame
+                # reports 30 Hz here, which is how it gives itself away.
+                "motion_rate": archive.motion_rate(),
             }
     except StreamError as error:
         return {"error": str(error)}

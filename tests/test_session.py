@@ -184,7 +184,7 @@ def test_resolve_refuses_a_session_that_does_not_exist(tmp_path) -> None:
 def test_paths_name_every_part_of_a_session(tmp_path) -> None:
     paths = SessionPaths.create(str(tmp_path), "session1")
     assert paths.manifest.endswith("session1/session.json")
-    assert paths.video.endswith("session1/video.rsdb")
+    assert paths.video.endswith("session1/video.rrdb")
     assert paths.audio.endswith("session1/audio.wav")
     assert paths.audio_clock.endswith("session1/audio.clock.jsonl")
     assert paths.doa.endswith("session1/doa.jsonl")

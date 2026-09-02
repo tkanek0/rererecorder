@@ -50,10 +50,15 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--no-audio", action="store_true", help="skip the array")
     parser.add_argument("--no-doa", action="store_true", help="skip the direction")
     parser.add_argument("--quiet", action="store_true", help="no progress line")
+    parser.add_argument(
+        "--verbose",
+        action="store_true",
+        help="log every discarded frame set and why",
+    )
     args = parser.parse_args(argv)
 
     logging.basicConfig(
-        level=logging.INFO,
+        level=logging.DEBUG if args.verbose else logging.INFO,
         format="%(asctime)s %(levelname)-7s %(name)s: %(message)s",
         stream=sys.stderr,
     )
@@ -65,6 +70,7 @@ def main(argv: list[str] | None = None) -> int:
         record_video=config.RECORD_VIDEO and not args.no_video,
         record_audio=config.RECORD_AUDIO and not args.no_audio,
         record_doa=config.RECORD_DOA and not args.no_doa,
+        codecs=config.CODECS,
     )
 
     try:
@@ -158,9 +164,14 @@ def _report(manifest: SessionManifest, directory: str) -> None:
             print(f"  video dropped   {video.dropped} (the disk could not keep up)")
         if video.skipped:
             print(
-                f"  video skipped   {video.skipped}"
+                f"  video skipped   {video.skipped} mid-stream"
                 f" ({video.skipped_unpaired} mispaired,"
                 f" {video.skipped_duplicate} repeated)"
+            )
+        if video.skipped_warmup:
+            print(
+                f"  startup         {video.skipped_warmup} sets discarded while "
+                f"the streams settled (normal)"
             )
 
     audio = manifest.audio

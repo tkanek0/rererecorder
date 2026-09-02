@@ -77,6 +77,7 @@ class SessionRecorder:
         record_video: bool = True,
         record_audio: bool = True,
         record_doa: bool = True,
+        codecs: dict[str, str] | None = None,
         source_factory: Any = None,
     ) -> None:
         """Prepare a recorder. Nothing is opened until :meth:`start`.
@@ -90,6 +91,7 @@ class SessionRecorder:
             record_video: Whether to record the camera at all.
             record_audio: Whether to record the array at all.
             record_doa: Whether to record the direction beside the audio.
+            codecs: Overrides for the archive's default codecs.
             source_factory: Callable returning a :class:`FrameSource`, for tests
                 and for a future replay source. Defaults to opening the camera.
         """
@@ -99,6 +101,7 @@ class SessionRecorder:
         self._record_video = record_video
         self._record_audio = record_audio
         self._record_doa = record_doa
+        self._codecs = codecs
         self._source_factory = source_factory or self._open_camera
 
         # Whether this recorder made the taps, and so has to close them. A tap
@@ -183,7 +186,10 @@ class SessionRecorder:
         if not self._record_video or self._paths is None:
             return None
         writer = VideoWriter(
-            self._source_factory(), self._paths.video, config=self._streams
+            self._source_factory(),
+            self._paths.video,
+            config=self._streams,
+            codecs=self._codecs,
         )
         try:
             writer.start(timeout=VIDEO_START_TIMEOUT_S)
@@ -392,6 +398,7 @@ class SessionRecorder:
             self._manifest.video = VideoTrack(
                 frames=stats.frames,
                 dropped=stats.dropped,
+                skipped_warmup=stats.skipped_warmup,
                 skipped_duplicate=stats.skipped_duplicate,
                 skipped_unpaired=stats.skipped_unpaired,
                 first_monotonic=stats.first_monotonic,

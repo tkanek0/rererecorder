@@ -32,6 +32,9 @@ class VideoStats:
         frames: Frame sets written.
         dropped: Sets the encoder queue could not accept. Non-zero means the
             disk or the CPU fell behind, and the recording has holes.
+        skipped_warmup: Sets discarded before the first one was delivered,
+            while the SDK's syncer settled. Every recording has a few; they are
+            not a loss and are reported apart from the rest for that reason.
         skipped_duplicate: Sets the source discarded because every frame in
             them had already been delivered.
         skipped_unpaired: Sets discarded because their streams disagreed about
@@ -49,6 +52,7 @@ class VideoStats:
 
     frames: int = 0
     dropped: int = 0
+    skipped_warmup: int = 0
     skipped_duplicate: int = 0
     skipped_unpaired: int = 0
     bytes_written: int = 0
@@ -59,7 +63,7 @@ class VideoStats:
 
     @property
     def skipped(self) -> int:
-        """Sets discarded for either reason."""
+        """Sets discarded mid-stream, for either reason. Excludes startup."""
         return self.skipped_duplicate + self.skipped_unpaired
 
     @property
@@ -95,6 +99,7 @@ class VideoWriter:
         path: str,
         *,
         config: StreamConfig,
+        codecs: dict[str, str] | None = None,
     ) -> None:
         """Bind a writer to its source and its output file.
 
@@ -103,10 +108,12 @@ class VideoWriter:
                 because a RealSense device admits one owner and this is it.
             path: Archive to write.
             config: Stream configuration to record alongside the frames.
+            codecs: Overrides for the archive's default codecs.
         """
         self._source = source
         self._path = path
         self._config = config
+        self._codecs = codecs
 
         self._lock = threading.Lock()
         self._stop = threading.Event()
@@ -195,6 +202,7 @@ class VideoWriter:
             snapshot.frames = written.frames
             snapshot.dropped = written.dropped
             snapshot.bytes_written = written.bytes_written
+        snapshot.skipped_warmup = getattr(self._source, "skipped_warmup", 0)
         snapshot.skipped_duplicate = getattr(self._source, "skipped_duplicate", 0)
         snapshot.skipped_unpaired = getattr(self._source, "skipped_unpaired", 0)
         snapshot.timestamp_domain = getattr(
@@ -214,6 +222,7 @@ class VideoWriter:
                 config=self._config,
                 device=getattr(self._source, "device", None),
                 options=options,
+                codecs=self._codecs,
             )
             try:
                 for frames in self._source.frames():

@@ -12,13 +12,31 @@ from dataclasses import dataclass, replace
 #: Width, height and frame rate of one video stream.
 StreamSpec = tuple[int, int, int]
 
-#: The D455's native depth resolution. Asking for anything else makes the
-#: firmware scale internally, which costs sharpness for no bandwidth saving on
-#: a local link.
-DEFAULT_DEPTH: StreamSpec = (848, 480, 30)
+#: The largest depth the D455 produces. Its stereo sensors are 1280x800 each,
+#: but the depth processor tops out at 720 lines - measured: 1280x720 depth has
+#: the same fx (653.36) as the raw 1280x800 infrared, with ppy 40 lower, so the
+#: depth output is the sensor with 80 lines cropped rather than anything scaled.
+#:
+#: Every smaller size is a scale of this one. 848x480 is *not* a native mode,
+#: whatever realsense-playground's notes say: its fx is 432.85 = 653.36 x 0.6625,
+#: which is exactly 848/1280.
+DEFAULT_DEPTH: StreamSpec = (1280, 720, 30)
 
-#: Matched to the depth stream so that alignment neither up- nor downsamples.
-DEFAULT_COLOR: StreamSpec = (848, 480, 30)
+#: The colour sensor's own resolution, and its maximum frame rate.
+#:
+#: Not matched to depth on purpose. Matching mattered when recordings were
+#: aligned, because alignment would otherwise resample; recordings here are not
+#: aligned, so each stream keeps its own geometry and alignment is applied later
+#: from the extrinsics.
+DEFAULT_COLOR: StreamSpec = (1280, 800, 30)
+
+#: Pixel format to ask the colour sensor for.
+#:
+#: YUYV is what the sensor emits. Asking for rgb8 makes the SDK convert, which
+#: costs CPU and 50% more bytes without adding anything - the chroma has already
+#: been subsampled by then. Recording what the sensor produced means the
+#: conversion stays a decision for whoever reads the file.
+DEFAULT_COLOR_FORMAT = "yuyv"
 
 
 @dataclass(frozen=True)
@@ -28,10 +46,25 @@ class StreamConfig:
     Attributes:
         color: Color stream as (width, height, fps), or None to disable it.
         depth: Depth stream as (width, height, fps), or None to disable it.
+        color_format: Pixel format for the colour stream, ``"yuyv"`` or
+            ``"rgb8"``. See DEFAULT_COLOR_FORMAT.
+        infrared: Record the two raw infrared images the depth is computed
+            from. They can only be opened at the depth stream's own resolution
+            and rate, so there is nothing to configure beyond on or off.
+
+            Worth the bytes when the point is to keep everything: the depth in
+            a recording is one particular stereo match made by the camera's
+            ASIC, and the infrared pair is what it was made from. Costs 55 MB/s
+            raw on top of depth and colour, 27 MB/s compressed.
         align_to_color: Resample depth into the color camera's viewpoint, so
-            that ``depth[y, x]`` describes ``color[y, x]``. Costs a few
-            milliseconds per frame and is what almost every consumer wants;
-            turn it off to measure with the depth sensor's own geometry.
+            that ``depth[y, x]`` describes ``color[y, x]``.
+
+            **Off by default here**, unlike in realsense-playground. Alignment
+            resamples, and resampling cannot be undone: it would put the depth
+            on the colour camera's 1280x800 grid, destroy its correspondence
+            with the infrared pair, and bake one particular choice into a file
+            meant to outlast it. Every consumer can align on the way out using
+            ``calibration.depth_to_color``; none of them can un-align.
         motion: Enable the accelerometer and gyroscope.
         record_path: rosbag file to write every frame to, or None. Must end in
             ``.db3``: librealsense 2.56 moved from rosbag1 to rosbag2 and
@@ -44,7 +77,9 @@ class StreamConfig:
 
     color: StreamSpec | None = DEFAULT_COLOR
     depth: StreamSpec | None = DEFAULT_DEPTH
-    align_to_color: bool = True
+    color_format: str = DEFAULT_COLOR_FORMAT
+    infrared: bool = False
+    align_to_color: bool = False
     motion: bool = False
     record_path: str | None = None
 
@@ -56,6 +91,12 @@ class StreamConfig:
         """
         if self.color is None and self.depth is None:
             raise ValueError("at least one of color or depth must be enabled")
+        if self.color_format not in ("yuyv", "rgb8"):
+            raise ValueError(f"unsupported colour format {self.color_format!r}")
+        if self.infrared and self.depth is None:
+            # The infrared streams are the depth sensor's own; without depth
+            # enabled there is no resolution to give them.
+            raise ValueError("infrared needs the depth stream enabled")
 
     @property
     def aligns(self) -> bool:
@@ -72,6 +113,8 @@ class StreamConfig:
         return {
             "color": list(self.color) if self.color else None,
             "depth": list(self.depth) if self.depth else None,
+            "color_format": self.color_format,
+            "infrared": self.infrared,
             "align_to_color": self.align_to_color,
             "motion": self.motion,
             "record_path": self.record_path,

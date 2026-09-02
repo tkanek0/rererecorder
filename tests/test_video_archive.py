@@ -59,11 +59,12 @@ def written(
         for frames in originals:
             frames.depth[10, 10] = 65535
 
-        path = str(tmp_path / "video.rsdb")
+        path = str(tmp_path / "video.rrdb")
         with ArchiveWriter(
             path,
             calibration=calibration,
-            config=StreamConfig(),
+            config=StreamConfig(color_format="rgb8"),
+            codecs={"depth": "png16"},
             device=DeviceInfo(
                 name="Intel RealSense D455",
                 serial="311322302077",
@@ -139,8 +140,10 @@ def test_a_hardware_clock_recording_says_so(
     tmp_path, calibration, make_frames
 ) -> None:
     """A recording the audio cannot be lined up against must be marked as such."""
-    path = str(tmp_path / "video.rsdb")
-    with ArchiveWriter(path, calibration=calibration, config=StreamConfig()) as writer:
+    path = str(tmp_path / "video.rrdb")
+    with ArchiveWriter(
+        path, calibration=calibration, config=StreamConfig(color_format="rgb8")
+    ) as writer:
         frames = make_frames(
             index=1,
             depth=np.zeros((HEIGHT, WIDTH), np.uint16),
@@ -207,7 +210,8 @@ def test_an_upstream_archive_without_the_column_still_reads(written) -> None:
     """
     path, originals = written(count=3)
 
-    # Rebuild the table without the column, as the upstream writer would.
+    # Rebuild the file as the upstream writer would have left it: v1, the old
+    # column set, PNG16 depth, and no record of a codec choice.
     with sqlite3.connect(path) as connection:
         connection.executescript(
             """
@@ -218,6 +222,8 @@ def test_an_upstream_archive_without_the_column_still_reads(written) -> None:
             ALTER TABLE old RENAME TO frames;
             """
         )
+        connection.execute("UPDATE meta SET value = '1' WHERE key = 'format_version'")
+        connection.execute("DELETE FROM meta WHERE key = 'codecs'")
 
     with ArchiveSource(path) as archive:
         assert archive.has_monotonic is False
@@ -239,11 +245,17 @@ def test_the_column_is_declared_in_the_meta(written) -> None:
         assert "capture_monotonic" in archive.meta["extensions"]
 
 
-def test_the_format_version_did_not_move(written) -> None:
-    """Adding a column must not lock realsense-playground out of these files."""
+def test_written_files_declare_the_current_version(written) -> None:
+    """v2 changes what existing columns mean, so it must announce itself.
+
+    ``capture_monotonic`` was an added column and left the version alone, on
+    the grounds that an older reader could ignore it. This is different:
+    colour moved to three columns and depth may be zlib rather than PNG, so a
+    v1 reader opening one of these would misread it. Better that it refuses.
+    """
     path, _ = written()
     with ArchiveSource(path) as archive:
-        assert archive.meta["format_version"] == 1
+        assert archive.meta["format_version"] == 2
 
 
 def test_the_file_is_readable_as_plain_sql(written) -> None:

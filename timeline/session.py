@@ -42,7 +42,7 @@ FORMAT_VERSION = 1
 #: File names inside a session directory. Fixed rather than recorded per session
 #: so that a directory can be understood without reading the manifest first.
 MANIFEST_NAME = "session.json"
-VIDEO_NAME = "video.rsdb"
+VIDEO_NAME = "video.rrdb"
 AUDIO_NAME = "audio.wav"
 AUDIO_CLOCK_NAME = f"audio{AUDIO_CLOCK_SUFFIX}"
 DOA_NAME = "doa.jsonl"
@@ -69,8 +69,13 @@ class VideoTrack:
         dropped: Frames the encoder queue could not accept. Non-zero means the
             disk or the CPU could not keep up, and is reported rather than
             hidden.
-        skipped_duplicate: Sets discarded because every frame in them had
-            already been delivered.
+        skipped_warmup: Sets discarded before the first one was written, while
+            the SDK's syncer settled. Measured on a D455: three, every time,
+            within the same millisecond as ``pipeline.start``. Not a loss, and
+            kept apart from the counts below so that a recording which lost
+            nothing does not report a number that looks like it did.
+        skipped_duplicate: Sets discarded mid-stream because every frame in them
+            had already been delivered.
         skipped_unpaired: Sets discarded because their streams disagreed about
             when they were taken by more than a few milliseconds. Measured on a
             D455: the first five sets after ``pipeline.start`` pair one stale
@@ -95,6 +100,7 @@ class VideoTrack:
     file: str = VIDEO_NAME
     frames: int = 0
     dropped: int = 0
+    skipped_warmup: int = 0
     skipped_duplicate: int = 0
     skipped_unpaired: int = 0
     first_monotonic: float | None = None
@@ -104,7 +110,7 @@ class VideoTrack:
 
     @property
     def skipped(self) -> int:
-        """Sets discarded for either reason."""
+        """Sets discarded mid-stream, for either reason. Excludes startup."""
         return self.skipped_duplicate + self.skipped_unpaired
 
     def as_dict(self) -> dict[str, object]:
@@ -114,6 +120,7 @@ class VideoTrack:
             "frames": self.frames,
             "dropped": self.dropped,
             "skipped": self.skipped,
+            "skipped_warmup": self.skipped_warmup,
             "skipped_duplicate": self.skipped_duplicate,
             "skipped_unpaired": self.skipped_unpaired,
             "first_monotonic": self.first_monotonic,
@@ -129,6 +136,7 @@ class VideoTrack:
             file=str(raw.get("file", VIDEO_NAME)),
             frames=int(raw.get("frames", 0)),
             dropped=int(raw.get("dropped", 0)),
+            skipped_warmup=int(raw.get("skipped_warmup", 0)),
             skipped_duplicate=int(raw.get("skipped_duplicate", 0)),
             skipped_unpaired=int(raw.get("skipped_unpaired", 0)),
             first_monotonic=_optional_float(raw.get("first_monotonic")),

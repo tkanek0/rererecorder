@@ -73,15 +73,19 @@ def make_frames(calibration: Calibration) -> Callable[..., FrameSet]:
         motion: Motion | None = None,
         index: int = 1,
         timestamp_domain: str = "global_time",
+        color_format: str = "rgb8",
+        infrared: tuple[np.ndarray, np.ndarray] | None = None,
     ) -> FrameSet:
         """Build a frame set carrying whatever was passed.
 
         Args:
             depth: Raw uint16 depth, or None.
-            color: RGB uint8 colour, or None.
+            color: Colour image in ``color_format``, or None.
             motion: Inertial sample, or None.
             index: Frame counter. Also sets the frame's place in time, at 30 fps.
             timestamp_domain: What the timestamp is supposed to mean.
+            color_format: ``"rgb8"`` or ``"yuyv"``.
+            infrared: The left and right raw images, or None.
 
         Returns:
             The frame set. Its ``capture_monotonic`` works out to
@@ -102,6 +106,8 @@ def make_frames(calibration: Calibration) -> Callable[..., FrameSet]:
             motion=motion,
             clock=clock,
             timestamp_domain=timestamp_domain,
+            color_format=color_format,
+            infrared=infrared,
         )
 
     return build

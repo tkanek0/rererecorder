@@ -189,6 +189,14 @@ class LiveSource:
         self._last_numbers: dict[str, int] = {}
         self._skipped_duplicate = 0
         self._skipped_unpaired = 0
+        #: Sets discarded before the first good one was delivered. Counted
+        #: apart from the rest because they mean something different: the
+        #: syncer settling, not the stream faltering. Measured on a D455, the
+        #: first three sets after ``pipeline.start`` pair one stale depth frame
+        #: with successive colour frames, 129 to 230 ms apart, and the depth
+        #: counter then restarts at 1. Reporting those beside a mid-stream drop
+        #: makes a healthy recording look damaged.
+        self._skipped_warmup = 0
         self._timestamp_domain = "unknown"
 
     # -- lifecycle ---------------------------------------------------------
@@ -220,10 +228,17 @@ class LiveSource:
             rs_config.enable_device(self._serial)
         if cfg.color is not None:
             width, height, fps = cfg.color
-            rs_config.enable_stream(rs.stream.color, width, height, rs.format.rgb8, fps)
+            fmt = rs.format.yuyv if cfg.color_format == "yuyv" else rs.format.rgb8
+            rs_config.enable_stream(rs.stream.color, width, height, fmt, fps)
         if cfg.depth is not None:
             width, height, fps = cfg.depth
             rs_config.enable_stream(rs.stream.depth, width, height, rs.format.z16, fps)
+            if cfg.infrared:
+                # The same sensor, so the same size and rate; index 1 is left.
+                for index in (1, 2):
+                    rs_config.enable_stream(
+                        rs.stream.infrared, index, width, height, rs.format.y8, fps
+                    )
         if cfg.motion:
             # No resolution to choose; the SDK picks the sensor's default rate.
             rs_config.enable_stream(rs.stream.accel)
@@ -441,8 +456,17 @@ class LiveSource:
         return self._skipped_unpaired
 
     @property
+    def skipped_warmup(self) -> int:
+        """Sets discarded before the first good one, while the syncer settled."""
+        return self._skipped_warmup
+
+    @property
     def skipped(self) -> int:
-        """Sets discarded for either reason."""
+        """Sets discarded mid-stream, for either reason.
+
+        Excludes the startup ones: those are not a loss, and counting them here
+        would mean every healthy recording reports a non-zero figure.
+        """
         return self._skipped_duplicate + self._skipped_unpaired
 
     @staticmethod
@@ -546,6 +570,18 @@ class LiveSource:
         # the video streams and the inertial frames do not survive the trip.
         motion = self._read_motion(composite) if self._config.motion else None
 
+        # Infrared, for the same reason. The frames are held rather than copied
+        # here - librealsense reference-counts them, so keeping the handles is
+        # enough to survive the align - because the checks below may throw the
+        # whole set away and a copy is 922 KB each.
+        infrared_frames: tuple[rs.frame, rs.frame] | None = None
+        if self._config.infrared:
+            left = composite.get_infrared_frame(1)
+            right = composite.get_infrared_frame(2)
+            if not left or not right:
+                return None
+            infrared_frames = (left, right)
+
         if self._align is not None:
             composite = self._align.process(composite)
 
@@ -565,6 +601,9 @@ class LiveSource:
                 return None
             frames["depth"] = frame
 
+        if infrared_frames is not None:
+            frames["ir1"], frames["ir2"] = infrared_frames
+
         if self._timestamp_domain == "unknown":
             self._note_timestamp_domain(next(iter(frames.values())))
 
@@ -574,6 +613,9 @@ class LiveSource:
         metadata: dict[str, dict[str, int]] = {
             name: _read_metadata(frame, self._fields_for(name, frame))
             for name, frame in frames.items()
+            # The infrared pair carries the depth sensor's own metadata, so
+            # recording it a third time would only make the JSON bigger.
+            if not name.startswith("ir")
         }
         # Copied, not viewed: the SDK reuses these buffers as soon as the
         # composite is released, and consumers hold frames past that point.
@@ -585,6 +627,14 @@ class LiveSource:
         depth = (
             np.asanyarray(frames["depth"].get_data()).copy()
             if "depth" in frames
+            else None
+        )
+        infrared = (
+            (
+                np.asanyarray(frames["ir1"].get_data()).copy(),
+                np.asanyarray(frames["ir2"].get_data()).copy(),
+            )
+            if infrared_frames is not None
             else None
         )
 
@@ -600,6 +650,8 @@ class LiveSource:
             metadata=metadata or None,
             clock=clock,
             timestamp_domain=self._timestamp_domain,
+            color_format=self._config.color_format,
+            infrared=infrared,
         )
 
     def _is_new(self, frames: dict[str, rs.frame]) -> bool:
@@ -614,7 +666,7 @@ class LiveSource:
         """
         numbers = {name: frame.get_frame_number() for name, frame in frames.items()}
         if numbers == self._last_numbers:
-            self._skipped_duplicate += 1
+            self._count_skip("duplicate")
             return False
         self._last_numbers = numbers
         return True
@@ -636,7 +688,7 @@ class LiveSource:
         stamps = [frame.get_timestamp() for frame in frames.values()]
         skew = max(stamps) - min(stamps)
         if skew > MAX_PAIR_SKEW_MS:
-            self._skipped_unpaired += 1
+            self._count_skip("unpaired")
             logger.debug(
                 "discarding a set whose streams are %.1f ms apart: %s",
                 skew,
@@ -644,6 +696,24 @@ class LiveSource:
             )
             return False
         return True
+
+    def _count_skip(self, reason: str) -> None:
+        """Record a discarded set, separating startup from the stream proper.
+
+        Args:
+            reason: ``"duplicate"`` or ``"unpaired"``.
+
+        A set discarded before any set has been delivered is the pipeline
+        starting, which every recording does once and which costs nothing. One
+        discarded later is the camera faltering mid-stream, which is worth
+        seeing. They are counted apart so a report can say which happened.
+        """
+        if self._index == 0:
+            self._skipped_warmup += 1
+        elif reason == "duplicate":
+            self._skipped_duplicate += 1
+        else:
+            self._skipped_unpaired += 1
 
     def _note_timestamp_domain(self, frame: rs.frame) -> None:
         """Record what the SDK's timestamps mean, once, and say so in the log.

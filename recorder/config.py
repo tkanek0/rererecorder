@@ -10,7 +10,13 @@ from __future__ import annotations
 
 import os
 
-from video import DEFAULT_COLOR, DEFAULT_DEPTH, StreamConfig, StreamSpec
+from video import (
+    DEFAULT_COLOR,
+    DEFAULT_COLOR_FORMAT,
+    DEFAULT_DEPTH,
+    StreamConfig,
+    StreamSpec,
+)
 
 
 def _flag(name: str, default: bool) -> bool:
@@ -50,6 +56,11 @@ def _spec(name: str, default: StreamSpec | None) -> StreamSpec | None:
 
 
 #: Where session directories are created.
+#:
+#: A relative default, so a checkout works anywhere and a container needs only a
+#: mount. At the sizes recorded here - 54 MB/s, 195 GB an hour - this wants to
+#: point at a disk with room: set ``RRR_SESSIONS_DIR``, or change it from the
+#: recording page, which writes the same variable.
 SESSIONS_ROOT = os.environ.get("RRR_SESSIONS_DIR", "var/sessions")
 
 #: Serial of the camera to open; empty means whichever the SDK finds first.
@@ -57,17 +68,29 @@ SERIAL = os.environ.get("RRR_SERIAL", "")
 
 #: What to ask the camera for.
 #:
-#: The defaults are the D455's native depth resolution with colour matched to it,
-#: so that alignment neither up- nor downsamples. Lossless at 848x480/30 costs
-#: about 25 MB/s - measured 24 MB/s over a real 15 second recording - which this
-#: machine sustains and a Raspberry Pi will not. Turn it down there rather than
-#: here: ``RRR_COLOR=424x240@15 RRR_DEPTH=424x240@15``.
+#: The defaults are what the sensors themselves produce: depth at the depth
+#: processor's maximum, colour at the colour sensor's own size, both at 30 fps,
+#: unaligned, with the raw infrared pair. Measured through the RSUSB backend
+#: this loses no frames at all - 172 MB/s raw, 54 MB/s after lossless
+#: compression.
+#:
+#: Turn it down on a machine that cannot keep up, rather than editing this:
+#: ``RRR_COLOR=640x360@30 RRR_DEPTH=640x360@30 RRR_INFRARED=0``.
 DEFAULT_STREAMS = StreamConfig(
     color=_spec("RRR_COLOR", DEFAULT_COLOR),
     depth=_spec("RRR_DEPTH", DEFAULT_DEPTH),
-    align_to_color=_flag("RRR_ALIGN", True),
+    color_format=os.environ.get("RRR_COLOR_FORMAT", DEFAULT_COLOR_FORMAT),
+    infrared=_flag("RRR_INFRARED", True),
+    # Off, and not merely defaulted off: alignment resamples the depth onto the
+    # colour grid, which destroys its correspondence with the infrared pair and
+    # cannot be undone. Every consumer can align on the way out from
+    # ``calibration.depth_to_color``; none of them can un-align.
+    align_to_color=_flag("RRR_ALIGN", False),
     motion=_flag("RRR_MOTION", True),
 )
+
+#: How the archive encodes each stream. See video.archive.DEFAULT_CODECS.
+CODECS = {"depth": os.environ.get("RRR_DEPTH_CODEC", "zlib")}
 
 #: Whether each device is recorded at all. Both, unless told otherwise - the
 #: point of this repository is the pair.

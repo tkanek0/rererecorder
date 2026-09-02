@@ -1,0 +1,41 @@
+# Recording from inside the container.
+#
+#   docker compose -f docker/compose.yaml build
+#   docker compose -f docker/compose.yaml run --rm recorder
+#
+# The camera reaches the container through /dev/bus/usb, which is all the RSUSB
+# backend needs - no /dev/video*, no kernel module, nothing privileged. That is
+# also why this image will run unchanged on a Raspberry Pi.
+
+services:
+  recorder:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    image: rererecorder:latest
+    # The whole USB bus, not one node: the camera's device number changes
+    # every time it is re-enumerated, and a reset re-enumerates it.
+    devices:
+      - /dev/bus/usb:/dev/bus/usb
+    volumes:
+      - ../var:/app/var
+      # Bind the source during development so a code change does not need a
+      # rebuild. The image already contains a copy; this shadows it.
+      - ..:/app
+    environment:
+      # The camera's maxima. Both streams are the sensors' native sizes, and
+      # measured through this image they lose no frames at 30 fps.
+      RRR_DEPTH: ${RRR_DEPTH:-1280x720@30}
+      RRR_COLOR: ${RRR_COLOR:-1280x800@30}
+      RRR_SESSIONS_DIR: /app/var/sessions
+    # Run as the invoking user, so recordings under var/ do not come out owned
+    # by root. The camera stays reachable because the RealSense udev rule makes
+    # its node world-writable (crw-rw-rw- root plugdev), so no group membership
+    # is needed inside the container.
+    #
+    # UID and GID are not exported by most shells; pass them explicitly when
+    # they are not 1000:
+    #     UID=$(id -u) GID=$(id -g) docker compose -f docker/compose.yaml run --rm recorder
+    user: "${UID:-1000}:${GID:-1000}"
+    # Recording is I/O and encoder threads; give it room but not the machine.
+    cpus: ${RRR_CPUS:-8}

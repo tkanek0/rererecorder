@@ -8,6 +8,7 @@ import {
   type Settings,
   type Status,
 } from './lib/api';
+import { PlayerPanel } from './components/player-panel';
 import { PreviewPanel } from './components/preview-panel';
 import { RecordingPanel } from './components/recording-panel';
 import { SessionList } from './components/session-list';
@@ -28,6 +29,7 @@ export const App = () => {
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
   const [settings, setSettings] = useState<Settings | null>(null);
   const [offline, setOffline] = useState<string | null>(null);
+  const [playing, setPlaying] = useState<string | null>(null);
 
   const refreshSessions = useCallback(() => {
     fetchSessions()
@@ -89,7 +91,11 @@ export const App = () => {
 
       {status ? (
         <>
-          <PreviewPanel camera={status.camera} />
+          {/* Hidden while playing back. Stacking both would push the
+              transport controls off screen, and watching the camera live while
+              studying a recording is not a thing anyone does - the recording
+              keeps running either way, since it holds the camera itself. */}
+          {playing ? null : <PreviewPanel camera={status.camera} />}
           <RecordingPanel
             recording={status.recording}
             writeRate={status.storage.write_bytes_per_s}
@@ -101,7 +107,25 @@ export const App = () => {
             recording={status.recording.recording}
             onChanged={refreshSessions}
           />
-          <SessionList sessions={sessions} />
+          {playing ? (
+            <PlayerPanel
+              sessionId={playing}
+              onClose={() => setPlaying(null)}
+            />
+          ) : null}
+          <SessionList
+            sessions={sessions}
+            selected={playing}
+            recordingId={
+              status.recording.recording ? status.recording.session_id : null
+            }
+            onSelect={setPlaying}
+            onDeleted={() => {
+              // The one being played may be the one just deleted.
+              setPlaying(null);
+              refreshSessions();
+            }}
+          />
         </>
       ) : (
         <section className="panel" style={{ gridColumn: '1 / -1' }}>

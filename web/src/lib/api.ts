@@ -88,6 +88,8 @@ export type StorageStatus = {
   free_bytes?: number;
   total_bytes?: number;
   write_bytes_per_s: number | null;
+  /** Whether the remaining time comes from a recording happening now. */
+  rate_is_live?: boolean;
   seconds_left: number | null;
   error?: string;
 };
@@ -114,6 +116,28 @@ export type SessionSummary = {
   audio: { seconds: number; channels: number; filled: number } | null;
   calibration: { offset_s: number | null };
   errors: string[];
+};
+
+/** What an archive holds, without decoding any of it. */
+export type ArchiveDetail = {
+  frames?: number;
+  first_index?: number | null;
+  last_index?: number | null;
+  first_monotonic?: number | null;
+  last_monotonic?: number | null;
+  streams?: { color: boolean; depth: boolean; infrared: boolean };
+  aligned?: boolean;
+  codecs?: Record<string, string> | null;
+  color_format?: string | null;
+  error?: string;
+};
+
+/** One session in full: its manifest, its size and its frame range. */
+export type SessionDetail = SessionSummary & {
+  size_bytes: number;
+  archive: ArchiveDetail;
+  clock_reference: string;
+  stopped_at: { monotonic: number; realtime: number } | null;
 };
 
 /** What the page is allowed to change, and what it is set to. */
@@ -181,3 +205,76 @@ export const setSessionsDir = (sessionsDir: string): Promise<Settings> =>
 /** URL of a live preview, for an `<img>` element. */
 export const previewUrl = (kind: PreviewKind, width = 640): string =>
   `${controlBase()}/stream/${kind}.mjpg?width=${width}`;
+
+/** Fetch one session in full, enough to play it back. */
+export const fetchSession = (sessionId: string): Promise<SessionDetail> =>
+  request<SessionDetail>(`/api/sessions/${encodeURIComponent(sessionId)}`);
+
+/**
+ * Delete a session and everything in it.
+ *
+ * @param sessionId Directory name. Refused while that session is recording.
+ */
+export const deleteSession = (
+  sessionId: string,
+): Promise<{ deleted: string; freed_bytes: number }> =>
+  request(`/api/sessions/${encodeURIComponent(sessionId)}`, {
+    method: 'DELETE',
+  });
+
+/**
+ * URL of one recorded frame, for an `<img>` element.
+ *
+ * @param sessionId Directory name.
+ * @param index The archive's own frame index, not a position in a sequence.
+ * @param kind Which stream to render.
+ * @param width Width to scale to before encoding.
+ */
+export const frameUrl = (
+  sessionId: string,
+  index: number,
+  kind: PreviewKind,
+  width = 640,
+): string =>
+  `${controlBase()}/api/sessions/${encodeURIComponent(sessionId)}/frame/${index}.jpg` +
+  `?kind=${kind}&width=${width}`;
+
+/** What a frame response says about the frame it carries. */
+export type FrameMeta = {
+  index: number;
+  /** Capture time on the monotonic axis, as recorded. */
+  monotonic: number | null;
+};
+
+/**
+ * Load one recorded frame, with the capture time the server reports for it.
+ *
+ * @param sessionId Directory name.
+ * @param index The archive's own frame index.
+ * @param kind Which stream to render.
+ * @param width Width to scale to before encoding.
+ *
+ * Returns an object URL the caller must revoke. The capture time comes from a
+ * response header rather than being computed from the index, because frames are
+ * not evenly spaced - a set the camera mispaired leaves a gap.
+ */
+export const loadFrame = async (
+  sessionId: string,
+  index: number,
+  kind: PreviewKind,
+  width = 640,
+): Promise<{ url: string; meta: FrameMeta }> => {
+  const response = await fetch(frameUrl(sessionId, index, kind, width));
+  if (!response.ok) {
+    const body = await response.json().catch(() => null);
+    throw new Error(body?.detail ?? `${response.status} ${response.statusText}`);
+  }
+  const monotonic = response.headers.get('X-Capture-Monotonic');
+  return {
+    url: URL.createObjectURL(await response.blob()),
+    meta: {
+      index: Number(response.headers.get('X-Frame-Index') ?? index),
+      monotonic: monotonic === null ? null : Number(monotonic),
+    },
+  };
+};

@@ -227,3 +227,101 @@ th {
     grid-template-columns: 1fr;
   }
 }
+
+/* -- playback -------------------------------------------------------------- */
+
+.player h2 {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  text-transform: none;
+  letter-spacing: 0;
+  font-size: 13px;
+  color: var(--text);
+}
+
+button.close {
+  padding: 0 8px;
+  font-size: 18px;
+  line-height: 1.2;
+  background: none;
+  border: none;
+  color: var(--dim);
+}
+
+.player-body {
+  display: grid;
+  gap: 14px;
+  grid-template-columns: 1fr 240px;
+}
+
+.player-view img,
+.player-view .placeholder {
+  width: 100%;
+  display: block;
+  background: #000;
+  border-radius: 4px;
+  aspect-ratio: 16 / 10;
+  object-fit: contain;
+  /* Bounded by the window, not by the frame: at 960 px wide the 16:10 box is
+     600 px tall, which pushed the transport controls off screen. */
+  max-height: 50vh;
+}
+
+.player-view .placeholder {
+  display: grid;
+  place-items: center;
+  color: var(--dim);
+}
+
+.transport {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 8px;
+  flex-wrap: wrap;
+}
+
+.transport button {
+  padding: 5px 10px;
+}
+
+.transport input[type='range'] {
+  flex: 1;
+  min-width: 120px;
+  accent-color: var(--accent);
+}
+
+.transport .counter {
+  color: var(--dim);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+tr.selected td {
+  background: #232833;
+}
+
+td.actions {
+  display: flex;
+  gap: 5px;
+  justify-content: flex-end;
+}
+
+td.actions button {
+  padding: 3px 8px;
+  font-size: 11px;
+}
+
+button.danger {
+  background: #3a1f1f;
+  border-color: var(--bad);
+  color: #ffb4ad;
+}
+
+@media (max-width: 1000px) {
+  .player-body {
+    grid-template-columns: 1fr;
+  }
+}

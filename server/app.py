@@ -15,13 +15,16 @@ to settle again in the middle of what is being recorded.
 from __future__ import annotations
 
 import asyncio
+import io
 import logging
 import os
 import shutil
 import time
+import wave
 from contextlib import asynccontextmanager
 from typing import Any
 
+import numpy as np
 from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, StreamingResponse
@@ -396,6 +399,84 @@ def session_frame(session_id: str, index: int, request: Request) -> Response:
             # is what makes seeking backwards and looping feel immediate.
             "Cache-Control": "public, max-age=3600",
         },
+    )
+
+
+@app.get("/api/sessions/{session_id}/frames.json")
+def session_frames(session_id: str) -> dict[str, Any]:
+    """Every frame's index and capture time.
+
+    Args:
+        session_id: Directory name.
+
+    Returns:
+        ``times`` as ``[[index, capture_monotonic], ...]`` in order.
+
+    Raises:
+        HTTPException: 404 if the session or its archive cannot be read.
+
+    What a player needs to turn "the audio is 4.2 seconds in" into "show frame
+    1234". Interpolating from the first and last would be close but not exact,
+    because a set the camera mispaired leaves a gap. About 30 KB for a 30 second
+    recording, 3 MB for an hour, fetched once.
+    """
+    paths = _resolve(session_id)
+    try:
+        with ArchiveSource(paths.video) as archive:
+            return {"times": archive.frame_times()}
+    except StreamError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+
+
+@app.get("/api/sessions/{session_id}/audio.wav")
+def session_audio(session_id: str, request: Request) -> Response:
+    """One channel of a session's audio, as a WAV a browser can play.
+
+    Args:
+        session_id: Directory name.
+        request: Used for ``channel`` - 0 is the array's processed channel, 1
+            to 4 the raw microphones, 5 the playback loopback.
+
+    Returns:
+        A single-channel WAV. Not the recorded file: that has six channels, and
+        a browser would fold them together into something nobody recorded. One
+        channel at a time is what a person listening actually wants.
+
+    Raises:
+        HTTPException: 404 if there is no audio or no such channel.
+
+    The whole file is built in memory and returned at once. At 16 kHz mono that
+    is 1.9 MB a minute, so this is fine for the sessions this records and would
+    need range requests for something much longer.
+    """
+    paths = _resolve(session_id)
+    channel = int(request.query_params.get("channel", 0))
+    try:
+        with wave.open(paths.audio, "rb") as handle:
+            rate = handle.getframerate()
+            channels = handle.getnchannels()
+            raw = handle.readframes(handle.getnframes())
+    except (OSError, wave.Error) as error:
+        raise HTTPException(
+            status_code=404, detail=f"no readable audio: {error}"
+        ) from error
+    if not 0 <= channel < channels:
+        raise HTTPException(
+            status_code=404, detail=f"channel {channel} of {channels}"
+        )
+
+    samples = np.frombuffer(raw, dtype="<i2").reshape(-1, channels)
+    buffer = io.BytesIO()
+    with wave.open(buffer, "wb") as out:
+        out.setnchannels(1)
+        out.setsampwidth(2)
+        out.setframerate(rate)
+        out.writeframes(samples[:, channel].tobytes())
+
+    return Response(
+        content=buffer.getvalue(),
+        media_type="audio/wav",
+        headers={"Cache-Control": "public, max-age=3600"},
     )
 
 

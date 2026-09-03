@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 import {
+  audioUrl,
+  fetchFrameTimes,
   fetchSession,
   loadFrame,
   type FrameMeta,
@@ -8,12 +10,23 @@ import {
   type SessionDetail,
 } from '../lib/api';
 import { bytes, duration } from '../lib/format';
+import { nearestFrame, timeOfFrame } from '../lib/frame-index';
 
 /** Playback speeds offered, as multiples of the recorded rate. */
 const SPEEDS = [0.25, 0.5, 1, 2, 4] as const;
 
 /** Frame rate assumed when the recording does not report one. */
 const FALLBACK_FPS = 30;
+
+/** What each channel of a ReSpeaker recording is. */
+const CHANNELS = [
+  { value: 0, label: 'processed' },
+  { value: 1, label: 'mic 1' },
+  { value: 2, label: 'mic 2' },
+  { value: 3, label: 'mic 3' },
+  { value: 4, label: 'mic 4' },
+  { value: 5, label: 'playback' },
+] as const;
 
 type Props = {
   sessionId: string;
@@ -56,6 +69,16 @@ export const PlayerPanel = ({ sessionId, onClose }: Props) => {
   const objectUrl = useRef<string | null>(null);
   const panel = useRef<HTMLElement>(null);
 
+  // When the session has audio, the audio element is the clock: it cannot be
+  // paused and resumed without a gap the ear notices, whereas a late video
+  // frame is simply a late video frame. Frames are then chased rather than
+  // scheduled, which is why `loading` exists - it drops requests rather than
+  // queueing them when decoding falls behind.
+  const audioRef = useRef<HTMLAudioElement>(null);
+  const loading = useRef(false);
+  const [frameTimes, setFrameTimes] = useState<[number, number][]>([]);
+  const [channel, setChannel] = useState(0);
+
   // The panel appears below the live preview, so opening it would otherwise
   // leave the transport controls off screen.
   useEffect(() => {
@@ -66,6 +89,8 @@ export const PlayerPanel = ({ sessionId, onClose }: Props) => {
   const last = detail?.archive.last_index ?? 0;
   const start = detail?.archive.first_monotonic ?? null;
   const fps = detail?.video?.fps ?? FALLBACK_FPS;
+  const audioStart = detail?.audio?.first_monotonic ?? null;
+  const hasAudio = detail?.audio != null && audioStart !== null;
 
   useEffect(() => {
     let cancelled = false;
@@ -80,6 +105,11 @@ export const PlayerPanel = ({ sessionId, onClose }: Props) => {
       .catch((cause) =>
         setError(cause instanceof Error ? cause.message : String(cause)),
       );
+    fetchFrameTimes(sessionId)
+      .then((times) => {
+        if (!cancelled) setFrameTimes(times);
+      })
+      .catch(() => setFrameTimes([]));
     return () => {
       cancelled = true;
     };
@@ -104,13 +134,19 @@ export const PlayerPanel = ({ sessionId, onClose }: Props) => {
     (at: number) => {
       const clamped = Math.min(Math.max(at, first), last);
       indexRef.current = clamped;
+      // Move the audio too, or the next tick would drag the picture back.
+      const audio = audioRef.current;
+      if (audio && audioStart !== null) {
+        const when = timeOfFrame(frameTimes, clamped);
+        if (when !== null) audio.currentTime = Math.max(0, when - audioStart);
+      }
       if (!playing) {
         show(clamped).catch((cause) =>
           setError(cause instanceof Error ? cause.message : String(cause)),
         );
       }
     },
-    [first, last, playing, show],
+    [first, last, playing, show, audioStart, frameTimes],
   );
 
   // The first frame, and any change of stream, while paused.
@@ -121,11 +157,56 @@ export const PlayerPanel = ({ sessionId, onClose }: Props) => {
     );
   }, [detail, kind, playing, show]);
 
-  // The playback loop. Chained rather than on an interval: the next frame is
-  // requested only once the previous one has arrived, so a slow server makes
-  // playback slower rather than making it queue up requests it cannot serve.
+  // Audio-led playback: the audio element runs, and each animation frame asks
+  // which video frame belongs to its current position. Frames that cannot be
+  // fetched in time are skipped rather than queued - the sound is the thing
+  // that must not stutter, and a dropped frame during playback costs nothing.
   useEffect(() => {
-    if (!playing || !detail) return;
+    if (!playing || !hasAudio || audioStart === null || frameTimes.length === 0) {
+      return;
+    }
+    const audio = audioRef.current;
+    if (!audio) return;
+    audio.playbackRate = speed;
+    void audio.play().catch((cause) => {
+      setError(cause instanceof Error ? cause.message : String(cause));
+      setPlaying(false);
+    });
+
+    let raf = 0;
+    const tick = () => {
+      raf = requestAnimationFrame(tick);
+      if (audio.ended) {
+        setPlaying(false);
+        return;
+      }
+      const wanted = nearestFrame(frameTimes, audioStart + audio.currentTime);
+      if (wanted === null || wanted === indexRef.current || loading.current) {
+        return;
+      }
+      indexRef.current = wanted;
+      loading.current = true;
+      show(wanted)
+        .catch((cause) =>
+          setError(cause instanceof Error ? cause.message : String(cause)),
+        )
+        .finally(() => {
+          loading.current = false;
+        });
+    };
+    raf = requestAnimationFrame(tick);
+    return () => {
+      cancelAnimationFrame(raf);
+      audio.pause();
+    };
+  }, [playing, hasAudio, audioStart, frameTimes, speed, show]);
+
+  // Frame-led playback, for a session with no audio. Chained rather than on an
+  // interval: the next frame is requested only once the previous has arrived,
+  // so a slow server makes playback slower rather than making it queue up
+  // requests it cannot serve.
+  useEffect(() => {
+    if (!playing || !detail || hasAudio) return;
     let cancelled = false;
 
     const run = async () => {
@@ -157,7 +238,7 @@ export const PlayerPanel = ({ sessionId, onClose }: Props) => {
     return () => {
       cancelled = true;
     };
-  }, [playing, detail, last, fps, speed, show]);
+  }, [playing, detail, hasAudio, last, fps, speed, show]);
 
   // Nothing left holding bytes once the panel goes away.
   useEffect(
@@ -211,6 +292,17 @@ export const PlayerPanel = ({ sessionId, onClose }: Props) => {
         <p className="error">{detail.archive.error}</p>
       ) : null}
 
+      {/* Present but not shown: the transport below drives it, and a second
+          set of controls would only disagree with the first. */}
+      {hasAudio ? (
+        <audio
+          ref={audioRef}
+          src={audioUrl(sessionId, channel)}
+          preload="auto"
+          onEnded={() => setPlaying(false)}
+        />
+      ) : null}
+
       <div className="player-body">
         <div className="player-view">
           {src ? (
@@ -220,7 +312,14 @@ export const PlayerPanel = ({ sessionId, onClose }: Props) => {
           )}
 
           <div className="transport">
-            <button onClick={() => setPlaying((was) => !was)} disabled={!detail}>
+            <button
+              onClick={() => {
+                // The effect starts and stops the audio; this only flips the
+                // intent, so that one place owns the element.
+                setPlaying((was) => !was);
+              }}
+              disabled={!detail}
+            >
               {playing ? 'Pause' : 'Play'}
             </button>
             <button onClick={() => seek(index - 1)} disabled={playing} title="previous frame">
@@ -265,6 +364,30 @@ export const PlayerPanel = ({ sessionId, onClose }: Props) => {
               </button>
             ))}
           </div>
+
+          {hasAudio ? (
+            <div className="transport">
+              <span className="counter">audio</span>
+              {CHANNELS.slice(0, detail?.audio?.channels ?? 0).map((option) => (
+                <button
+                  key={option.value}
+                  onClick={() => setChannel(option.value)}
+                  disabled={option.value === channel}
+                  title={
+                    option.value === 0
+                      ? 'beamformed and echo-cancelled by the array'
+                      : option.value === 5
+                        ? 'loopback of what was played out'
+                        : 'a raw microphone'
+                  }
+                >
+                  {option.label}
+                </button>
+              ))}
+            </div>
+          ) : (
+            <p className="note">This session has no audio.</p>
+          )}
         </div>
 
         <div className="player-facts rows">
@@ -314,8 +437,19 @@ export const PlayerPanel = ({ sessionId, onClose }: Props) => {
           />
           <Fact
             label="audio"
-            value={detail?.audio ? duration(detail.audio.seconds) : 'none'}
+            value={
+              detail?.audio
+                ? `${duration(detail.audio.seconds)}, ${detail.audio.channels} ch`
+                : 'none'
+            }
           />
+          {detail?.audio?.filled ? (
+            <Fact
+              label="audio filled"
+              value={`${detail.audio.filled} samples`}
+              tone="warn"
+            />
+          ) : null}
           <Fact
             label="offset"
             value={

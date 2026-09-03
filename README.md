@@ -88,6 +88,5 @@ Both devices record together, on one clock, cross-checked. What is left:
   `tools/calibrate.py`. Until it runs, `session.json` says "unmeasured" rather
   than claiming zero.
 - **A Raspberry Pi** has not run this. Lossless at 54 MB/s will not fit there.
-- **Playback has no sound** yet.
 
 Tests: `make check` - 152 of them, none needing a device.

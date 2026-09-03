@@ -138,12 +138,25 @@ export type ArchiveDetail = {
   error?: string;
 };
 
+/** The array's track in a finished session. */
+export type AudioTrack = {
+  rate: number;
+  channels: number;
+  samples: number;
+  seconds: number;
+  filled: number;
+  overruns: number;
+  /** Capture time of sample zero, on the common axis. */
+  first_monotonic: number | null;
+};
+
 /** One session in full: its manifest, its size and its frame range. */
-export type SessionDetail = SessionSummary & {
+export type SessionDetail = Omit<SessionSummary, 'audio'> & {
   size_bytes: number;
   archive: ArchiveDetail;
   clock_reference: string;
   stopped_at: { monotonic: number; realtime: number } | null;
+  audio: AudioTrack | null;
 };
 
 /** What the page is allowed to change, and what it is set to. */
@@ -244,6 +257,29 @@ export const frameUrl = (
 ): string =>
   `${controlBase()}/api/sessions/${encodeURIComponent(sessionId)}/frame/${index}.jpg` +
   `?kind=${kind}&width=${width}`;
+
+/** URL of one channel of a session's audio, for an `<audio>` element. */
+export const audioUrl = (sessionId: string, channel = 0): string =>
+  `${controlBase()}/api/sessions/${encodeURIComponent(sessionId)}/audio.wav` +
+  `?channel=${channel}`;
+
+/**
+ * Fetch every frame's index and capture time.
+ *
+ * @param sessionId Directory name.
+ *
+ * What turns "the audio is 4.2 seconds in" into "show frame 1234". Fetched
+ * rather than interpolated because frames are not evenly spaced - a set the
+ * camera mispaired leaves a gap.
+ */
+export const fetchFrameTimes = async (
+  sessionId: string,
+): Promise<[number, number][]> => {
+  const body = await request<{ times: [number, number][] }>(
+    `/api/sessions/${encodeURIComponent(sessionId)}/frames.json`,
+  );
+  return body.times;
+};
 
 /** What a frame response says about the frame it carries. */
 export type FrameMeta = {

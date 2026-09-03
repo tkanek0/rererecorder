@@ -78,9 +78,15 @@ One page at `:8040`, served by the same process that records.
   hour: 200 GB reads as plenty and is one hour. The directory can be moved
   between sessions, not during one.
 - **Sessions** - every recording, newest first, with its losses. Play or delete.
-- **Playback** - play, pause, step, seek, four streams, 0.25x to 4x. The clock
-  shown is each frame's own recorded time, read from a response header, because
-  frames are not evenly spaced.
+- **Playback** - play, pause, step, seek, four video streams, six audio
+  channels, 0.25x to 4x. The clock shown is each frame's own recorded time,
+  read from a response header, because frames are not evenly spaced.
+
+  With audio, **the audio element is the clock**: each animation frame asks
+  which video frame belongs to its current position, and frames that cannot be
+  fetched in time are skipped rather than queued. A stutter in the sound is
+  audible; a late video frame is not. Without audio, the frames drive
+  themselves at the recorded rate.
 
 Playing pauses when the tab is hidden: Chrome throttles a background tab's
 timers to the point where a `setTimeout(10)` took 557 ms, so the loop would crawl
@@ -184,5 +190,3 @@ page says "unmeasured" rather than showing zero.
 ## Not yet
 
 - **A Raspberry Pi.** The image is built to be portable but has not run on one.
-- **Playback has no sound.** The player shows frames; the audio is in the file
-  but not on the page.

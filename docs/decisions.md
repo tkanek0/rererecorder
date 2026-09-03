@@ -239,6 +239,66 @@ twice - and its docstring says what it is.
 
 ---
 
+## 13. Both devices in one container, with the audio group granted
+
+**Chosen:** pass `/dev/bus/usb` and `/dev/snd`, and add the host's `audio`
+group to the container.
+
+**Why the group:** `/dev/snd/*` is `root:audio 0660`. On the host an ACL lets
+the desktop user in - `getfacl` shows `user:tkaneko:rw-` - but an ACL does not
+follow into a container, and the uid there is not the one it names. Without
+`--group-add`, PortAudio does not fail: it **reports an empty device list**,
+which looks like an unplugged array. That failure mode is why the Makefile
+derives the id with `getent group audio` rather than hard-coding 29.
+
+**What was checked:** the three transfer paths do not interfere. The camera goes
+through libusb (RSUSB), the array's audio through ALSA, and its direction
+readout through a USB control transfer. Measured on a 15 second session with all
+of them running:
+
+```
+  video           451 frames over 15.02 s = 29.96 fps
+  frame interval  33.4 ms median, 33.3 min, 33.5 max
+  inertial        12574 samples (accel 400 Hz, gyro 399 Hz)
+  length          15.040 s by header, 15.040 s by clock points (0.3 ms apart)
+  residual        0.035 ms rms, 0.095 ms max
+  direction       225 readings at 15.0 Hz
+  overlap         15.00 s of both tracks
+  every cross-check agreed
+```
+
+They sit on different USB controllers here (the camera on bus 002 at 5 Gbps, the
+array on bus 001 at 12 Mbps), so this does not prove they would not contend on a
+machine where they share one - a Raspberry Pi, for instance.
+
+---
+
+## 14. Measure the device offset from a handclap, and say how well
+
+**Chosen:** `tools/calibrate.py`. Detect the impulse in the audio, find the peak
+frame-to-frame difference in the video around it, take the difference. Write
+nothing without `--apply`.
+
+**Alternatives:** a flashing LED (needs hardware); asking the SDK (neither
+device documents its internal latency); assuming zero (what showing `0` would
+amount to).
+
+**Why the accuracy is what it is:** the two halves are not comparable. An audio
+onset is locatable to well under a millisecond - it is a step in energy. The
+video half is "the frame where the hands met", which is only known to within one
+frame interval. **So the frame rate bounds the result, at 33 ms.** A single clap
+gives ±16.7 ms; N claps give ±16.7/√N, which is why the tool reports the spread
+across claps and warns when they disagree by more than two intervals.
+
+Verified on a synthetic session with 80 ms planted in it, which it measured back
+as +80.0 ms.
+
+**Cost:** somebody has to clap in front of the camera. Until they do,
+`calibration.offset_s` stays null and every consumer is told the alignment is
+unmeasured - which is the honest state, not a defect.
+
+---
+
 ## Known limits
 
 **Nothing stops a recording when the disk fills.** At 195 GB an hour this will

@@ -146,9 +146,43 @@ SELECT idx, capture_monotonic, length(depth) FROM frames ORDER BY idx;
 For one frame out of the middle, `archive.frame_at(index, only="color")` decodes
 that stream alone - 11 ms against 30 ms for all of them.
 
+## The array
+
+Recorded beside the camera, in the same session and on the same clock.
+
+| Stream | Recorded as | Notes |
+|---|---|---|
+| 6 channels, 16 kHz | `audio.wav` | int16, every channel - the raw microphones cannot be recovered from the processed one |
+| capture times | `audio.clock.jsonl` | one measured point per second, plus every gap |
+| direction | `doa.jsonl` | 15 Hz, the chip's own estimate |
+
+Audio has no timestamps of its own, so the sidecar carries them. Without it a
+WAV can only be read through `frames / rate`, and that assumption fails twice:
+the converter does not run at exactly 16 kHz (measured -8 to -42 ppm on this
+unit), and a dropped sample would shift everything after it. Gaps are filled
+with silence so that a file position keeps meaning a time, and the fill is
+recorded so the repair can be checked.
+
+## Aligning the two devices
+
+Both tracks share `CLOCK_MONOTONIC`, so any sample can be placed against any
+frame. What is *not* known without measuring is the residual: how long a sound
+takes to reach the array's converter against how long light takes to reach the
+camera's shutter timestamp.
+
+```
+uv run python -m tools.calibrate var/sessions/<name>          # measure
+uv run python -m tools.calibrate var/sessions/<name> --apply  # and record it
+```
+
+Clap a few times in front of the camera, close to the array. The tool finds the
+impulse in the audio (sub-millisecond) and the peak frame-to-frame difference in
+the video (one frame), so **the frame rate bounds the answer**: ±16.7 ms for one
+clap, ±16.7/√N for N. Until it has run, `calibration.offset_s` is null and the
+page says "unmeasured" rather than showing zero.
+
 ## Not yet
 
-- **The ReSpeaker.** The audio path is built and tested (its clock work is the
-  more delicate half) but is not wired into the container, and the offset between
-  the two devices is unmeasured.
 - **A Raspberry Pi.** The image is built to be portable but has not run on one.
+- **Playback has no sound.** The player shows frames; the audio is in the file
+  but not on the page.

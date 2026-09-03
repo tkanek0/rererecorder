@@ -77,14 +77,17 @@ container is SQLite.
 | [features.md](docs/features.md) | what it records, what it reports, and how to drive it |
 | [frame-loss.md](docs/frame-loss.md) | the frame-loss investigation: seven wrong hypotheses and the right one |
 
+Fourteen decisions, because every one of them cost a measurement to settle.
+
 ## State
 
-The camera is done: native resolution, native frame rate, nothing lost,
-cross-checked. Three things are not:
+Both devices record together, on one clock, cross-checked. What is left:
 
-- **The ReSpeaker** is built and tested but not wired into the container, and the
-  offset between the two devices is unmeasured - `session.json` says so rather
+- **The offset between them is unmeasured.** They share a clock, but the residual
+  between a microphone and a shutter has to be measured from a handclap -
+  `tools/calibrate.py`. Until it runs, `session.json` says "unmeasured" rather
   than claiming zero.
 - **A Raspberry Pi** has not run this. Lossless at 54 MB/s will not fit there.
+- **Playback has no sound** yet.
 
 Tests: `make check` - 152 of them, none needing a device.

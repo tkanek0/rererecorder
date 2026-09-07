@@ -138,6 +138,7 @@ make record SECONDS=30 SESSION=kitchen     # on the host: V4L2, loses frames
 make drecord SECONDS=30                    # in the container: RSUSB, does not
 make inspect DIR=var/sessions/kitchen      # cross-check a recording
 make dserver                               # the page, on :8040
+make export DIR=var/sessions/kitchen       # write it out as plain files
 make check                                 # 152 tests, no device needed
 ```
 
@@ -275,6 +276,50 @@ impulse in the audio (sub-millisecond) and the peak frame-to-frame difference in
 the video (one frame), so **the frame rate bounds the answer**: ±16.7 ms for one
 clap, ±16.7/√N for N. Until it has run, `calibration.offset_s` is null and the
 page says "unmeasured" rather than showing zero.
+
+## Exporting
+
+`video.rrdb` is shaped for writing 54 MB/s without dropping anything, which is
+the wrong shape for anything else to read. `rrr.tools.export` writes the same
+recording as plain files - PNG images, CSV tables, a WAV - so a consumer needs a
+filesystem and nothing else.
+
+```bash
+uv run python -m rrr.tools.export var/sessions/x -o /mnt/dataspace01/rrr
+uv run python -m rrr.tools.export var/sessions/x --stride 5 --end 600
+```
+
+```
+whole/
+    manifest.json     the index: every stream, what it holds, where it is
+    calibration.json  every sensor, every transform, and what is still unknown
+    color/            index.csv + data/<ns>.png
+    ir_left/          index.csv + data/<ns>.png
+    ir_right/         index.csv + data/<ns>.png
+    depth/            index.csv + data/<ns>.png   16-bit, raw z16
+    imu_accel/        index.csv
+    imu_gyro/         index.csv
+    audio/            audio.wav + clock.csv + clock_fit.json
+    doa/              index.csv
+    events/           index.csv
+    derived/          empty: where whatever is computed from this goes
+```
+
+Times are integer nanoseconds on `CLOCK_MONOTONIC`, and a frame's filename *is*
+its time, so a directory listing sorts into order. Streams are named for their
+role rather than numbered, so removing a camera from the rig does not renumber
+the others. Anything variable-length - eight microphones instead of four - is a
+longer array in `calibration.json` rather than a change of layout.
+
+One conversion happens, and the manifest names it: colour is written as RGB,
+because nothing outside the SDK reads a packed YUYV image. The packed original
+stays in the archive. Depth keeps its raw z16 and carries its scale, and the two
+inertial streams stay apart rather than being resampled onto shared timestamps.
+
+**The measured device offset is written down and not applied.** Applying it
+would bake one alignment into files meant to outlast the decision. Where
+something is unknown - an unset rig, an unmeasured offset - the export says so
+in `notes` rather than substituting an identity.
 
 ## Not yet
 

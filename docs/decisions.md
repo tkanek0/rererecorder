@@ -363,6 +363,56 @@ session - and the rest is procedure.
 
 ---
 
+## 17. Export to a flat directory, rather than being imported
+
+**Chosen:** `rrr.tools.export` writes a session out as plain files - PNG, CSV,
+WAV - in a flat layout indexed by `manifest.json`. The analysis repository reads
+that. It does not import this package.
+
+**Alternatives:** letting the analysis side depend on this repository and use
+`ArchiveSource` directly (no duplication, no second copy of a 200 GB recording,
+but it couples two repositories that have opposite jobs and different release
+rhythms - and `video.rrdb` is shaped for writing 54 MB/s, which is a constraint
+the analysis side should never have to think about); ROS 2 bags, which every
+SLAM tool reads but which drags rosbag into a repository that otherwise needs
+numpy and torch; VRS, which the analysis side already reads for AEA but which
+puts an SDK back in the middle.
+
+**Why flat and role-named:** the alternative shape is EuRoC's `cam0`, `cam1`,
+`imu0`. Removing a camera from a rig renumbers every later one, so an old
+configuration file silently means something different. `ir_left` does not move
+when `ir_right` goes away. The dataset this project compares against - AEA -
+avoids the problem differently, by putting every stream inside one
+self-describing VRS container and using the directory only to separate raw from
+derived. Without a container, that self-description has to live in a manifest,
+which is why `manifest.json` is the index rather than something a reader
+reconstructs by walking directories.
+
+**Four properties, each of which would hurt later if reversed:** names are roles
+and not numbers; `manifest.json` answers what a session holds; every stream has
+the same shape (`index.csv` whose first column is `t_ns`, plus `data/` for
+images); anything variable-length is an array rather than a layout, so eight
+microphones instead of four is a longer list and not a new directory.
+
+**Everything is expressed against the depth stream's frame,** which is what the
+SDK reports `depth_to_color` and the rest against, and on a D400 is the left
+infrared imager. Transforms are a list where each entry names both ends, so a
+rig with a different set of sensors produces the same shape of file with
+different rows.
+
+**What it costs:** a second copy on disk, and one conversion. Colour is written
+as RGB because nothing outside the SDK reads packed YUYV; the packed original
+stays in the archive, and the manifest says which encoding was used. Depth stays
+raw z16 with its scale, and the two inertial streams are written separately
+rather than resampled onto shared timestamps.
+
+**What it refuses:** applying the measured device offset. It is written down and
+left unapplied - baking one alignment into the files would make the decision
+unrecoverable. Where something is unknown, `notes` says so rather than an
+identity being substituted for it.
+
+---
+
 ## Known limits
 
 **Nothing stops a recording when the disk fills.** At 195 GB an hour this will

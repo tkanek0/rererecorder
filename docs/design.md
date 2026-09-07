@@ -34,7 +34,7 @@ flowchart TD
     A["rrr/audio/<br/>ReSpeaker: taps, DOA<br/><i>sounddevice, pyusb</i>"]
     R["rrr/recorder/<br/>writers, session orchestration"]
     S["rrr/server/<br/>FastAPI, MJPEG, playback"]
-    C["rrr/tools/<br/>record, inspect"]
+    C["rrr/tools/<br/>record, inspect, export"]
     W["web/<br/>vite + react"]
     T --> V
     T --> A
@@ -117,6 +117,13 @@ Alignment of depth to colour is refused in the same spirit: recordings are
 destroys its correspondence with the infrared pair, and bakes one choice into a
 file meant to outlast it. `depth_to_color` is recorded so any consumer can align
 on the way out.
+
+## Leaving
+
+`video.rrdb` is shaped for recording, and nothing outside this repository should
+have to know that. `rrr.tools.export` writes a session as plain files in a flat,
+manifest-indexed layout, and that is the boundary: the analysis repository reads
+the export and never imports this package. See decisions 17.
 
 ## Reading it back
 

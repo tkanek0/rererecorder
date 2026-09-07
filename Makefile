@@ -13,6 +13,7 @@
 #
 #   make record       record a session   (SECONDS=10 SESSION=name)
 #   make inspect      cross-check a recorded session   (DIR=var/sessions/x)
+#   make export       write it out as plain files      (DIR=var/sessions/x)
 #   make devices      what the SDK can see
 #
 # The camera loses frames through the kernel's uvcvideo, so recording happens
@@ -32,6 +33,7 @@
 SECONDS   ?= 10
 SESSION   ?=
 DIR       ?=
+OUT       ?= export
 DATA      ?= /mnt/dataspace02/rererecorder
 
 #: Control plane port. Kept in step with web/src/lib/api.ts's default.
@@ -60,7 +62,7 @@ DOCKER_RUN = docker run --rm -it --user $(shell id -u):$(shell id -g) \
 	-e RRR_SESSIONS_DIR=/data/sessions
 
 .DEFAULT_GOAL := help
-.PHONY: help setup check server web web-build record inspect devices \
+.PHONY: help setup check server web web-build record inspect export devices \
         image drecord dserver clean
 
 # Print the header above: from line 2 until the first line that is not a comment.
@@ -101,6 +103,10 @@ record:
 inspect:
 	@test -n "$(DIR)" || (echo "usage: make inspect DIR=var/sessions/<name>"; exit 1)
 	uv run python -m rrr.tools.inspect $(DIR)
+
+export:
+	@test -n "$(DIR)" || (echo "usage: make export DIR=var/sessions/<name> [OUT=export]"; exit 1)
+	uv run python -m rrr.tools.export $(DIR) -o $(OUT)
 
 devices:
 	uv run python -c "from rrr.video import list_devices; \

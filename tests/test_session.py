@@ -10,6 +10,7 @@ from rrr.timeline.clock import ClockPair
 from rrr.timeline.session import (
     FORMAT_VERSION,
     AudioTrack,
+    Rig,
     SessionError,
     SessionManifest,
     SessionPaths,
@@ -296,3 +297,92 @@ def test_split_counts_are_preferred_when_present() -> None:
     )
     assert track.skipped == 1
     assert track.skipped_warmup == 3
+
+
+# -- the rig ------------------------------------------------------------------
+#
+# The mounting is expected to be filled in by hand, in the file, long after the
+# recording. That only works if the manifest declares the field: an unknown key
+# would be dropped the first time anything rewrote the session - which
+# `calibrate --apply` does.
+
+NOMINAL = Rig(
+    source="nominal",
+    rotation=(1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0),
+    translation=(0.0, -0.05, 0.0),
+    microphones=(
+        (0.0463, 0.0, 0.0),
+        (0.0, 0.0463, 0.0),
+        (-0.0463, 0.0, 0.0),
+        (0.0, -0.0463, 0.0),
+    ),
+    channels=(1, 2, 3, 4),
+    description="array on top of the camera, axes aligned",
+)
+
+
+def test_a_new_session_says_its_rig_is_unset() -> None:
+    manifest = _manifest()
+    assert manifest.rig.source == "unset"
+    assert not manifest.rig.known
+    assert manifest.as_dict()["rig"]["source"] == "unset"
+
+
+def test_a_rig_edited_into_the_file_survives_a_rewrite(tmp_path) -> None:
+    paths = SessionPaths.create(str(tmp_path), "s")
+    write_manifest(paths, _manifest("s"))
+    on_disk = tmp_path / "s" / "session.json"
+
+    stored = json.loads(on_disk.read_text())
+    stored["rig"] = NOMINAL.as_dict()
+    on_disk.write_text(json.dumps(stored))
+
+    edited = read_manifest(paths)
+    assert edited.rig == NOMINAL
+
+    write_manifest(paths, edited.with_calibration(SyncCalibration(offset_s=0.08)))
+    assert read_manifest(paths).rig == NOMINAL
+
+
+def test_with_rig_leaves_the_recording_alone() -> None:
+    manifest = _manifest()
+    updated = manifest.with_rig(NOMINAL)
+    assert updated.rig == NOMINAL
+    assert updated.video == manifest.video
+    assert updated.clock_samples == manifest.clock_samples
+    assert manifest.rig.source == "unset"
+
+
+@pytest.mark.parametrize(
+    "field, value",
+    [
+        ("rotation", [1.0, 0.0, 0.0]),
+        ("rotation", ["a"] * 9),
+        ("translation", [0.0, 0.0]),
+        ("microphones", [[0.0, 0.0, 0.0], [0.0, 0.0]]),
+        ("channels", "1234"),
+    ],
+)
+def test_a_malformed_rig_field_reads_as_unset(field, value) -> None:
+    """A typo in a hand-edited mounting must not cost the whole session."""
+    raw = _manifest().as_dict()
+    raw["rig"] = NOMINAL.as_dict() | {field: value}
+
+    rig = SessionManifest.from_dict(raw).rig
+    assert getattr(rig, field) is None
+    assert rig.description == NOMINAL.description
+
+
+def test_a_partly_filled_rig_is_not_known() -> None:
+    """Half a mounting places nothing: a consumer must not assume the rest."""
+    raw = _manifest().as_dict()
+    raw["rig"] = NOMINAL.as_dict() | {"translation": None}
+
+    assert not SessionManifest.from_dict(raw).rig.known
+
+
+def test_a_manifest_from_before_the_rig_reads_as_unset() -> None:
+    raw = _manifest().as_dict()
+    del raw["rig"]
+
+    assert SessionManifest.from_dict(raw).rig == Rig()

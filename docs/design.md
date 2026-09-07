@@ -98,6 +98,19 @@ reach a timestamp - is not derivable from either device's documentation. Showing
 zero would assert an alignment nobody has established. The page displays
 "unmeasured", and `rrr/tools/calibrate.py` is what will fill it in.
 
+`rig` is the same shape of refusal, for space rather than time. A direction
+from the array is a bearing in the array's own frame, and turning it into a ray
+in the world needs to know where the array is bolted relative to the camera.
+Nothing in either device knows that, so the field starts `"unset"` and is filled
+in by hand. Defaulting it to identity would place every sound at the camera's
+own origin - plausible-looking output from a mounting nobody wrote down.
+
+What the block does record is `source`: `"nominal"` for values taken from how
+the mount was designed, `"measured"` for values obtained from this hardware.
+The two are both usable - the Aria recordings this project compares against use
+nominal CAD positions for their own microphones - but they are not the same
+claim, and which one a session was processed with has to survive in the file.
+
 Alignment of depth to colour is refused in the same spirit: recordings are
 **unaligned**, because resampling depth onto the colour grid cannot be undone,
 destroys its correspondence with the infrared pair, and bakes one choice into a

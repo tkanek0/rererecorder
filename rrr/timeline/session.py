@@ -307,6 +307,111 @@ class SyncCalibration:
         )
 
 
+@dataclass(frozen=True)
+class Rig:
+    """How the two devices are mounted, and how well that is known.
+
+    A direction estimate from the array is a bearing in the array's own frame.
+    Turning it into a ray in the world needs two things this holds: where the
+    array sits relative to the camera, and where each microphone sits on the
+    array. Neither is derivable from either device - the camera knows nothing
+    about the array, and the array's firmware reports an angle without saying
+    what it is measured from.
+
+    Every field starts empty. An unset rig is the honest state of a recording
+    made before anybody wrote the mounting down, and it is recorded that way
+    rather than defaulted to identity, which would silently place every sound
+    at the camera's own origin.
+
+    ``source`` is the point of this block. Nominal values - taken from how the
+    mount was designed, or from a datasheet - are usable and are what the Aria
+    recordings the analysis side works from use for their own microphones, but
+    they are not the same claim as a measurement on this unit. Which one a
+    recording was processed with has to survive in the file.
+
+    Attributes:
+        source: ``"unset"`` until somebody fills it in, then ``"nominal"`` for
+            design or datasheet values and ``"measured"`` for values obtained
+            from this hardware.
+        rotation: Row-major 3x3 rotation of ``depth_from_array``: applied to a
+            direction in the array frame, it gives that direction in the depth
+            stream's frame.
+
+            The depth stream rather than the colour one, because that is the
+            frame every other transform in a recording is expressed against -
+            the archive stores ``depth_to_color``, ``depth_to_infrared`` and
+            ``depth_to_accel``. On a D400 it is the left infrared imager.
+        translation: Position of the array's origin in the depth stream's
+            frame, in metres.
+        microphones: Position of each microphone in the array frame, in metres,
+            in the order :attr:`channels` names.
+        channels: Which channel of ``audio.wav`` each microphone in
+            :attr:`microphones` is. The array's processed and playback channels
+            are not microphones, so this is not simply ``0..n``.
+        description: How the mount is arranged, in words, for whoever reads the
+            session later.
+        note: Anything worth knowing about where these numbers came from.
+    """
+
+    source: str = "unset"
+    rotation: tuple[float, ...] | None = None
+    translation: tuple[float, ...] | None = None
+    microphones: tuple[tuple[float, float, float], ...] | None = None
+    channels: tuple[int, ...] | None = None
+    description: str | None = None
+    note: str | None = None
+
+    @property
+    def known(self) -> bool:
+        """Whether the array can actually be placed against the camera.
+
+        Returns:
+            True only when a placement is present. A consumer that gets False
+            must say the two devices are unregistered rather than assume they
+            share an origin.
+        """
+        return self.rotation is not None and self.translation is not None
+
+    def as_dict(self) -> dict[str, object]:
+        """Return a JSON-serialisable view of this rig."""
+        return {
+            "source": self.source,
+            "rotation": list(self.rotation) if self.rotation else None,
+            "translation": list(self.translation) if self.translation else None,
+            "microphones": (
+                [list(position) for position in self.microphones]
+                if self.microphones
+                else None
+            ),
+            "channels": list(self.channels) if self.channels else None,
+            "description": self.description,
+            "note": self.note,
+        }
+
+    @staticmethod
+    def from_dict(raw: dict[str, object]) -> Rig:
+        """Rebuild a rig from its stored form.
+
+        Args:
+            raw: A mapping as :meth:`as_dict` produced. Hand-edited files are
+                the expected case, so a field that is absent, null or the wrong
+                shape leaves that part unset rather than raising: a typo in the
+                mounting should not make the rest of the session unreadable.
+
+        Returns:
+            The rig.
+        """
+        return Rig(
+            source=str(raw.get("source") or "unset"),
+            rotation=_optional_floats(raw.get("rotation"), 9),
+            translation=_optional_floats(raw.get("translation"), 3),
+            microphones=_optional_points(raw.get("microphones")),
+            channels=_optional_ints(raw.get("channels")),
+            description=_optional_str(raw.get("description")),
+            note=_optional_str(raw.get("note")),
+        )
+
+
 @dataclass
 class SessionManifest:
     """Everything needed to read a session directory as one recording.
@@ -323,6 +428,8 @@ class SessionManifest:
         audio: What the array contributed, or None.
         doa_file: Direction sidecar name, or None.
         calibration: The measured offset between the devices, if any.
+        rig: How the two devices are mounted relative to each other. Empty
+            unless somebody has written it down.
         errors: What went wrong during the session. A device that failed does
             not stop the other one - a recording with one track and an
             explanation beats no recording - so failures are written down here
@@ -338,6 +445,7 @@ class SessionManifest:
     audio: AudioTrack | None = None
     doa_file: str | None = None
     calibration: SyncCalibration = field(default_factory=SyncCalibration)
+    rig: Rig = field(default_factory=Rig)
     errors: list[str] = field(default_factory=list)
 
     @property
@@ -368,6 +476,7 @@ class SessionManifest:
             "audio": self.audio.as_dict() if self.audio else None,
             "doa_file": self.doa_file,
             "calibration": self.calibration.as_dict(),
+            "rig": self.rig.as_dict(),
             "errors": list(self.errors),
         }
 
@@ -393,6 +502,7 @@ class SessionManifest:
         video = raw.get("video")
         audio = raw.get("audio")
         calibration = raw.get("calibration")
+        rig = raw.get("rig")
         samples = raw.get("clock_samples") or []
         return SessionManifest(
             session_id=str(raw["session_id"]),
@@ -412,6 +522,7 @@ class SessionManifest:
                 if isinstance(calibration, dict)
                 else SyncCalibration()
             ),
+            rig=Rig.from_dict(rig) if isinstance(rig, dict) else Rig(),
             errors=[str(entry) for entry in raw.get("errors") or []],
         )
 
@@ -426,6 +537,20 @@ class SessionManifest:
             lets a calibration be measured long after the recording.
         """
         return replace(self, calibration=calibration)
+
+    def with_rig(self, rig: Rig) -> SessionManifest:
+        """Return a copy carrying a different rig.
+
+        Args:
+            rig: The mounting to record.
+
+        Returns:
+            A new manifest. As with a calibration, the rest of the session is
+            untouched, so a mounting can be written down long after the
+            recording - which is the expected case while the rig is still
+            being built.
+        """
+        return replace(self, rig=rig)
 
 
 @dataclass(frozen=True)
@@ -598,6 +723,56 @@ def listing(root: str) -> list[SessionManifest]:
 def _optional_float(value: object) -> float | None:
     """Read a float that is allowed to be absent."""
     return None if value is None else float(value)  # type: ignore[arg-type]
+
+
+def _optional_floats(value: object, count: int) -> tuple[float, ...] | None:
+    """Read a fixed-length sequence of numbers that is allowed to be absent.
+
+    Args:
+        value: The stored value, typically straight from a hand-edited file.
+        count: How many numbers the field is supposed to hold.
+
+    Returns:
+        The numbers, or None if the field is absent, the wrong length, or holds
+        anything that is not a number.
+    """
+    if not isinstance(value, (list, tuple)) or len(value) != count:
+        return None
+    try:
+        return tuple(float(entry) for entry in value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _optional_points(value: object) -> tuple[tuple[float, float, float], ...] | None:
+    """Read a list of three-dimensional points that is allowed to be absent.
+
+    Args:
+        value: The stored value.
+
+    Returns:
+        The points, or None if any of them is not three numbers. All or
+        nothing: a microphone layout missing one microphone is not a layout.
+    """
+    if not isinstance(value, (list, tuple)) or not value:
+        return None
+    points = []
+    for entry in value:
+        point = _optional_floats(entry, 3)
+        if point is None:
+            return None
+        points.append((point[0], point[1], point[2]))
+    return tuple(points)
+
+
+def _optional_ints(value: object) -> tuple[int, ...] | None:
+    """Read a sequence of channel indices that is allowed to be absent."""
+    if not isinstance(value, (list, tuple)) or not value:
+        return None
+    try:
+        return tuple(int(entry) for entry in value)
+    except (TypeError, ValueError):
+        return None
 
 
 def _optional_str(value: object) -> str | None:

@@ -181,6 +181,29 @@ uv run python -m rrr.tools.calibrate var/sessions/<name>          # measure
 uv run python -m rrr.tools.calibrate var/sessions/<name> --apply  # and record it
 ```
 
+That measures *when*. **Where** is a separate question, and it is not measured
+at all: `session.json` carries a `rig` block holding the transform from the
+array's frame to the camera's, the microphone positions on the array, and which
+channel of the WAV each microphone is. Every field starts empty.
+
+```json
+"rig": {
+  "source": "unset",        // then "nominal" for design values, "measured" for this unit
+  "rotation": null,         // row-major 3x3, camera_from_array
+  "translation": null,      // metres, array origin in the camera frame
+  "microphones": null,      // metres, in the array frame
+  "channels": null,         // which WAV channel each microphone is
+  "description": null,
+  "note": null
+}
+```
+
+It is meant to be edited into the file by hand, which is why it is a declared
+field rather than something a consumer bolts on: an unknown key would be dropped
+the first time anything rewrote the session, and `calibrate --apply` does. A
+half-filled block reads as unknown rather than as half a mounting, and a
+malformed field costs that field rather than the session.
+
 Clap a few times in front of the camera, close to the array. The tool finds the
 impulse in the audio (sub-millisecond) and the peak frame-to-frame difference in
 the video (one frame), so **the frame rate bounds the answer**: ±16.7 ms for one

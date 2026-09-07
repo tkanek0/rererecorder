@@ -35,7 +35,7 @@ the page, but it will drop frames.
 
 ```
 var/sessions/2026-09-02_15-28-36/
-    session.json        clock anchors, calibration state, what went wrong
+    session.json        clock anchors, calibration and rig state, what went wrong
     video.rrdb          SQLite: frames, motion, calibration, sensor options
     audio.wav           every channel, gaps filled with silence
     audio.clock.jsonl   measured capture time per block

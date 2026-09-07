@@ -64,6 +64,31 @@ bias, matching the 9.69 m/s^2 gravity `inspect` measures against a true 9.81.
 Recorded anyway, because "the device says identity" and "no calibration was
 recorded" have to stay distinguishable.
 
+### The projector
+
+`RRR_EMITTER` decides what the depth projector does, because the two things it
+affects want opposite answers.
+
+| Mode | Depth | Infrared |
+|---|---|---|
+| `on` (default) | best - the dots are what makes a blank wall matchable | **unusable for tracking**: the pattern is stuck to the scene, so a feature tracker follows the dots |
+| `off` | degrades on untextured surfaces | clean |
+| `alternating` | good on half the frames | clean on the other half |
+
+Whichever is chosen, the projector's state is in **each frame's metadata** as
+its laser power, so which frames were which is read from the recording rather
+than assumed. Measured over 40 frames:
+
+```
+on            laser_power 150   mode 11111111111111111111111111111111
+off           laser_power 0     mode 00000000000000000000000000000000
+alternating   laser_power 0/150 mode 11110101010101010101010101010101
+```
+
+Alternating takes about four frames to settle, so the first few frames of a
+recording are not yet toggling - another reason the per-frame metadata is what
+to read rather than the mode that was asked for.
+
 ## Timing
 
 Every frame carries `capture_monotonic`: the camera's own idea of when the frame

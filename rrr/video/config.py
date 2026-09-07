@@ -7,6 +7,7 @@ to decide whether a running pipeline has to be restarted.
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass, replace
 
 #: Width, height and frame rate of one video stream.
@@ -38,6 +39,32 @@ DEFAULT_COLOR: StreamSpec = (1280, 800, 30)
 #: conversion stays a decision for whoever reads the file.
 DEFAULT_COLOR_FORMAT = "yuyv"
 
+#: What the depth projector does while recording.
+#:
+#: The projector throws a dot pattern onto the scene. Depth needs it on
+#: anything without texture of its own - a painted wall gives a stereo matcher
+#: nothing to match - and it is why a D455 works indoors at all. The same
+#: pattern lands in the infrared images, where it is stuck to the scene rather
+#: than to the imagers, so a feature tracker run on them follows the dots
+#: instead of the room.
+#:
+#: Which of those matters depends on what the infrared pair is being recorded
+#: for, so it is a choice rather than a default:
+#:
+#:   on           the projector is always on. Best depth, infrared unusable
+#:                for tracking.
+#:   off          always off. Infrared is clean; depth degrades on untextured
+#:                surfaces.
+#:   alternating  the firmware toggles it frame by frame, so half the frames
+#:                have good depth and the other half have clean infrared.
+#:                Halves the effective rate of both.
+#:
+#: Whichever is asked for, the projector's state is recorded per frame in the
+#: frame metadata's laser power, so which frames were which is recoverable
+#: rather than assumed.
+EMITTER_MODES = ("on", "off", "alternating")
+DEFAULT_EMITTER = os.environ.get("RRR_EMITTER", "on")
+
 
 @dataclass(frozen=True)
 class StreamConfig:
@@ -65,6 +92,8 @@ class StreamConfig:
             with the infrared pair, and bake one particular choice into a file
             meant to outlast it. Every consumer can align on the way out using
             ``calibration.depth_to_color``; none of them can un-align.
+        emitter: What the depth projector does - ``"on"``, ``"off"`` or
+            ``"alternating"``. See EMITTER_MODES.
         motion: Enable the accelerometer and gyroscope.
         record_path: rosbag file to write every frame to, or None. Must end in
             ``.db3``: librealsense 2.56 moved from rosbag1 to rosbag2 and
@@ -79,6 +108,7 @@ class StreamConfig:
     depth: StreamSpec | None = DEFAULT_DEPTH
     color_format: str = DEFAULT_COLOR_FORMAT
     infrared: bool = False
+    emitter: str = DEFAULT_EMITTER
     align_to_color: bool = False
     motion: bool = False
     record_path: str | None = None
@@ -93,6 +123,11 @@ class StreamConfig:
             raise ValueError("at least one of color or depth must be enabled")
         if self.color_format not in ("yuyv", "rgb8"):
             raise ValueError(f"unsupported colour format {self.color_format!r}")
+        if self.emitter not in EMITTER_MODES:
+            raise ValueError(
+                f"unsupported emitter mode {self.emitter!r}, "
+                f"expected one of {', '.join(EMITTER_MODES)}"
+            )
         if self.infrared and self.depth is None:
             # The infrared streams are the depth sensor's own; without depth
             # enabled there is no resolution to give them.
@@ -115,6 +150,7 @@ class StreamConfig:
             "depth": list(self.depth) if self.depth else None,
             "color_format": self.color_format,
             "infrared": self.infrared,
+            "emitter": self.emitter,
             "align_to_color": self.align_to_color,
             "motion": self.motion,
             "record_path": self.record_path,

@@ -74,12 +74,12 @@ container is SQLite.
 | | |
 |---|---|
 | [design.md](docs/design.md) | the one idea, module boundaries, why the camera is shared two ways |
-| [decisions.md](docs/decisions.md) | seventeen choices, the alternatives, and the measurement that decided each |
+| [decisions.md](docs/decisions.md) | eighteen choices, the alternatives, and the measurement that decided each |
 | [features.md](docs/features.md) | what it records, what it reports, and how to drive it |
 | [frame-loss.md](docs/frame-loss.md) | the frame-loss investigation: seven wrong hypotheses and the right one |
 
-Seventeen decisions, nearly all of them settled by a measurement rather than
-by taste.
+Eighteen decisions, nearly all of them settled by a measurement rather than by
+taste.
 
 ## State
 

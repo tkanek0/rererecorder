@@ -413,6 +413,47 @@ identity being substituted for it.
 
 ---
 
+## 18. Clear the emitter toggle before every mode, because the firmware insists
+
+**Chosen:** setting the depth projector's mode always writes
+``emitter_on_off = 0`` first, then ``emitter_enabled``, and alternating writes
+``emitter_on_off = 1`` last. Then both options are read back and a disagreement
+is logged.
+
+**Alternatives:** the two obvious orderings, both of which this firmware
+refuses.
+
+**What was measured** on a D455, firmware 5.17.3.10, over a fresh pipeline:
+
+```
+emitter_enabled = 0 ; emitter_on_off = 1   ->  REFUSED  hwmon 0x7b, Invalid parameter
+emitter_enabled = 1 ; emitter_on_off = 1   ->  REFUSED  hwmon 0x7b, Invalid parameter
+emitter_on_off = 0 ; emitter_enabled = 1 ; emitter_on_off = 1   ->  accepted
+```
+
+So it is not "the projector must be on first", which was the obvious guess.
+The toggle has to be written as 0 and then re-armed, with the enable in
+between. Asked for on its own immediately after ``pipeline.start()`` the toggle
+is also accepted, which is why the bug only appeared when switching modes -
+the first mode of a run worked and the third did not.
+
+**Why it is worth a decision rather than a fix:** the refusal is silent in the
+sense that matters. The option write fails, the log line scrolls past, and the
+recording comes out with the projector solidly on while the session says
+``alternating``. The infrared pair then carries the dot pattern that mode
+existed to avoid, and nothing downstream can tell. Hence the read-back: what
+the device reports is recorded, and a mismatch is warned about at the point it
+can still be noticed.
+
+**Cost:** alternating takes about four frames to settle, so the start of a
+recording is not yet toggling. The per-frame laser power is in the metadata, so
+this is visible rather than something to correct for.
+
+**Verified:** on 150 constant, off 0 constant, alternating
+``11110101010101...`` over 40 frames.
+
+---
+
 ## Known limits
 
 **Nothing stops a recording when the disk fills.** At 195 GB an hour this will

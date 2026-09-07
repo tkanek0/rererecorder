@@ -14,6 +14,7 @@ from rrr.video import (
     DEFAULT_COLOR,
     DEFAULT_COLOR_FORMAT,
     DEFAULT_DEPTH,
+    DEFAULT_EMITTER,
     StreamConfig,
     StreamSpec,
 )
@@ -81,6 +82,10 @@ DEFAULT_STREAMS = StreamConfig(
     depth=_spec("RRR_DEPTH", DEFAULT_DEPTH),
     color_format=os.environ.get("RRR_COLOR_FORMAT", DEFAULT_COLOR_FORMAT),
     infrared=_flag("RRR_INFRARED", True),
+    # See video.config.EMITTER_MODES. "on" is right when depth is the point;
+    # "off" or "alternating" is what makes the infrared pair usable for
+    # tracking, which is what it is recorded for here.
+    emitter=os.environ.get("RRR_EMITTER", DEFAULT_EMITTER),
     # Off, and not merely defaulted off: alignment resamples the depth onto the
     # colour grid, which destroys its correspondence with the infrared pair and
     # cannot be undone. Every consumer can align on the way out from

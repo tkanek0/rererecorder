@@ -147,3 +147,34 @@ def test_a_recording_can_have_infrared_without_an_inertial_sensor(
     with ArchiveSource(path) as archive:
         assert archive.calibration.motion is None
         assert archive.calibration.infrared_baseline_m == pytest.approx(BASELINE_M)
+
+
+# -- the emitter --------------------------------------------------------------
+
+
+@pytest.mark.parametrize("mode", ["on", "off", "alternating"])
+def test_every_emitter_mode_is_accepted(mode) -> None:
+    assert StreamConfig(emitter=mode).as_dict()["emitter"] == mode
+
+
+def test_an_unknown_emitter_mode_is_refused() -> None:
+    """Refused rather than ignored: silently recording with the projector in
+    the wrong state costs a session that looks fine."""
+    with pytest.raises(ValueError, match="emitter mode"):
+        StreamConfig(emitter="sometimes")
+
+
+def test_the_emitter_mode_is_recorded_in_the_archive(tmp_path, make_frames) -> None:
+    path = str(tmp_path / "video.rrdb")
+    with ArchiveWriter(
+        path,
+        calibration=_full(),
+        config=StreamConfig(color_format="rgb8", emitter="alternating"),
+    ) as writer:
+        assert writer.append(
+            make_frames(index=0, depth=np.zeros((HEIGHT, WIDTH), np.uint16)),
+            timeout=10.0,
+        )
+
+    with ArchiveSource(path) as archive:
+        assert archive.meta["config"]["emitter"] == "alternating"

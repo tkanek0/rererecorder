@@ -136,6 +136,11 @@ def _extrinsics(source: rs.stream_profile, target: rs.stream_profile) -> Extrins
     )
 
 
+def _option_name(option: rs.option) -> str:
+    """The bare name of an SDK option, for a log line."""
+    return str(option).split(".")[-1]
+
+
 def _motion_intrinsics(profile: rs.stream_profile) -> MotionIntrinsics | None:
     """Convert an SDK motion profile's correction to ours.
 
@@ -312,6 +317,7 @@ class LiveSource:
         self._stop = False
         self._align = rs.align(rs.stream.color) if cfg.aligns else None
         self._enable_global_time(profile)
+        self._apply_emitter(profile)
         self._calibration = self._read_calibration(profile)
         self._device = self._read_device(profile)
         if cfg.motion:
@@ -783,6 +789,81 @@ class LiveSource:
                 logger.info("enabled global time on %s", name)
             except RuntimeError as exc:
                 logger.warning("could not enable global time on %s: %s", name, exc)
+
+    def _apply_emitter(self, profile: rs.pipeline_profile) -> None:
+        """Put the depth projector into the configured mode.
+
+        Args:
+            profile: The started pipeline's profile.
+
+        Two options, and **the order between them is not free**. Measured on
+        this D455 (firmware 5.17.3.10), ``emitter_on_off`` is refused with
+        ``hwmon command 0x7b failed (Invalid parameter)`` unless the toggle is
+        first written as 0, the projector is then enabled, and only then is the
+        toggle written as 1. Enabling the projector and asking for the toggle
+        in that order alone is refused; so is asking for it while the projector
+        is off.
+
+        So every mode starts by clearing the toggle. Alternating re-arms it
+        afterwards. That sequence was measured to work from both a fresh
+        pipeline and one left in any other mode, which the obvious orderings
+        were not.
+
+        A failure is logged rather than raised - a recording with the projector
+        in the wrong state is still a recording - and what the device ended up
+        in is read back here and recorded in the archive's option snapshot,
+        which is the number to trust rather than what was asked for.
+        """
+        if self._config.depth is None:
+            return
+        try:
+            sensor = profile.get_device().first_depth_sensor()
+        except RuntimeError as exc:
+            logger.warning("no depth sensor to set the emitter on: %s", exc)
+            return
+
+        mode = self._config.emitter
+        steps = [
+            (rs.option.emitter_on_off, 0.0),
+            (rs.option.emitter_enabled, 0.0 if mode == "off" else 1.0),
+        ]
+        if mode == "alternating":
+            steps.append((rs.option.emitter_on_off, 1.0))
+
+        for option, value in steps:
+            if not sensor.supports(option):
+                logger.warning(
+                    "this depth sensor does not support %s, so emitter mode %r "
+                    "is not what will be recorded",
+                    _option_name(option),
+                    mode,
+                )
+                continue
+            try:
+                sensor.set_option(option, value)
+            except RuntimeError as exc:
+                logger.warning(
+                    "could not set %s to %s: %s", _option_name(option), value, exc
+                )
+
+        got = {
+            _option_name(option): sensor.get_option(option)
+            for option in (rs.option.emitter_enabled, rs.option.emitter_on_off)
+            if sensor.supports(option)
+        }
+        wanted = {
+            "emitter_enabled": 0.0 if mode == "off" else 1.0,
+            "emitter_on_off": 1.0 if mode == "alternating" else 0.0,
+        }
+        if any(got.get(name) != value for name, value in wanted.items()):
+            logger.warning(
+                "asked for emitter mode %r but the device reports %s; the "
+                "recording is whatever the device did, not what was asked",
+                mode,
+                got,
+            )
+        else:
+            logger.info("emitter mode: %s", mode)
 
     # -- frames ------------------------------------------------------------
 

@@ -21,6 +21,8 @@ from .config import (
     DEFAULT_COLOR,
     DEFAULT_COLOR_FORMAT,
     DEFAULT_DEPTH,
+    DEFAULT_EMITTER,
+    EMITTER_MODES,
     StreamConfig,
     StreamSpec,
 )
@@ -43,6 +45,8 @@ __all__ = [
     "DEFAULT_COLOR",
     "DEFAULT_COLOR_FORMAT",
     "DEFAULT_DEPTH",
+    "DEFAULT_EMITTER",
+    "EMITTER_MODES",
     "MAX_PAIR_SKEW_MS",
     "ArchiveSource",
     "ArchiveWriter",

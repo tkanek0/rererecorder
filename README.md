@@ -91,4 +91,4 @@ Both devices record together, on one clock, cross-checked. What is left:
   than claiming zero.
 - **A Raspberry Pi** has not run this. Lossless at 54 MB/s will not fit there.
 
-Tests: `make check` - 152 of them, none needing a device.
+Tests: `make check` - 229 of them, none needing a device.

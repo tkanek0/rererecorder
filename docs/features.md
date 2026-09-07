@@ -164,7 +164,7 @@ make drecord SECONDS=30                    # in the container: RSUSB, does not
 make inspect DIR=var/sessions/kitchen      # cross-check a recording
 make dserver                               # the page, on :8040
 make export DIR=var/sessions/kitchen       # write it out as plain files
-make check                                 # 152 tests, no device needed
+make check                                 # 229 tests, no device needed
 ```
 
 `rrr.tools.inspect` is the one that matters after a recording. It re-reads the files

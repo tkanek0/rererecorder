@@ -85,6 +85,88 @@ class Extrinsics:
 
 
 @dataclass(frozen=True)
+class MotionIntrinsics:
+    """The inertial sensor's own correction, as the device was calibrated.
+
+    An accelerometer and a gyroscope are not read straight off: each axis has a
+    scale, the three axes are not exactly orthogonal, and each carries a bias.
+    A device can store the correction for its own unit, and using the raw
+    samples without it is a needless source of drift in anything that
+    integrates them.
+
+    **This D455 does not have one.** Measured: the correction reads back as the
+    identity with zero bias, which is what librealsense reports for a unit that
+    was never IMU-calibrated at the factory. That is consistent with the other
+    measurement this repository already makes - ``inspect`` puts the stationary
+    accelerometer's magnitude at 9.69 m/s^2 against a true 9.81, which is 1.2%
+    out and about what an uncalibrated axis scale looks like. Intel's
+    ``rs-imu-calibration.py`` writes one if it turns out to matter.
+
+    Recorded either way, because the two cases have to be distinguishable: an
+    identity that came from the device is not the same claim as no calibration
+    at all, and only the recording can say which one a session had.
+
+    Attributes:
+        data: The 3x4 correction, row-major - a 3x3 scale-and-misalignment
+            matrix with a bias column. Corrected = ``data[:, :3] @ raw +
+            data[:, 3]``.
+        noise_variances: Per-axis noise variance, as the device reports it.
+        bias_variances: Per-axis bias variance.
+    """
+
+    data: tuple[float, ...]
+    noise_variances: tuple[float, float, float]
+    bias_variances: tuple[float, float, float]
+
+    def as_dict(self) -> dict[str, object]:
+        """Return a JSON-serialisable view of these intrinsics."""
+        return {
+            "data": list(self.data),
+            "noise_variances": list(self.noise_variances),
+            "bias_variances": list(self.bias_variances),
+        }
+
+
+@dataclass(frozen=True)
+class MotionCalibration:
+    """Where the inertial sensor sits, and how to correct what it reports.
+
+    Both halves are needed by anything that fuses the inertial samples with the
+    images, and neither is recoverable afterwards: an archive holding samples
+    without the transform to the camera is a set of numbers in an unnamed
+    frame.
+
+    Attributes:
+        accel: The accelerometer's correction, or None if the device does not
+            report one.
+        gyro: The gyroscope's correction.
+        depth_to_accel: Transform from the depth stream's frame to the
+            accelerometer's.
+        depth_to_gyro: The same for the gyroscope. Recorded separately because
+            the SDK reports them separately; on a D455 they are the same
+            frame, which is worth being able to check rather than assume.
+    """
+
+    accel: MotionIntrinsics | None = None
+    gyro: MotionIntrinsics | None = None
+    depth_to_accel: Extrinsics | None = None
+    depth_to_gyro: Extrinsics | None = None
+
+    def as_dict(self) -> dict[str, object]:
+        """Return a JSON-serialisable view of this calibration."""
+        return {
+            "accel": self.accel.as_dict() if self.accel else None,
+            "gyro": self.gyro.as_dict() if self.gyro else None,
+            "depth_to_accel": (
+                self.depth_to_accel.as_dict() if self.depth_to_accel else None
+            ),
+            "depth_to_gyro": (
+                self.depth_to_gyro.as_dict() if self.depth_to_gyro else None
+            ),
+        }
+
+
+@dataclass(frozen=True)
 class Calibration:
     """Everything needed to turn a depth image into metric 3D points.
 
@@ -98,6 +180,14 @@ class Calibration:
         depth_to_color: Transform from the depth frame to the color frame.
             Identity when the two are aligned.
         aligned: Whether depth was resampled into the color viewpoint.
+        infrared: Intrinsics of the left and right infrared streams, each None
+            if that stream was not recorded.
+        depth_to_infrared: Transform from the depth frame to each infrared
+            frame. On a D400 the depth image is computed in the left imager's
+            frame, so the first of these should be the identity - recorded
+            rather than assumed, because it is a claim that can be checked.
+        motion: Where the inertial sensor sits and how to correct it, or None
+            if it was not recorded.
     """
 
     color: Intrinsics | None
@@ -105,6 +195,27 @@ class Calibration:
     depth_scale: float
     depth_to_color: Extrinsics | None
     aligned: bool
+    infrared: tuple[Intrinsics | None, Intrinsics | None] = (None, None)
+    depth_to_infrared: tuple[Extrinsics | None, Extrinsics | None] = (None, None)
+    motion: MotionCalibration | None = None
+
+    @property
+    def infrared_baseline_m(self) -> float | None:
+        """Distance between the two infrared imagers, in metres.
+
+        Returns:
+            The baseline, or None if both infrared streams were not recorded.
+            This is what fixes the scale of anything reconstructed from the
+            pair, so it is worth being able to read without composing the two
+            transforms by hand.
+        """
+        left, right = self.depth_to_infrared
+        if left is None or right is None:
+            return None
+        return float(
+            sum((a - b) ** 2 for a, b in zip(left.translation, right.translation))
+            ** 0.5
+        )
 
     def as_dict(self) -> dict[str, object]:
         """Return a JSON-serialisable view of this calibration."""
@@ -116,6 +227,13 @@ class Calibration:
                 self.depth_to_color.as_dict() if self.depth_to_color else None
             ),
             "aligned": self.aligned,
+            "infrared": [
+                entry.as_dict() if entry else None for entry in self.infrared
+            ],
+            "depth_to_infrared": [
+                entry.as_dict() if entry else None for entry in self.depth_to_infrared
+            ],
+            "motion": self.motion.as_dict() if self.motion else None,
         }
 
 

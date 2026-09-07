@@ -29,6 +29,41 @@ Turn it down with `RRR_DEPTH`, `RRR_COLOR`, `RRR_INFRARED` when a machine cannot
 keep up - see [frame-loss.md](frame-loss.md) for what each resolution costs in
 field of view and depth noise.
 
+### What the calibration holds
+
+Everything a consumer needs to relate one sensor to another, expressed against
+**the depth stream's frame** - on a D400 that is the left infrared imager, and
+it is what the SDK reports every other transform against.
+
+| | |
+|---|---|
+| `color`, `depth`, `infrared` | intrinsics of each stream |
+| `depth_to_color`, `depth_to_infrared` | where each imager sits |
+| `infrared_baseline_m` | derived from the pair, and what fixes the scale of anything reconstructed from them |
+| `motion.accel` / `.gyro` | the device's own correction: a 3x4 scale-and-misalignment matrix with a bias column, plus noise and bias variances |
+| `motion.depth_to_accel` / `_gyro` | where the inertial sensor sits relative to the camera |
+
+Measured on this D455 (firmware 5.17.3.10):
+
+```
+depth->ir_left    t=(0, 0, 0)                    identity     <- as a D400 should be
+depth->ir_right   t=(-0.09513, 0, 0)             95.13 mm baseline
+depth->color      t=(-0.05909, 0.00022, 0.00027)
+depth->accel      t=(-0.03022, 0.0074, 0.01602)  } the same frame,
+depth->gyro       t=(-0.03022, 0.0074, 0.01602)  } which is now checked rather than assumed
+```
+
+The infrared pair's intrinsics come back identical to depth's - `fx` 653.36,
+`ppx` 640.09 - which is the same thing config.py records about the depth output
+being the infrared sensor cropped rather than scaled.
+
+The inertial half matters for a moving rig and is not recoverable afterwards:
+samples with no transform to the camera are numbers in an unnamed frame. **This
+unit has no IMU correction**, though: it reads back as the identity with zero
+bias, matching the 9.69 m/s^2 gravity `inspect` measures against a true 9.81.
+Recorded anyway, because "the device says identity" and "no calibration was
+recorded" have to stay distinguishable.
+
 ## Timing
 
 Every frame carries `capture_monotonic`: the camera's own idea of when the frame

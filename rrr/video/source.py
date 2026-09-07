@@ -32,6 +32,8 @@ from .types import (
     FrameSet,
     Intrinsics,
     Motion,
+    MotionCalibration,
+    MotionIntrinsics,
     MotionSample,
 )
 
@@ -131,6 +133,31 @@ def _extrinsics(source: rs.stream_profile, target: rs.stream_profile) -> Extrins
     return Extrinsics(
         rotation=tuple(column_major.T.reshape(-1).tolist()),
         translation=tuple(float(t) for t in extr.translation),
+    )
+
+
+def _motion_intrinsics(profile: rs.stream_profile) -> MotionIntrinsics | None:
+    """Convert an SDK motion profile's correction to ours.
+
+    Args:
+        profile: An accelerometer or gyroscope stream profile.
+
+    Returns:
+        The correction, or None if the device does not carry one. Not every
+        unit is calibrated, and a missing correction is worth recording as
+        absent rather than as an identity somebody might mistake for measured.
+    """
+    try:
+        intr = profile.as_motion_stream_profile().get_motion_intrinsics()
+    except RuntimeError:
+        return None
+    data = np.asarray(intr.data, dtype=np.float64).reshape(-1)
+    noise = tuple(float(v) for v in intr.noise_variances)
+    bias = tuple(float(v) for v in intr.bias_variances)
+    return MotionIntrinsics(
+        data=tuple(data.tolist()),
+        noise_variances=(noise[0], noise[1], noise[2]),
+        bias_variances=(bias[0], bias[1], bias[2]),
     )
 
 
@@ -361,12 +388,31 @@ class LiveSource:
             profile.get_stream(rs.stream.depth) if cfg.depth is not None else None
         )
 
+        infrared_profiles: tuple[Any, Any] = (None, None)
+        if cfg.infrared:
+            infrared_profiles = (
+                self._stream(profile, rs.stream.infrared, 1),
+                self._stream(profile, rs.stream.infrared, 2),
+            )
+
         color = _intrinsics(color_profile) if color_profile else None
         depth = _intrinsics(depth_profile) if depth_profile else None
         depth_to_color = (
             _extrinsics(depth_profile, color_profile)
             if depth_profile and color_profile
             else None
+        )
+        infrared = tuple(
+            _intrinsics(entry) if entry else None for entry in infrared_profiles
+        )
+        # The left imager is where a D400 computes its depth, so the first of
+        # these is expected to be the identity. Read rather than assumed: it is
+        # what fixes the infrared pair against the depth, and the baseline
+        # between the two is what fixes the scale of anything reconstructed
+        # from them.
+        depth_to_infrared = tuple(
+            _extrinsics(depth_profile, entry) if depth_profile and entry else None
+            for entry in infrared_profiles
         )
         if cfg.aligns:
             depth = color
@@ -383,7 +429,85 @@ class LiveSource:
             depth_scale=scale,
             depth_to_color=depth_to_color,
             aligned=cfg.aligns,
+            infrared=(infrared[0], infrared[1]),
+            depth_to_infrared=(depth_to_infrared[0], depth_to_infrared[1]),
+            motion=self._read_motion_calibration(profile, depth_profile),
         )
+
+    def _read_motion_calibration(
+        self, profile: rs.pipeline_profile, depth_profile: rs.stream_profile | None
+    ) -> MotionCalibration | None:
+        """Read where the inertial sensor sits and how to correct it.
+
+        Args:
+            profile: The started pipeline's profile, for the device.
+            depth_profile: The stream the transforms are expressed against, or
+                None when depth is not being recorded.
+
+        Returns:
+            The calibration, or None if the device has no inertial sensor or
+            depth is not running to express the transforms against.
+
+        Read here rather than in :meth:`_open_motion`, because it is a property
+        of the device rather than of a stream: a session whose inertial sensor
+        failed to start should still record what the sensor was, and a failure
+        to read the calibration must not stop the recording.
+        """
+        if depth_profile is None:
+            return None
+        try:
+            sensor = next(
+                s
+                for s in profile.get_device().query_sensors()
+                if "Motion" in s.get_info(rs.camera_info.name)
+            )
+        except StopIteration:
+            return None
+
+        found: dict[str, Any] = {}
+        try:
+            for stream, name in ((rs.stream.accel, "accel"), (rs.stream.gyro, "gyro")):
+                candidates = [
+                    p for p in sensor.get_stream_profiles() if p.stream_type() == stream
+                ]
+                if not candidates:
+                    continue
+                chosen = max(candidates, key=lambda p: p.fps())
+                found[name] = _motion_intrinsics(chosen)
+                found[f"depth_to_{name}"] = _extrinsics(depth_profile, chosen)
+        except RuntimeError as exc:
+            logger.warning("could not read the inertial calibration: %s", exc)
+            return None
+
+        if not found:
+            return None
+        return MotionCalibration(
+            accel=found.get("accel"),
+            gyro=found.get("gyro"),
+            depth_to_accel=found.get("depth_to_accel"),
+            depth_to_gyro=found.get("depth_to_gyro"),
+        )
+
+    @staticmethod
+    def _stream(
+        profile: rs.pipeline_profile, stream: rs.stream, index: int = -1
+    ) -> rs.stream_profile | None:
+        """Find one started stream's profile, or None if it is not running.
+
+        Args:
+            profile: The started pipeline's profile.
+            stream: Which stream to look for.
+            index: Stream index, for the infrared pair.
+
+        Returns:
+            The profile, or None. The SDK raises rather than returning nothing
+            when a stream was not enabled, and every caller here treats a
+            missing stream as ordinary.
+        """
+        try:
+            return profile.get_stream(stream, index)
+        except RuntimeError:
+            return None
 
     @staticmethod
     def _read_device(profile: rs.pipeline_profile) -> DeviceInfo:

@@ -48,6 +48,8 @@ from .types import (
     FrameSet,
     Intrinsics,
     Motion,
+    MotionCalibration,
+    MotionIntrinsics,
     MotionSample,
     join_yuyv,
     split_yuyv,
@@ -643,6 +645,58 @@ class ArchiveWriter:
             pass
 
 
+def _extrinsics(raw: dict[str, Any] | None) -> Extrinsics | None:
+    """Rebuild a transform from its stored form."""
+    if not raw:
+        return None
+    return Extrinsics(
+        rotation=tuple(raw["rotation"]),
+        translation=tuple(raw["translation"]),
+    )
+
+
+def _motion_intrinsics(raw: dict[str, Any] | None) -> MotionIntrinsics | None:
+    """Rebuild an inertial correction from its stored form."""
+    if not raw:
+        return None
+    noise = tuple(raw["noise_variances"])
+    bias = tuple(raw["bias_variances"])
+    return MotionIntrinsics(
+        data=tuple(raw["data"]),
+        noise_variances=(noise[0], noise[1], noise[2]),
+        bias_variances=(bias[0], bias[1], bias[2]),
+    )
+
+
+def _motion_calibration(raw: dict[str, Any] | None) -> MotionCalibration | None:
+    """Rebuild the inertial calibration from its stored form.
+
+    Args:
+        raw: The stored mapping, or None for an archive written before the
+            inertial calibration was recorded.
+
+    Returns:
+        The calibration, or None. Absent rather than empty, so that a consumer
+        can tell "this recording has no inertial calibration" from "this
+        recording has one and it is all zeros".
+    """
+    if not raw:
+        return None
+    return MotionCalibration(
+        accel=_motion_intrinsics(raw.get("accel")),
+        gyro=_motion_intrinsics(raw.get("gyro")),
+        depth_to_accel=_extrinsics(raw.get("depth_to_accel")),
+        depth_to_gyro=_extrinsics(raw.get("depth_to_gyro")),
+    )
+
+
+def _pair(raw: Any, build) -> tuple[Any, Any]:
+    """Rebuild a left/right pair that older archives do not carry."""
+    if not isinstance(raw, (list, tuple)) or len(raw) != 2:
+        return (None, None)
+    return (build(raw[0]), build(raw[1]))
+
+
 def _intrinsics(raw: dict[str, Any] | None) -> Intrinsics | None:
     """Rebuild intrinsics from their stored form."""
     if raw is None:
@@ -727,20 +781,17 @@ class ArchiveSource:
             **(self._meta.get("codecs") or {}),
         }
         raw = self._meta["calibration"]
-        extrinsics = raw.get("depth_to_color")
         self._calibration = Calibration(
             color=_intrinsics(raw.get("color")),
             depth=_intrinsics(raw.get("depth")),
             depth_scale=raw["depth_scale"],
-            depth_to_color=(
-                Extrinsics(
-                    rotation=tuple(extrinsics["rotation"]),
-                    translation=tuple(extrinsics["translation"]),
-                )
-                if extrinsics
-                else None
-            ),
+            depth_to_color=_extrinsics(raw.get("depth_to_color")),
             aligned=raw["aligned"],
+            # Absent from any archive written before these were recorded, which
+            # reads back as "not known" rather than failing to open.
+            infrared=_pair(raw.get("infrared"), _intrinsics),
+            depth_to_infrared=_pair(raw.get("depth_to_infrared"), _extrinsics),
+            motion=_motion_calibration(raw.get("motion")),
         )
         # Detected, not inferred from the version: a file written by
         # realsense-playground has no such column, and one written here does.

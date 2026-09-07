@@ -1,6 +1,6 @@
 """Run the control plane.
 
-    uv run python -m server
+    uv run python -m rrr.server
 """
 
 from __future__ import annotations

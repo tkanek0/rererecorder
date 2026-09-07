@@ -1,6 +1,6 @@
 """Check what a recorded session actually says about its own timing.
 
-    uv run python -m tools.inspect var/sessions/2026-09-01_17-30-00
+    uv run python -m rrr.tools.inspect var/sessions/2026-09-01_17-30-00
 
 Everything here is a cross-check rather than a summary. The manifest already
 says what the recorder believed; this reads the files themselves and asks
@@ -29,13 +29,13 @@ import wave
 
 import numpy as np
 
-from timeline import (
+from rrr.timeline import (
     AudioTimeline,
     SessionManifest,
     SessionPaths,
     read_manifest,
 )
-from video import ArchiveSource, StreamError
+from rrr.video import ArchiveSource, StreamError
 
 #: How far the two independent estimates of the audio's length may differ before
 #: it is called a disagreement, in milliseconds.

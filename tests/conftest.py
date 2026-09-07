@@ -14,8 +14,8 @@ from collections.abc import Callable
 import numpy as np
 import pytest
 
-from timeline import ClockPair
-from video import Calibration, Extrinsics, FrameSet, Intrinsics, Motion
+from rrr.timeline import ClockPair
+from rrr.video import Calibration, Extrinsics, FrameSet, Intrinsics, Motion
 
 #: The D455 at its native depth resolution, measured on the device.
 WIDTH, HEIGHT = 848, 480

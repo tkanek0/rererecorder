@@ -17,8 +17,8 @@ import os
 import pytest
 from fastapi.testclient import TestClient
 
-from server import app as server_app
-from timeline import ClockPair, SessionManifest, SessionPaths, write_manifest
+from rrr.server import app as server_app
+from rrr.timeline import ClockPair, SessionManifest, SessionPaths, write_manifest
 
 
 class FakeRecorder:

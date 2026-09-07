@@ -16,7 +16,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from timeline import ClockPair
+from rrr.timeline import ClockPair
 
 
 @dataclass(frozen=True)

@@ -17,7 +17,7 @@ access by frame, and readable by anything that speaks SQL whether or not
 librealsense is installed. See `docs/recording.md`.
 
 The one thing given up is `realsense-viewer`, which reads rosbag2 and not this.
-`tools/record.py --format db3` still writes that when it is what you want.
+`rrr/tools/record.py --format db3` still writes that when it is what you want.
 """
 
 from __future__ import annotations
@@ -37,7 +37,7 @@ from typing import Any
 import cv2
 import numpy as np
 
-from timeline import ClockPair
+from rrr.timeline import ClockPair
 
 from .config import StreamConfig
 from .source import StreamError

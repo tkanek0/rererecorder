@@ -16,8 +16,8 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from video import ArchiveSource, ArchiveWriter, Calibration, FrameSet, StreamConfig
-from video.types import join_yuyv, split_yuyv
+from rrr.video import ArchiveSource, ArchiveWriter, Calibration, FrameSet, StreamConfig
+from rrr.video.types import join_yuyv, split_yuyv
 
 #: The camera's real maxima, and the sizes every measurement in this repository
 #: was taken at.
@@ -28,7 +28,7 @@ COLOR_W, COLOR_H = 1280, 800
 @pytest.fixture
 def native(intrinsics) -> Calibration:
     """Calibration for an unaligned recording at the sensors' own sizes."""
-    from video import Extrinsics, Intrinsics
+    from rrr.video import Extrinsics, Intrinsics
 
     depth = Intrinsics(
         width=DEPTH_W, height=DEPTH_H, fx=653.36, fy=653.36,
@@ -208,7 +208,7 @@ def test_zlib_depth_without_a_shape_is_refused(written_native, tmp_path) -> None
             (json.dumps(raw),),
         )
 
-    from video import StreamError
+    from rrr.video import StreamError
 
     with ArchiveSource(path) as archive:
         with pytest.raises(StreamError, match="shape is unknown"):
@@ -254,7 +254,7 @@ def test_startup_discards_are_counted_apart_from_losses() -> None:
     Reaches into the source's counter directly because the alternative is a
     camera.
     """
-    from video import LiveSource
+    from rrr.video import LiveSource
 
     source = LiveSource(StreamConfig())
 
@@ -279,7 +279,7 @@ def test_startup_discards_are_counted_apart_from_losses() -> None:
 
 def _imu_burst(count: int, *, start_ms: float = 1_788_000_000_000.0) -> list:
     """Samples at the rates a D455 actually produces: 482 and 478 Hz."""
-    from video.types import MotionSample
+    from rrr.video.types import MotionSample
 
     samples = []
     for n in range(count):

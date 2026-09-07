@@ -104,7 +104,7 @@ make dserver                               # the page, on :8040
 make check                                 # 152 tests, no device needed
 ```
 
-`tools.inspect` is the one that matters after a recording. It re-reads the files
+`rrr.tools.inspect` is the one that matters after a recording. It re-reads the files
 and makes them argue with each other rather than summarising what the recorder
 believed:
 
@@ -133,7 +133,7 @@ means something. Its exit status is 1 if any check disagreed.
 ## Reading a recording
 
 ```python
-from video import ArchiveSource
+from rrr.video import ArchiveSource
 
 with ArchiveSource("var/sessions/x/video.rrdb") as archive:
     for frames in archive.frames():
@@ -177,8 +177,8 @@ takes to reach the array's converter against how long light takes to reach the
 camera's shutter timestamp.
 
 ```
-uv run python -m tools.calibrate var/sessions/<name>          # measure
-uv run python -m tools.calibrate var/sessions/<name> --apply  # and record it
+uv run python -m rrr.tools.calibrate var/sessions/<name>          # measure
+uv run python -m rrr.tools.calibrate var/sessions/<name> --apply  # and record it
 ```
 
 Clap a few times in front of the camera, close to the array. The tool finds the

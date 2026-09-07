@@ -23,7 +23,7 @@ import logging
 import threading
 from dataclasses import dataclass
 
-from video import ArchiveWriter, FrameHub, FrameSet, StreamConfig
+from rrr.video import ArchiveWriter, FrameHub, FrameSet, StreamConfig
 
 logger = logging.getLogger(__name__)
 

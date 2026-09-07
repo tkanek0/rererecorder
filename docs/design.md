@@ -23,17 +23,18 @@ measured `(monotonic, realtime)` pairs rather than as the axis itself.
 
 ## Module boundaries
 
-Dependencies run one way. `timeline` imports nothing but numpy, `video` and
-`audio` import no web framework, and nothing below `server` knows HTTP exists.
+Everything lives under one package, `rrr`. Dependencies run one way:
+`rrr.timeline` imports nothing but numpy, `rrr.video` and `rrr.audio` import no
+web framework, and nothing below `rrr.server` knows HTTP exists.
 
 ```mermaid
 flowchart TD
-    T["timeline/<br/>clocks, session manifest<br/><i>numpy only</i>"]
-    V["video/<br/>D455: source, archive<br/><i>pyrealsense2</i>"]
-    A["audio/<br/>ReSpeaker: taps, DOA<br/><i>sounddevice, pyusb</i>"]
-    R["recorder/<br/>writers, session orchestration"]
-    S["server/<br/>FastAPI, MJPEG, playback"]
-    C["tools/<br/>record, inspect"]
+    T["rrr/timeline/<br/>clocks, session manifest<br/><i>numpy only</i>"]
+    V["rrr/video/<br/>D455: source, archive<br/><i>pyrealsense2</i>"]
+    A["rrr/audio/<br/>ReSpeaker: taps, DOA<br/><i>sounddevice, pyusb</i>"]
+    R["rrr/recorder/<br/>writers, session orchestration"]
+    S["rrr/server/<br/>FastAPI, MJPEG, playback"]
+    C["rrr/tools/<br/>record, inspect"]
     W["web/<br/>vite + react"]
     T --> V
     T --> A
@@ -44,7 +45,7 @@ flowchart TD
     S --> W
 ```
 
-`timeline/` being the base, and importing nothing that needs a device, is the
+`rrr/timeline/` being the base, and importing nothing that needs a device, is the
 point: it holds the arithmetic everything else depends on, so all of it can be
 tested without a camera attached. If that arithmetic is wrong, nothing
 downstream can detect it.
@@ -95,7 +96,7 @@ it. The two tracks share a clock, but the residual between a microphone and a
 shutter - how long a sound takes to reach the converter, how long light takes to
 reach a timestamp - is not derivable from either device's documentation. Showing
 zero would assert an alignment nobody has established. The page displays
-"unmeasured", and `tools/calibrate.py` is what will fill it in.
+"unmeasured", and `rrr/tools/calibrate.py` is what will fill it in.
 
 Alignment of depth to colour is refused in the same spirit: recordings are
 **unaligned**, because resampling depth onto the colour grid cannot be undone,

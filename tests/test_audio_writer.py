@@ -22,9 +22,9 @@ from dataclasses import dataclass
 import numpy as np
 import pytest
 
-from audio.types import BlockStamp, Chunk
-from recorder.audio_writer import AudioWriter
-from timeline import AudioTimeline
+from rrr.audio.types import BlockStamp, Chunk
+from rrr.recorder.audio_writer import AudioWriter
+from rrr.timeline import AudioTimeline
 
 RATE = 16_000
 BLOCK = 256
@@ -346,7 +346,7 @@ def test_an_unrepaired_recording_would_have_failed_these_checks() -> None:
         points.append((position, START + n * BLOCK_S + skipped))
         position += BLOCK
 
-    from timeline.audio_clock import AudioClockPoint
+    from rrr.timeline.audio_clock import AudioClockPoint
 
     report = AudioTimeline(
         [AudioClockPoint(sample=s, monotonic=t) for s, t in points], RATE

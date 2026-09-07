@@ -16,7 +16,7 @@ from dataclasses import dataclass
 import numpy as np
 import pytest
 
-from audio.capture import AudioTap
+from rrr.audio.capture import AudioTap
 
 RATE = 16_000
 BLOCK = 256

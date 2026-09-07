@@ -23,7 +23,7 @@ from typing import Literal
 import cv2
 import numpy as np
 
-from video import FrameSet
+from rrr.video import FrameSet
 
 #: Which preview a request is asking for.
 Kind = Literal["color", "depth", "ir1", "ir2"]

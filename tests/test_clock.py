@@ -13,7 +13,7 @@ import time
 
 import pytest
 
-from timeline.clock import ClockPair, ClockTrack, read_clocks
+from rrr.timeline.clock import ClockPair, ClockTrack, read_clocks
 
 #: A plausible pair: monotonic near a machine's uptime, realtime near now.
 #: The offset is what matters, and it is deliberately large enough that

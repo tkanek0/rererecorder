@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import os
 
-from video import (
+from rrr.video import (
     DEFAULT_COLOR,
     DEFAULT_COLOR_FORMAT,
     DEFAULT_DEPTH,

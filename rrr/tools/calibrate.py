@@ -1,7 +1,7 @@
 """Measure the offset between the camera and the array, from a handclap.
 
-    uv run python -m tools.calibrate var/sessions/2026-09-02_15-28-36
-    uv run python -m tools.calibrate var/sessions/... --apply
+    uv run python -m rrr.tools.calibrate var/sessions/2026-09-02_15-28-36
+    uv run python -m rrr.tools.calibrate var/sessions/... --apply
 
 Both devices timestamp their own measurements, and both are believable to about
 ten milliseconds. What neither says is how long a sound takes to reach the
@@ -31,14 +31,14 @@ import wave
 
 import numpy as np
 
-from timeline import (
+from rrr.timeline import (
     AudioTimeline,
     SessionPaths,
     SyncCalibration,
     read_manifest,
     write_manifest,
 )
-from video import ArchiveSource
+from rrr.video import ArchiveSource
 
 #: How much louder than the preceding second a block must be to be a clap.
 #:

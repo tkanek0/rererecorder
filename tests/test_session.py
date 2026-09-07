@@ -6,8 +6,8 @@ import json
 
 import pytest
 
-from timeline.clock import ClockPair
-from timeline.session import (
+from rrr.timeline.clock import ClockPair
+from rrr.timeline.session import (
     FORMAT_VERSION,
     AudioTrack,
     SessionError,

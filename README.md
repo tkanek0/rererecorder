@@ -55,7 +55,7 @@ repeating what the recorder believed.
 ## Reading one back
 
 ```python
-from video import ArchiveSource
+from rrr.video import ArchiveSource
 
 with ArchiveSource("var/sessions/x/video.rrdb") as archive:
     for frames in archive.frames():
@@ -73,11 +73,12 @@ container is SQLite.
 | | |
 |---|---|
 | [design.md](docs/design.md) | the one idea, module boundaries, why the camera is shared two ways |
-| [decisions.md](docs/decisions.md) | eleven choices, the alternatives, and the measurement that decided each |
+| [decisions.md](docs/decisions.md) | fifteen choices, the alternatives, and the measurement that decided each |
 | [features.md](docs/features.md) | what it records, what it reports, and how to drive it |
 | [frame-loss.md](docs/frame-loss.md) | the frame-loss investigation: seven wrong hypotheses and the right one |
 
-Fourteen decisions, because every one of them cost a measurement to settle.
+Fifteen decisions, nearly all of them settled by a measurement rather than by
+taste.
 
 ## State
 
@@ -85,7 +86,7 @@ Both devices record together, on one clock, cross-checked. What is left:
 
 - **The offset between them is unmeasured.** They share a clock, but the residual
   between a microphone and a shutter has to be measured from a handclap -
-  `tools/calibrate.py`. Until it runs, `session.json` says "unmeasured" rather
+  `rrr/tools/calibrate.py`. Until it runs, `session.json` says "unmeasured" rather
   than claiming zero.
 - **A Raspberry Pi** has not run this. Lossless at 54 MB/s will not fit there.
 

@@ -1,7 +1,7 @@
 """Record a session from the terminal.
 
-    uv run python -m tools.record --seconds 20
-    uv run python -m tools.record --session kitchen-test --no-doa
+    uv run python -m rrr.tools.record --seconds 20
+    uv run python -m rrr.tools.record --session kitchen-test --no-doa
 
 The same :class:`~recorder.SessionRecorder` the server uses, with a progress
 line instead of a browser. Nothing here needs the web stack, which is the point:
@@ -16,8 +16,8 @@ import signal
 import sys
 import time
 
-from recorder import SessionRecorder, config
-from timeline import SessionManifest
+from rrr.recorder import SessionRecorder, config
+from rrr.timeline import SessionManifest
 
 
 def main(argv: list[str] | None = None) -> int:

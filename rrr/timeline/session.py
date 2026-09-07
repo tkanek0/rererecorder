@@ -21,7 +21,7 @@ What it deliberately does **not** claim is that the two are aligned. The
 absolute offset between the array's converter and the camera's shutter cannot be
 derived from either device's documentation - each reports its own idea of when a
 measurement happened, and the paths in between are not specified - so it is left
-null until something measures it. ``tools/calibrate.py`` does that from a
+null until something measures it. ``rrr/tools/calibrate.py`` does that from a
 handclap; until it has run, ``calibration.offset_s`` is None and every consumer
 knows the alignment is only as good as the two clocks.
 """

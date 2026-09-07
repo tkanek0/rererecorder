@@ -18,7 +18,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from timeline import (
+from rrr.timeline import (
     AudioClockPoint,
     AudioClockWriter,
     AudioTrack,
@@ -29,8 +29,8 @@ from timeline import (
     read_manifest,
     write_manifest,
 )
-from tools import calibrate
-from video import ArchiveWriter, Calibration, Extrinsics, Intrinsics, StreamConfig
+from rrr.tools import calibrate
+from rrr.video import ArchiveWriter, Calibration, Extrinsics, Intrinsics, StreamConfig
 
 RATE = 16_000
 CHANNELS = 6
@@ -73,7 +73,7 @@ def session(tmp_path: Path, calibration: Calibration) -> SessionPaths:
     The video is 150 frames of a static scene with one frame that differs; the
     audio is silence with one impulse, placed PLANTED_OFFSET_S later.
     """
-    from video import FrameSet
+    from rrr.video import FrameSet
 
     paths = SessionPaths.create(str(tmp_path), "planted")
     frames_total = 150
@@ -170,7 +170,7 @@ def test_the_audio_impulse_is_located(session: SessionPaths) -> None:
 
 def test_the_video_movement_is_located(session: SessionPaths) -> None:
     """To within one frame, which is all the video can say."""
-    from video import ArchiveSource
+    from rrr.video import ArchiveSource
 
     claps = calibrate._find_claps(session)
     with ArchiveSource(session.video) as archive:
@@ -187,7 +187,7 @@ def test_the_video_movement_is_located(session: SessionPaths) -> None:
 
 def test_a_still_recording_yields_no_movement(session: SessionPaths) -> None:
     """Looking somewhere with nothing happening must not invent a peak."""
-    from video import ArchiveSource
+    from rrr.video import ArchiveSource
 
     with ArchiveSource(session.video) as archive:
         found = calibrate._find_movement(

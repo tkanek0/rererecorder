@@ -15,8 +15,8 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from timeline import ClockPair
-from video import (
+from rrr.timeline import ClockPair
+from rrr.video import (
     ArchiveSource,
     ArchiveWriter,
     Calibration,

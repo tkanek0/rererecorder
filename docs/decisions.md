@@ -80,7 +80,7 @@ The split and its inverse were checked byte-for-byte on every frame, not
 assumed.
 
 **Cost:** three columns instead of one, and a reader has to reassemble them.
-`video.types.join_yuyv` does, and `server.preview.to_bgr_from_planes` skips the
+`rrr.video.types.join_yuyv` does, and `rrr.server.preview.to_bgr_from_planes` skips the
 reassembly for display.
 
 ---
@@ -229,7 +229,7 @@ including with no IMU at all - that was the V4L2 backend, not the IMU. Decision
 
 **Cost:** the `motion` table is replaced by `imu`, which moves the format to
 version 3, and about 30 KB/s - 0.06% of the video. The samples start up to 0.7 s
-before the first frame and have gaps while the sensor settles; `tools/inspect`
+before the first frame and have gaps while the sensor settles; `rrr/tools/inspect`
 looks for gaps only inside the video's own span for that reason.
 
 `FrameSet.motion` still exists, holding the newest buffered sample of each
@@ -275,9 +275,9 @@ machine where they share one - a Raspberry Pi, for instance.
 
 ## 14. Measure the device offset from a handclap, and say how well
 
-**Chosen:** `tools/calibrate.py`. Detect the impulse in the audio, find the peak
-frame-to-frame difference in the video around it, take the difference. Write
-nothing without `--apply`.
+**Chosen:** `rrr/tools/calibrate.py`. Detect the impulse in the audio, find the
+peak frame-to-frame difference in the video around it, take the difference.
+Write nothing without `--apply`.
 
 **Alternatives:** a flashing LED (needs hardware); asking the SDK (neither
 device documents its internal latency); assuming zero (what showing `0` would
@@ -296,6 +296,37 @@ as +80.0 ms.
 **Cost:** somebody has to clap in front of the camera. Until they do,
 `calibration.offset_s` stays null and every consumer is told the alignment is
 unmeasured - which is the honest state, not a defect.
+
+---
+
+## 15. One package, `rrr`, rather than six top-level ones
+
+**Chosen:** `rrr/{timeline,video,audio,recorder,server,tools}`, imported as
+`from rrr.video import ArchiveSource`.
+
+**Alternatives:** leaving `audio/`, `video/`, `timeline/`, `recorder/`,
+`server/` and `tools/` at the top level, as they were; a `src/rrr/` layout with
+a build backend, as the sibling `multimodal-spatial-awareness` repository uses.
+
+**Why:** recordings made here are meant to be read by other repositories, and
+those six names are ones any other project might also define. `import video` in
+a process that had this checkout on its path was a coin toss, and a name
+collision at that boundary looks like corrupted data rather than like a broken
+import. `rrr` is what the rest of the repository already calls itself - the
+`.rrdb` suffix, the `RRR_` environment prefix.
+
+**Why not `src/`:** a `src/` layout earns its keep when the package is built and
+installed, so that tests run against the installed copy rather than the working
+tree. This project is not packaged - there is no `[build-system]`, and both the
+Makefile and the container run it from the checkout with the repository root on
+`PYTHONPATH`. Adding `src/` would mean adding a build backend and reordering the
+image's `uv sync` around the source copy, for no benefit here. The sibling
+repository packages itself and so keeps `src/msa/`; the layouts differ because
+the answer to "is this installed?" differs.
+
+**Cost:** every import statement, the Makefile, the Dockerfile's `CMD` and the
+documentation changed at once. Mechanical, and cheapest before anything outside
+this repository reads a session.
 
 ---
 

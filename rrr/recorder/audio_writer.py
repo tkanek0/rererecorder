@@ -39,8 +39,8 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from audio import AudioTap, BlockStamp, DoaTap
-from timeline import AudioClockPoint, AudioClockWriter
+from rrr.audio import AudioTap, BlockStamp, DoaTap
+from rrr.timeline import AudioClockPoint, AudioClockWriter
 
 logger = logging.getLogger(__name__)
 

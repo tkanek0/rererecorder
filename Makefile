@@ -81,7 +81,7 @@ check:
 # Runs on the host, so it uses the V4L2 pyrealsense2 wheel and will lose
 # frames. Fine for working on the page; use `make dserver` to record.
 server:
-	RRR_SERVER_PORT=$(PORT) uv run python -m server
+	RRR_SERVER_PORT=$(PORT) uv run python -m rrr.server
 
 web:
 	@echo "opening on http://localhost:$(WEB_PORT), talking to :$(PORT)"
@@ -95,15 +95,15 @@ web-build:
 # -- the CLI ----------------------------------------------------------------
 
 record:
-	uv run python -m tools.record --seconds $(SECONDS) \
+	uv run python -m rrr.tools.record --seconds $(SECONDS) \
 		$(if $(SESSION),--session $(SESSION),)
 
 inspect:
 	@test -n "$(DIR)" || (echo "usage: make inspect DIR=var/sessions/<name>"; exit 1)
-	uv run python -m tools.inspect $(DIR)
+	uv run python -m rrr.tools.inspect $(DIR)
 
 devices:
-	uv run python -c "from video import list_devices; \
+	uv run python -c "from rrr.video import list_devices; \
 		[print(d) for d in list_devices()]"
 
 # -- the container ----------------------------------------------------------
@@ -112,13 +112,13 @@ image:
 	docker build -f docker/Dockerfile -t $(IMAGE) .
 
 drecord:
-	$(DOCKER_RUN) $(IMAGE) python -m tools.record --seconds $(SECONDS) \
+	$(DOCKER_RUN) $(IMAGE) python -m rrr.tools.record --seconds $(SECONDS) \
 		$(if $(SESSION),--session $(SESSION),)
 
 dserver:
 	@echo "opening on http://localhost:$(PORT)"
 	$(DOCKER_RUN) -p $(PORT):$(PORT) -e RRR_SERVER_PORT=$(PORT) $(IMAGE) \
-		python -m server
+		python -m rrr.server
 
 # -- cleanup ----------------------------------------------------------------
 

@@ -19,7 +19,7 @@ So this class does three things:
 
 What it deliberately does not do is claim the two tracks are aligned. The
 residual offset between a microphone and a shutter is not derivable from either
-device, and until ``tools/calibrate.py`` measures it the manifest's calibration
+device, and until ``rrr/tools/calibrate.py`` measures it the manifest's calibration
 stays null.
 """
 
@@ -30,8 +30,8 @@ import threading
 import time
 from typing import Any
 
-from audio import AudioTap, DoaTap
-from timeline import (
+from rrr.audio import AudioTap, DoaTap
+from rrr.timeline import (
     AudioTimeline,
     AudioTrack,
     ClockTrack,
@@ -41,7 +41,7 @@ from timeline import (
     read_clocks,
     write_manifest,
 )
-from video import FrameHub, FrameSource, LiveSource, StreamConfig
+from rrr.video import FrameHub, FrameSource, LiveSource, StreamConfig
 
 from .audio_writer import AudioWriter
 from .video_writer import VideoWriter

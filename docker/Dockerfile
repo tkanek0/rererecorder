@@ -58,7 +58,7 @@ FROM python:3.12-slim-bookworm
 
 # libusb for the camera; libgomp is what the OpenCV wheel links against;
 # libportaudio2 is loaded at import time by sounddevice, so the audio package
-# cannot even be imported without it - and recorder/ imports it unconditionally.
+# cannot even be imported without it - and rrr/recorder/ imports it unconditionally.
 # No v4l-utils, no uvcvideo: the RSUSB backend talks to /dev/bus/usb directly.
 RUN apt-get update && apt-get install -y --no-install-recommends \
         libusb-1.0-0 libgomp1 libportaudio2 \
@@ -92,5 +92,5 @@ RUN python -c "import pyrealsense2 as rs; print('librealsense', rs.__version__)"
 ENV PYTHONPATH=/app
 EXPOSE 8040
 # The server rather than the CLI: the image is the recorder, and the recorder
-# has a page. `docker run ... python -m tools.record` still works.
-CMD ["python", "-m", "server"]
+# has a page. `docker run ... python -m rrr.tools.record` still works.
+CMD ["python", "-m", "rrr.server"]

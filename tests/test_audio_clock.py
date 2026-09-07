@@ -17,7 +17,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from timeline.audio_clock import (
+from rrr.timeline.audio_clock import (
     AudioClockPoint,
     AudioClockWriter,
     AudioTimeline,

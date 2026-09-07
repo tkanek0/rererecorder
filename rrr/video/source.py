@@ -22,7 +22,7 @@ from typing import Protocol
 import numpy as np
 import pyrealsense2 as rs
 
-from timeline import ClockPair, read_clocks
+from rrr.timeline import ClockPair, read_clocks
 
 from .config import StreamConfig
 from .types import (

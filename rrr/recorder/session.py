@@ -32,9 +32,12 @@ from typing import Any
 
 from rrr.audio import AudioTap, DoaTap
 from rrr.timeline import (
+    EVENTS_NAME,
     AudioTimeline,
     AudioTrack,
     ClockTrack,
+    Event,
+    EventWriter,
     SessionManifest,
     SessionPaths,
     VideoTrack,
@@ -128,6 +131,10 @@ class SessionRecorder:
         self._clock_track = ClockTrack(interval_s=MONITOR_INTERVAL_S)
         self._video: VideoWriter | None = None
         self._audio: AudioWriter | None = None
+        self._events: EventWriter | None = None
+        # Counted here rather than read off the writer, so that the number
+        # survives the writer being closed at the end of a session.
+        self._marks = 0
 
     def _open_camera(self) -> FrameSource:
         """Open the camera as the default frame source."""
@@ -169,6 +176,12 @@ class SessionRecorder:
                 started_at=started,
                 clock_samples=self._clock_track.samples,
             )
+            # Opened for every session rather than on the first mark: a button
+            # press is worth nothing if it has to wait for a file to be
+            # created, and an empty sidecar costs a directory entry.
+            self._events = EventWriter(paths.events)
+            self._marks = 0
+            self._manifest.events_file = EVENTS_NAME
 
         errors: list[str] = []
         self._video = self._start_video(errors)
@@ -256,6 +269,13 @@ class SessionRecorder:
         # off it, and start() replaces it anyway.
         if self._video is not None:
             self._video.stop(timeout=timeout)
+        # Detached under the lock before it is closed: a mark arriving from the
+        # page while the session is being stopped would otherwise reach a file
+        # that has just been closed.
+        with self._lock:
+            events, self._events = self._events, None
+        if events is not None:
+            events.close()
 
         with self._lock:
             self._clock_track.sample(force=True)
@@ -271,6 +291,35 @@ class SessionRecorder:
         )
         self._monitor = None
         return self._manifest
+
+    def mark(self, label: str, data: dict[str, Any] | None = None) -> Event:
+        """Record a mark against the running session.
+
+        Args:
+            label: What the mark means, e.g. the condition being recorded.
+            data: Anything else worth keeping with it.
+
+        Returns:
+            The event as written, so a caller can show the time it landed on.
+
+        Raises:
+            RuntimeError: If nothing is recording. A mark with no session has
+                nowhere to go, and inventing one would put it in the next
+                recording instead.
+
+        The stamp is taken inside the lock, as close to the call as possible.
+        It is still a person's reaction time late - see
+        :mod:`rrr.timeline.events` - so this is for saying what a stretch of a
+        recording was, not for aligning against a frame.
+        """
+        with self._lock:
+            if self._events is None:
+                raise RuntimeError("nothing is recording, so there is nothing to mark")
+            event = Event.now(label, data)
+            self._events.append(event)
+            self._marks += 1
+        logger.info("mark: %s", label)
+        return event
 
     def close(self) -> None:
         """Release the devices for good, if this recorder opened them.
@@ -398,6 +447,7 @@ class SessionRecorder:
                     "error": audio.error,
                 }
             ),
+            "marks": self._marks,
             "errors": list(self._manifest.errors) if self._manifest else [],
         }
 

@@ -78,6 +78,8 @@ One page at `:8040`, served by the same process that records.
   hour: 200 GB reads as plenty and is one hour. The directory can be moved
   between sessions, not during one.
 - **Sessions** - every recording, newest first, with its losses. Play or delete.
+- **Recording** also takes a mark: a label, and Enter or the button, written to
+  `events.jsonl` with the time it landed on.
 - **Playback** - play, pause, step, seek, four video streams, six audio
   channels, 0.25x to 4x. The clock shown is each frame's own recorded time,
   read from a response header, because frames are not evenly spaced.
@@ -168,6 +170,35 @@ the converter does not run at exactly 16 kHz (measured -8 to -42 ppm on this
 unit), and a dropped sample would shift everything after it. Gaps are filled
 with silence so that a file position keeps meaning a time, and the fill is
 recorded so the repair can be checked.
+
+## Marks
+
+Everything else in a session is a measurement a device made. `events.jsonl` is
+the one sidecar written by a person: a label, stamped when the mark reached the
+recorder, saying what was being done.
+
+```json
+{"monotonic": 1322248.12, "realtime": 1788250202.15,
+ "label": "speaker 45deg 2m", "data": {"azimuth_deg": 45, "distance_m": 2.0}}
+```
+
+It exists because a recording of an experiment is unusable without knowing which
+part of it was which condition, and "speaker at 45 degrees, two metres" is not
+recoverable from the audio. `data` is free-form and this repository does not
+interpret it: what belongs in it depends on the experiment, and fixing a schema
+now would fix the wrong one.
+
+**A mark is accurate to a person's reaction time, not to a sample.** Somebody
+presses the button after they notice something, which is a few hundred
+milliseconds late and varies. So a mark says what a *stretch* of a recording
+was; when an instant has to be exact it comes from the signal - an onset in the
+audio - and the mark only says what that onset was.
+
+Marked from the page while recording (Enter in the field, or the button), and
+the label stays after marking because a run is marked over and over with the
+same condition. `make inspect` counts them and **fails if any of them falls
+outside the recording**, which is how a sidecar from a different session gets
+caught.
 
 ## Aligning the two devices
 

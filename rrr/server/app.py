@@ -32,7 +32,13 @@ from fastapi.staticfiles import StaticFiles
 
 from rrr.recorder import RecorderBusy, SessionRecorder
 from rrr.recorder import config as recording_config
-from rrr.timeline import SessionError, SessionPaths, listing, read_manifest
+from rrr.timeline import (
+    SessionError,
+    SessionPaths,
+    listing,
+    read_events,
+    read_manifest,
+)
 from rrr.video import ArchiveSource, FrameHub, LiveSource, StreamError
 
 from . import config, preview
@@ -239,6 +245,40 @@ async def set_recording(request: Request) -> dict[str, Any]:
     return state.recorder.state()
 
 
+@app.post("/api/events")
+async def add_event(request: Request) -> dict[str, Any]:
+    """Mark the running recording.
+
+    Args:
+        request: JSON body with ``label`` (a non-empty string) and optionally
+            ``data`` (an object of anything else worth keeping).
+
+    Returns:
+        The mark as written, and how many the session now holds.
+
+    Raises:
+        HTTPException: 400 for an empty label, a ``data`` that is not an
+            object, or when nothing is recording.
+
+    Not run in a thread: appending one line and flushing it is microseconds,
+    and a mark is worth stamping as close to the request as possible.
+    """
+    body = await request.json()
+    label = str(body.get("label") or "").strip()
+    if not label:
+        raise HTTPException(status_code=400, detail="a mark needs a label")
+    data = body.get("data")
+    if data is not None and not isinstance(data, dict):
+        raise HTTPException(status_code=400, detail="data must be an object")
+
+    try:
+        event = state.recorder.mark(label, data)
+    except RuntimeError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+
+    return {"event": event.as_dict(), "marks": state.recorder.state()["marks"]}
+
+
 @app.get("/api/sessions")
 def sessions() -> dict[str, Any]:
     """Every readable session in the current directory, newest first."""
@@ -292,6 +332,13 @@ def session_detail(session_id: str) -> dict[str, Any]:
     detail = manifest.as_dict()
     detail["size_bytes"] = paths.size_bytes()
     detail["archive"] = _archive_detail(paths.video)
+    # Read rather than counted from the manifest: the file is what a session
+    # actually holds, and a session recorded before marks existed has none.
+    try:
+        detail["events"] = [event.as_dict() for event in read_events(paths.events)]
+    except ValueError as error:
+        logger.warning("unreadable marks in %s: %s", session_id, error)
+        detail["events"] = []
     return detail
 
 

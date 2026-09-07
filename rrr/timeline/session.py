@@ -11,6 +11,7 @@ what anyone would want to do with it.
         audio.wav           every channel, int16, gaps filled with silence
         audio.clock.jsonl   measured capture time per block
         doa.jsonl           the array's direction estimate
+        events.jsonl        marks made by whoever was recording
 
 The manifest is what ties them together. Without it the directory is three
 recordings that happen to share a folder: the WAV has no start time, and the
@@ -34,6 +35,7 @@ import re
 from dataclasses import dataclass, field, replace
 
 from .audio_clock import SUFFIX as AUDIO_CLOCK_SUFFIX
+from .events import SUFFIX as EVENTS_SUFFIX
 from .clock import ClockPair, ClockTrack
 
 #: Bumped when the layout changes in a way a reader must know about.
@@ -46,6 +48,7 @@ VIDEO_NAME = "video.rrdb"
 AUDIO_NAME = "audio.wav"
 AUDIO_CLOCK_NAME = f"audio{AUDIO_CLOCK_SUFFIX}"
 DOA_NAME = "doa.jsonl"
+EVENTS_NAME = f"events{EVENTS_SUFFIX}"
 
 #: Session directory names this module will produce and accept back.
 #:
@@ -427,6 +430,10 @@ class SessionManifest:
         video: What the camera contributed, or None if it was not recorded.
         audio: What the array contributed, or None.
         doa_file: Direction sidecar name, or None.
+        events_file: Mark sidecar name, or None if nobody marked anything. No
+            count is kept here: how many marks a session holds is a question
+            the file answers, and a number copied into the manifest could
+            disagree with it.
         calibration: The measured offset between the devices, if any.
         rig: How the two devices are mounted relative to each other. Empty
             unless somebody has written it down.
@@ -444,6 +451,7 @@ class SessionManifest:
     video: VideoTrack | None = None
     audio: AudioTrack | None = None
     doa_file: str | None = None
+    events_file: str | None = None
     calibration: SyncCalibration = field(default_factory=SyncCalibration)
     rig: Rig = field(default_factory=Rig)
     errors: list[str] = field(default_factory=list)
@@ -475,6 +483,7 @@ class SessionManifest:
             "video": self.video.as_dict() if self.video else None,
             "audio": self.audio.as_dict() if self.audio else None,
             "doa_file": self.doa_file,
+            "events_file": self.events_file,
             "calibration": self.calibration.as_dict(),
             "rig": self.rig.as_dict(),
             "errors": list(self.errors),
@@ -517,6 +526,7 @@ class SessionManifest:
             video=VideoTrack.from_dict(video) if isinstance(video, dict) else None,
             audio=AudioTrack.from_dict(audio) if isinstance(audio, dict) else None,
             doa_file=_optional_str(raw.get("doa_file")),
+            events_file=_optional_str(raw.get("events_file")),
             calibration=(
                 SyncCalibration.from_dict(calibration)
                 if isinstance(calibration, dict)
@@ -642,6 +652,11 @@ class SessionPaths:
     def doa(self) -> str:
         """Path to the direction sidecar."""
         return self._path(DOA_NAME)
+
+    @property
+    def events(self) -> str:
+        """Path to the mark sidecar."""
+        return self._path(EVENTS_NAME)
 
     def size_bytes(self) -> int:
         """Total size of everything in the session directory."""

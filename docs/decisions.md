@@ -330,6 +330,39 @@ this repository reads a session.
 
 ---
 
+## 16. One sidecar written by a person, and what it may not be used for
+
+**Chosen:** `events.jsonl`. A label plus both clocks, stamped when the mark
+reaches the recorder, flushed on every write.
+
+**Alternatives:** a column in the manifest (rewritten every second while
+recording, so a mark would race the rewrite); naming conditions in the session
+id (one session per condition, which means restarting the camera between runs
+and losing auto-exposure settling each time); annotating afterwards against
+playback (accurate, but it cannot record what was *done* - only what is visible
+in what was recorded).
+
+**Why it is needed:** a recording of an experiment is unusable without knowing
+which stretch was which condition, and "speaker at 45 degrees, two metres" is
+not recoverable from the audio. This is the only thing in a session that a
+device did not measure.
+
+**What it may not be used for:** aligning anything. A person presses a button
+after noticing something, a few hundred milliseconds late and by a varying
+amount, so a mark bounds a stretch rather than naming an instant. When the
+instant matters it comes from the signal - an onset in the audio, which is
+locatable to well under a millisecond - and the mark only says what that onset
+was. Writing this down here because the file will look like a timestamp source
+to anyone who finds it later.
+
+**Cost:** it is the one part of a session nobody can check. A dropped frame is
+counted and a filled audio gap is recorded, but a mark that was never pressed
+leaves nothing behind. `inspect` does what little can be done - it fails if a
+mark falls outside the recording, which catches a sidecar belonging to another
+session - and the rest is procedure.
+
+---
+
 ## Known limits
 
 **Nothing stops a recording when the disk fills.** At 195 GB an hour this will

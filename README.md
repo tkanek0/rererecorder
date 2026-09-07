@@ -40,6 +40,7 @@ var/sessions/2026-09-02_15-28-36/
     audio.wav           every channel, gaps filled with silence
     audio.clock.jsonl   measured capture time per block
     doa.jsonl           the array's direction estimate
+    events.jsonl        marks made by hand, saying what was happening
 ```
 
 Every frame carries `capture_monotonic` - the camera's own idea of when it
@@ -73,11 +74,11 @@ container is SQLite.
 | | |
 |---|---|
 | [design.md](docs/design.md) | the one idea, module boundaries, why the camera is shared two ways |
-| [decisions.md](docs/decisions.md) | fifteen choices, the alternatives, and the measurement that decided each |
+| [decisions.md](docs/decisions.md) | sixteen choices, the alternatives, and the measurement that decided each |
 | [features.md](docs/features.md) | what it records, what it reports, and how to drive it |
 | [frame-loss.md](docs/frame-loss.md) | the frame-loss investigation: seven wrong hypotheses and the right one |
 
-Fifteen decisions, nearly all of them settled by a measurement rather than by
+Sixteen decisions, nearly all of them settled by a measurement rather than by
 taste.
 
 ## State

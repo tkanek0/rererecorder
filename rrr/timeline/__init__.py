@@ -17,10 +17,12 @@ from .audio_clock import (
     TimelineReport,
 )
 from .clock import ClockPair, ClockTrack, read_clocks
+from .events import Event, EventWriter, read_events
 from .session import (
     AUDIO_CLOCK_NAME,
     AUDIO_NAME,
     DOA_NAME,
+    EVENTS_NAME,
     FORMAT_VERSION,
     MANIFEST_NAME,
     VIDEO_NAME,
@@ -41,6 +43,7 @@ __all__ = [
     "AUDIO_CLOCK_SUFFIX",
     "AUDIO_NAME",
     "DOA_NAME",
+    "EVENTS_NAME",
     "FORMAT_VERSION",
     "MANIFEST_NAME",
     "VIDEO_NAME",
@@ -50,6 +53,8 @@ __all__ = [
     "AudioTrack",
     "ClockPair",
     "ClockTrack",
+    "Event",
+    "EventWriter",
     "Rig",
     "SessionError",
     "SessionManifest",
@@ -59,6 +64,7 @@ __all__ = [
     "VideoTrack",
     "listing",
     "read_clocks",
+    "read_events",
     "read_manifest",
     "write_manifest",
 ]

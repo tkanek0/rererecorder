@@ -82,7 +82,17 @@ export type RecordingState = {
   size_bytes: number;
   video: VideoState | null;
   audio: AudioState | null;
+  /** How many marks have been written into this session so far. */
+  marks: number;
   errors: string[];
+};
+
+/** One mark made by hand while recording. */
+export type Mark = {
+  monotonic: number;
+  realtime: number;
+  label: string;
+  data: Record<string, unknown>;
 };
 
 /** Where recordings go, and how long the disk lasts at the current rate. */
@@ -207,6 +217,25 @@ export const setRecording = (
   request<RecordingState>('/api/recording', {
     method: 'PUT',
     body: JSON.stringify({ recording, session: session ?? null }),
+  });
+
+/**
+ * Mark the running recording.
+ *
+ * The stamp is taken when the request reaches the recorder, so it is a
+ * person's reaction time late. It says what a stretch of a recording was; it
+ * does not align anything against a frame.
+ *
+ * @param label What the mark means. Refused if empty.
+ * @param data Anything else worth keeping with it.
+ */
+export const addMark = (
+  label: string,
+  data?: Record<string, unknown>,
+): Promise<{ event: Mark; marks: number }> =>
+  request<{ event: Mark; marks: number }>('/api/events', {
+    method: 'POST',
+    body: JSON.stringify({ label, data: data ?? null }),
   });
 
 /**

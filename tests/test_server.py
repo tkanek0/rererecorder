@@ -18,7 +18,13 @@ import pytest
 from fastapi.testclient import TestClient
 
 from rrr.server import app as server_app
-from rrr.timeline import ClockPair, SessionManifest, SessionPaths, write_manifest
+from rrr.timeline import (
+    ClockPair,
+    Event,
+    SessionManifest,
+    SessionPaths,
+    write_manifest,
+)
 
 
 class FakeRecorder:
@@ -28,6 +34,7 @@ class FakeRecorder:
         self.root = root
         self.recording = False
         self.stopped = 0
+        self.marks: list[Event] = []
 
     def state(self) -> dict[str, object]:
         return {
@@ -38,8 +45,16 @@ class FakeRecorder:
             "size_bytes": 0,
             "video": None,
             "audio": None,
+            "marks": len(self.marks),
             "errors": [],
         }
+
+    def mark(self, label: str, data: dict[str, object] | None = None) -> Event:
+        if not self.recording:
+            raise RuntimeError("nothing is recording, so there is nothing to mark")
+        event = Event.now(label, data)
+        self.marks.append(event)
+        return event
 
     def stop(self) -> None:
         self.stopped += 1
@@ -239,3 +254,71 @@ def test_deleting_the_running_session_is_refused(client) -> None:
 
 def test_deleting_a_missing_session_is_a_404(client) -> None:
     assert client.request("DELETE", "/api/sessions/nothing").status_code == 404
+
+
+# -- marks --------------------------------------------------------------------
+
+
+def test_a_mark_needs_a_running_recording(client) -> None:
+    response = client.post("/api/events", json={"label": "clap"})
+    assert response.status_code == 400
+    assert "nothing is recording" in response.json()["detail"]
+
+
+def test_a_mark_is_written_and_counted(client) -> None:
+    server_app.state.recorder.recording = True
+
+    response = client.post(
+        "/api/events",
+        json={"label": "speaker 45deg 2m", "data": {"azimuth_deg": 45}},
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["event"]["label"] == "speaker 45deg 2m"
+    assert body["event"]["data"] == {"azimuth_deg": 45}
+    assert body["marks"] == 1
+
+
+@pytest.mark.parametrize("label", ["", "   ", None])
+def test_a_mark_without_a_label_is_refused(client, label) -> None:
+    server_app.state.recorder.recording = True
+    response = client.post("/api/events", json={"label": label})
+    assert response.status_code == 400
+    assert "label" in response.json()["detail"]
+
+
+def test_mark_data_has_to_be_an_object(client) -> None:
+    server_app.state.recorder.recording = True
+    response = client.post("/api/events", json={"label": "x", "data": [1, 2]})
+    assert response.status_code == 400
+
+
+def test_a_session_detail_carries_its_marks(client, tmp_path) -> None:
+    paths = SessionPaths.create(str(tmp_path / "sessions"), "marked")
+    write_manifest(paths, SessionManifest(session_id="marked"))
+    with open(paths.events, "w", encoding="utf-8") as handle:
+        handle.write(
+            '{"monotonic": 1.0, "realtime": 2.0, "label": "clap", "data": {}}\n'
+        )
+
+    body = client.get("/api/sessions/marked").json()
+    assert [event["label"] for event in body["events"]] == ["clap"]
+
+
+def test_a_session_without_marks_reports_none(client, tmp_path) -> None:
+    paths = SessionPaths.create(str(tmp_path / "sessions"), "plain")
+    write_manifest(paths, SessionManifest(session_id="plain"))
+
+    assert client.get("/api/sessions/plain").json()["events"] == []
+
+
+def test_an_unreadable_mark_does_not_break_the_session(client, tmp_path) -> None:
+    """One bad line must not make a whole recording unopenable."""
+    paths = SessionPaths.create(str(tmp_path / "sessions"), "broken")
+    write_manifest(paths, SessionManifest(session_id="broken"))
+    with open(paths.events, "w", encoding="utf-8") as handle:
+        handle.write("not json\n")
+
+    response = client.get("/api/sessions/broken")
+    assert response.status_code == 200
+    assert response.json()["events"] == []

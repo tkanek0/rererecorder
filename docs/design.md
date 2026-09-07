@@ -83,6 +83,7 @@ var/sessions/2026-09-02_15-28-36/
     audio.wav          every channel, int16, gaps filled with silence
     audio.clock.jsonl   measured capture time per block
     doa.jsonl           the array's direction estimate
+    events.jsonl        marks made by whoever was recording
 ```
 
 The manifest is what ties them together. Without it the directory is three

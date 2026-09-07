@@ -1,6 +1,6 @@
 import { useState } from 'react';
 
-import { setRecording, type RecordingState } from '../lib/api';
+import { addMark, setRecording, type RecordingState } from '../lib/api';
 import { bytes, duration, rate } from '../lib/format';
 
 type Props = {
@@ -36,6 +36,8 @@ export const RecordingPanel = ({ recording, writeRate, onChanged }: Props) => {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [name, setName] = useState('');
+  const [label, setLabel] = useState('');
+  const [lastMark, setLastMark] = useState<string | null>(null);
 
   const toggle = async () => {
     setBusy(true);
@@ -47,6 +49,22 @@ export const RecordingPanel = ({ recording, writeRate, onChanged }: Props) => {
       setError(cause instanceof Error ? cause.message : String(cause));
     } finally {
       setBusy(false);
+    }
+  };
+
+  // The label is deliberately left in the field after marking. A run of an
+  // experiment is marked over and over with the same condition, and clearing it
+  // would mean retyping it while carrying the rig.
+  const mark = async () => {
+    const text = label.trim();
+    if (!text) return;
+    setError(null);
+    try {
+      await addMark(text);
+      setLastMark(text);
+      onChanged();
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause));
     }
   };
 
@@ -82,11 +100,38 @@ export const RecordingPanel = ({ recording, writeRate, onChanged }: Props) => {
         </div>
       ) : null}
 
+      {recording.recording ? (
+        <div className="field" style={{ marginTop: 8 }}>
+          <input
+            type="text"
+            value={label}
+            placeholder="what is happening (Enter to mark)"
+            onChange={(event) => setLabel(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter') void mark();
+            }}
+          />
+          <button onClick={() => void mark()} disabled={!label.trim()}>
+            Mark
+          </button>
+        </div>
+      ) : null}
+
       <div className="rows" style={{ marginTop: 12 }}>
         <Row label="session" value={recording.session_id ?? '-'} />
         <Row label="elapsed" value={duration(recording.seconds)} />
         <Row label="written" value={bytes(recording.size_bytes)} />
         <Row label="rate" value={rate(writeRate)} />
+        {recording.recording || recording.marks > 0 ? (
+          <Row
+            label="marks"
+            value={
+              lastMark
+                ? `${recording.marks} (last: ${lastMark})`
+                : String(recording.marks)
+            }
+          />
+        ) : null}
       </div>
 
       {video ? (

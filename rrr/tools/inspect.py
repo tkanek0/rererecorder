@@ -33,6 +33,7 @@ from rrr.timeline import (
     AudioTimeline,
     SessionManifest,
     SessionPaths,
+    read_events,
     read_manifest,
 )
 from rrr.video import ArchiveSource, StreamError
@@ -108,6 +109,7 @@ def main(argv: list[str] | None = None) -> int:
     imu = _check_imu(paths, manifest, video, check)
     overlap = _check_overlap(audio, video, manifest, check)
     doa = _check_doa(paths, audio, check)
+    marks = _check_events(paths, audio, video, check)
 
     if args.json:
         json.dump(
@@ -118,6 +120,7 @@ def main(argv: list[str] | None = None) -> int:
                 "imu": imu,
                 "overlap": overlap,
                 "doa": doa,
+                "marks": marks,
                 "problems": check.problems,
                 "notes": check.notes,
             },
@@ -127,7 +130,7 @@ def main(argv: list[str] | None = None) -> int:
         )
         print()
     else:
-        _print(manifest, audio, video, imu, overlap, doa, check)
+        _print(manifest, audio, video, imu, overlap, doa, marks, check)
 
     return 1 if check.problems else 0
 
@@ -578,10 +581,63 @@ def _check_doa(
     return result
 
 
+def _check_events(
+    paths: SessionPaths,
+    audio: dict[str, object] | None,
+    video: dict[str, object] | None,
+    check: Check,
+) -> dict[str, object] | None:
+    """Check the marks fall inside the recording they describe.
+
+    Args:
+        paths: Where the session lives.
+        audio: What the audio check measured.
+        video: What the video check measured.
+        check: Where findings go.
+
+    Returns:
+        What was measured, or None if nobody marked anything.
+
+    A mark outside both tracks means the sidecar belongs to a different session
+    or the clocks disagree, and either way it cannot be used to say what a
+    stretch of the recording was.
+    """
+    try:
+        events = read_events(paths.events)
+    except ValueError as error:
+        check.fail(f"unreadable mark: {error}")
+        return None
+    if not events:
+        return None
+
+    times = [event.monotonic for event in events]
+    result: dict[str, object] = {
+        "marks": len(events),
+        "first_monotonic": times[0],
+        "last_monotonic": times[-1],
+        "labels": [event.label for event in events],
+    }
+
+    bounds = [
+        track
+        for track in (audio, video)
+        if track is not None and "first_monotonic" in track
+    ]
+    if bounds:
+        first = min(float(track["first_monotonic"]) for track in bounds)
+        last = max(float(track["last_monotonic"]) for track in bounds)
+        outside = [t for t in times if t < first or t > last]
+        if outside:
+            check.fail(
+                f"{len(outside)} of {len(times)} marks fall outside the recording"
+            )
+    return result
+
+
 # -- output -------------------------------------------------------------------
 
 
-def _print(manifest, audio, video, imu, overlap, doa, check: Check) -> None:
+def _print(manifest, audio, video, imu, overlap, doa, marks, check: Check) -> None:
     """Write the findings for a person to read."""
     print(f"session {manifest.session_id}")
     if manifest.started_at is not None:
@@ -674,6 +730,16 @@ def _print(manifest, audio, video, imu, overlap, doa, check: Check) -> None:
                 "  offset          NOT MEASURED - the tracks share a clock but "
                 "their absolute alignment is unknown"
             )
+
+    if marks:
+        # Distinct labels, and only a few of them: a session of an experiment
+        # can carry one mark per run, and a line listing forty of them buries
+        # the checks around it.
+        distinct = list(dict.fromkeys(marks["labels"]))
+        shown = ", ".join(distinct[:5])
+        if len(distinct) > 5:
+            shown += f", and {len(distinct) - 5} more"
+        print(f"  marks           {marks['marks']} ({shown})")
 
     for note in check.notes:
         print(f"  note            {note}")

@@ -33,6 +33,7 @@ from __future__ import annotations
 import collections
 import logging
 import math
+import sys
 import threading
 import time
 
@@ -53,6 +54,83 @@ logger = logging.getLogger(__name__)
 
 #: Scale from int16 to the [-1, 1] convention every processor works in.
 _INT16_SCALE = 1.0 / 32768.0
+
+#: How many valid (non-missing) blocks to average `now - reported` over before
+#: deciding whether inputBufferAdcTime shares time.monotonic()'s origin, sits
+#: at a fixed but different one, or is not readable as one clock at all - see
+#: :func:`AudioTap._adc_time`. ~0.3 s at the default 256-frame block size:
+#: long enough that the measured ADC jitter (0.35 ms on this array over ALSA)
+#: cannot masquerade as a fixed offset, short enough not to delay a
+#: recording's own clock noticeably.
+_DOMAIN_CALIBRATION_BLOCKS = 20
+
+#: How much `now - reported` may vary across the calibration window and still
+#: count as "the same clock, at a fixed but unexplained offset" rather than
+#: "not readable as one clock at all". Measured on this array
+#: (docs/windows-native.md 7): WASAPI's offset varied by 5.3 ms std over five
+#: minutes; MME's varied by 5-6 **seconds**, for the blocks it filled in at
+#: all. This sits with a wide margin on both sides of that gap.
+_DOMAIN_STABILITY_S = 0.25
+
+
+# -- COM, for WASAPI's callback mode ------------------------------------------
+#
+# Measured on this array (docs/windows-native.md 7): a callback-mode stream
+# opened on WASAPI from a background thread that has never initialised COM
+# fails outright - `PaErrorCode -9999: Unanticipated host error` /
+# `WdmSyncIoctl: DeviceIoControl GLE = 0x00000490` - while the identical call
+# on the main thread, or in blocking (read) mode on any thread, does not.
+# `IAudioClient::Initialize` for an event-driven (callback) stream is a COM
+# activation and needs an apartment on the calling thread; MME and
+# DirectSound do not use COM this way, so choosing WASAPI (see
+# _PREFERRED_HOST_API below) is what exposed this rather than caused it - the
+# thread this repository already reads the array on simply never had a reason
+# to be COM-aware before.
+#
+# `ctypes.windll` exists only on Windows, so this is genuinely
+# platform-specific - unlike device *selection* above, which needs no branch
+# because it only ever acts on what `sd.query_devices()` itself reports.
+
+if sys.platform == "win32":
+    import ctypes
+
+    #: Apartment model for a plain background thread with no message pump of
+    #: its own - the ordinary choice for a worker thread, as opposed to
+    #: COINIT_APARTMENTTHREADED which a UI thread would use.
+    _COINIT_MULTITHREADED = 0x0
+
+    def _com_initialize() -> bool:
+        """Initialise COM on the calling thread, once, for its lifetime.
+
+        Returns:
+            Whether COM is now usable on this thread. False only if the
+            thread was already in an incompatible apartment state
+            (`RPC_E_CHANGED_MODE`) - logged, not raised, since only WASAPI's
+            callback mode actually needs this; every other path this class
+            has ever used works without it.
+        """
+        result = ctypes.windll.ole32.CoInitializeEx(None, _COINIT_MULTITHREADED)
+        if result < 0:
+            logger.warning(
+                "CoInitializeEx failed (%#x); a WASAPI callback stream on this "
+                "thread may fail as a result",
+                result & 0xFFFFFFFF,
+            )
+            return False
+        return True
+
+    def _com_uninitialize() -> None:
+        """Release what a successful :func:`_com_initialize` set up."""
+        ctypes.windll.ole32.CoUninitialize()
+
+else:
+
+    def _com_initialize() -> bool:
+        """No-op off Windows: COM does not exist there, and nothing needs it."""
+        return False
+
+    def _com_uninitialize() -> None:
+        """No-op off Windows, matching :func:`_com_initialize`."""
 
 
 class DeviceNotFound(RuntimeError):
@@ -118,11 +196,26 @@ class AudioTap:
         self._stamps: collections.deque[BlockStamp] = collections.deque(
             maxlen=math.ceil(self._capacity / max(1, block_size)) + 2
         )
-        #: Whether inputBufferAdcTime has been checked against time.monotonic().
-        self._adc_checked = False
         #: Whether the fallback has already been reported. Logged once: it would
         #: otherwise repeat 15 times a second.
         self._adc_warned = False
+        #: `now - reported`, collected from the first few valid blocks, to
+        #: decide whether inputBufferAdcTime shares time.monotonic()'s origin,
+        #: sits at a fixed but different one, or cannot be trusted as one
+        #: clock at all. See :func:`AudioTap._adc_time`.
+        self._domain_lags: list[float] = []
+        #: Whether that decision has been made yet.
+        self._domain_calibrated = False
+        #: Constant correction added to `reported` once the domain is judged
+        #: stable-but-offset. Zero when no correction is needed (the ordinary
+        #: case) or before calibration finishes.
+        self._adc_offset = 0.0
+        #: Set once calibration finds inputBufferAdcTime not just offset but
+        #: incoherent. Every block after that falls back to the callback
+        #: clock too - the host API does not change mid-stream, so a stamp
+        #: built from an untrustworthy value would still be wrong, just
+        #: undetected after calibration.
+        self._adc_bad_domain = False
 
     # -- lifecycle ---------------------------------------------------------
 
@@ -366,7 +459,7 @@ class AudioTap:
         )
 
     def _adc_time(self, frames: int, reported: float) -> float:
-        """Return a usable ADC time for a block, checking the reported one once.
+        """Return a usable ADC time for a block, calibrating once at the start.
 
         Args:
             frames: Samples in the block.
@@ -376,18 +469,34 @@ class AudioTap:
             The ADC time of the block's first sample, on the same clock as
             ``time.monotonic()``.
 
-        Two things can be wrong with what PortAudio reports, and both are
-        checked here rather than discovered later in a recording that will not
-        line up:
+        Three things can be true of what PortAudio reports, and calibration
+        tells them apart rather than assuming the best case:
 
-        * the field is not filled in at all, which some host APIs do,
-        * it is filled in from a clock with a different origin, which would put
-          every audio sample somewhere else entirely.
+        * it agrees with ``time.monotonic()`` to within about one block, the
+          ordinary case (measured on a ReSpeaker over ALSA: agrees to within
+          0.35 ms) - use it as-is.
+        * it does not agree, but the disagreement is a fixed amount: some host
+          APIs report a real, low-jitter ADC clock on an epoch of their own
+          rather than ``CLOCK_MONOTONIC`` (measured on this array's WASAPI
+          endpoint on Windows: offset by a constant ~3.9 s, stable to 5.3 ms
+          over five minutes - see docs/windows-native.md 7 and
+          docs/decisions.md). Correcting for the fixed offset keeps the ADC
+          clock's own precision instead of discarding it.
+        * it is not filled in at all (``reported <= 0``, some host APIs never
+          fill it), or it disagrees by an amount that is not even stable
+          (measured on this array's MME endpoint: half of all blocks missing,
+          the rest 5-6 **seconds** apart from each other, not just from
+          ``time.monotonic()``) - nothing here can be trusted, so every block
+          times from the callback's own clock instead.
 
-        The check runs on the first block only. It compares the reported time
-        against the callback's own clock, which must agree to within about one
-        block; measured on a ReSpeaker the difference is the block length to
-        within 0.35 ms.
+        Telling the second case from the third needs more than one reading,
+        since a single sample cannot distinguish "a fixed offset" from "one
+        arbitrary value out of an incoherent series". The first
+        :data:`_DOMAIN_CALIBRATION_BLOCKS` blocks that report anything are
+        therefore all timed from the callback clock (as if missing) while
+        their offsets are collected; once calibration decides, every block
+        from then on - including the one that completed calibration - uses
+        whatever that decision says.
         """
         expected_lag = frames / self._rate
         now = time.monotonic()
@@ -402,97 +511,191 @@ class AudioTap:
                 self._adc_warned = True
             return now - expected_lag
 
-        if not self._adc_checked:
-            self._adc_checked = True
-            lag = now - reported
-            # One block of slack either side: the callback runs after the block
-            # is complete, and the scheduler can add to that.
-            if not (-expected_lag <= lag <= 3.0 * expected_lag):
-                logger.warning(
-                    "inputBufferAdcTime is %.3f s from the callback clock, not "
-                    "the expected %.3f s: the two are probably not the same "
-                    "clock. Audio times cannot be compared with video times "
-                    "until this is understood",
-                    lag,
-                    expected_lag,
-                )
-            else:
+        if not self._domain_calibrated:
+            self._domain_lags.append(now - reported)
+            if len(self._domain_lags) < _DOMAIN_CALIBRATION_BLOCKS:
+                return now - expected_lag
+            self._domain_calibrated = True
+            lags = np.array(self._domain_lags)
+            mean_lag = float(lags.mean())
+            spread = float(lags.std())
+            if -expected_lag <= mean_lag <= 3.0 * expected_lag:
                 logger.info(
                     "inputBufferAdcTime agrees with time.monotonic(): "
-                    "callback runs %.1f ms after the block's first sample "
-                    "(block is %.1f ms)",
-                    lag * 1000.0,
+                    "callback runs %.1f ms after the block's first sample on "
+                    "average over %d blocks (block is %.1f ms)",
+                    mean_lag * 1000.0,
+                    len(lags),
                     expected_lag * 1000.0,
                 )
-        return reported
+            elif spread < _DOMAIN_STABILITY_S:
+                self._adc_offset = mean_lag - expected_lag
+                logger.warning(
+                    "inputBufferAdcTime is %.3f s from the callback clock on "
+                    "average over %d blocks, but stable there (+/-%.1f ms): "
+                    "correcting for the fixed offset rather than discarding "
+                    "the ADC clock's own timing",
+                    mean_lag,
+                    len(lags),
+                    spread * 1000.0,
+                )
+            else:
+                self._adc_bad_domain = True
+                logger.warning(
+                    "inputBufferAdcTime is %.3f s from the callback clock over "
+                    "%d blocks and not even stable there (+/-%.3f s): the two "
+                    "are not readable as one clock. Falling back to the "
+                    "callback clock for the rest of this recording, which is "
+                    "%.1f ms coarser",
+                    mean_lag,
+                    len(lags),
+                    spread,
+                    expected_lag * 1000.0,
+                )
+
+        if self._adc_bad_domain:
+            return now - expected_lag
+        return reported + self._adc_offset
 
     def _run(self) -> None:
         logger.info("audio tap starting on device matching %r", self._device)
-        while not self._should_stop():
-            try:
-                index = _resolve_device(self._device, self._channels)
-                with self._lock:
-                    self._error = None
-                    self._overruns = 0
-                # int16 rather than float32: the array's endpoint is 16 bit, so
-                # this is the format on the wire and the conversion is ours to
-                # see rather than PortAudio's to hide.
-                with sd.InputStream(
-                    device=index,
-                    channels=self._channels,
-                    samplerate=self._rate,
-                    dtype="int16",
-                    blocksize=self._block_size,
-                    callback=self._callback,
-                ):
-                    logger.info("capturing %d ch at %d Hz", self._channels, self._rate)
-                    while not self._should_stop():
-                        time.sleep(0.1)
-            except Exception as error:  # noqa: BLE001 - any device failure retries
-                logger.warning("capture failed: %s", error)
-                with self._lock:
-                    self._error = str(error)
-                if self._should_stop():
-                    break
-                time.sleep(config.RECONNECT_DELAY_S)
+        # Once for the thread's whole lifetime, not once per reconnect: it is
+        # the thread that needs an apartment, not any one stream on it.
+        com_ready = _com_initialize()
+        try:
+            while not self._should_stop():
+                try:
+                    index = _resolve_device(self._device, self._channels, self._rate)
+                    with self._lock:
+                        self._error = None
+                        self._overruns = 0
+                    # int16 rather than float32: the array's endpoint is 16 bit, so
+                    # this is the format on the wire and the conversion is ours to
+                    # see rather than PortAudio's to hide.
+                    with sd.InputStream(
+                        device=index,
+                        channels=self._channels,
+                        samplerate=self._rate,
+                        dtype="int16",
+                        blocksize=self._block_size,
+                        callback=self._callback,
+                    ):
+                        logger.info(
+                            "capturing %d ch at %d Hz", self._channels, self._rate
+                        )
+                        while not self._should_stop():
+                            time.sleep(0.1)
+                except Exception as error:  # noqa: BLE001 - any device failure retries
+                    logger.warning("capture failed: %s", error)
+                    with self._lock:
+                        self._error = str(error)
+                    if self._should_stop():
+                        break
+                    time.sleep(config.RECONNECT_DELAY_S)
+        finally:
+            if com_ready:
+                _com_uninitialize()
 
         logger.info("audio tap stopped")
         with self._updated:
             self._updated.notify_all()
 
 
-def _resolve_device(name: str, channels: int) -> int:
+#: PortAudio host API this array's endpoint was measured to behave well
+#: through on Windows: `inputBufferAdcTime` filled on every block, a fixed
+#: (not drifting) offset from `time.monotonic()`, and a fitted rate within
+#: -35.7 ppm of nominal over five minutes with zero overflows. MME and
+#: DirectSound - the other two host APIs Windows exposes the same physical
+#: device through - route audio through the shared-mixer resampler: measured
+#: on the same array, MME left `inputBufferAdcTime` unfilled for half of all
+#: blocks and, for the rest, days away from `time.monotonic()`, and a
+#: recording built from it fitted a rate 1.5x nominal (see
+#: docs/windows-native.md 7 and docs/decisions.md). Named here, but only ever
+#: used alongside a matching reported sample rate below - never on its own -
+#: so a future host API sharing this name on different hardware is not
+#: preferred by name alone.
+_PREFERRED_HOST_API = "Windows WASAPI"
+
+#: How close a reported `default_samplerate` must be to the array's requested
+#: rate to count as "the same rate". Wide enough for float rounding in what
+#: PortAudio reports, far narrower than the gap this is meant to catch (the
+#: shared-mixer rate is a different nominal format entirely, e.g. 44100 Hz
+#: against this array's 16000 Hz).
+_RATE_MATCH_TOLERANCE_HZ = 1.0
+
+
+def _resolve_device(name: str, channels: int, rate: int) -> int:
     """Find the input device whose name contains ``name``.
 
     Args:
         name: Substring to look for, case-insensitively.
         channels: Channel count the caller intends to open.
+        rate: Sample rate the caller intends to open at. Used only to rank
+            candidates that share a name, not to filter them - see below.
 
     Returns:
         The PortAudio device index.
 
     Raises:
-        DeviceNotFound: If nothing matches, or if the match cannot supply the
-            requested channels - which is what a 1-channel firmware looks like
-            from here.
+        DeviceNotFound: If nothing matches, or if every match cannot supply
+            the requested channels - which is what a 1-channel firmware looks
+            like from here.
+
+    A name substring can match more than one device: Windows exposes the same
+    physical array once per host API (MME, DirectSound, WASAPI, WDM-KS), and
+    they are not interchangeable - see :data:`_PREFERRED_HOST_API`. Candidates
+    are ranked rather than just matched, in order:
+
+    1. host API is :data:`_PREFERRED_HOST_API` *and* its `default_samplerate`
+       agrees with ``rate`` - the combination actually measured to behave.
+    2. `default_samplerate` agrees with ``rate``, any host API - covers
+       Linux, where ALSA reports the array's real rate and there is normally
+       only one match anyway, so this tier is where it is chosen.
+    3. the first match in enumeration order, whatever it reports - the
+       previous behaviour, kept as a last resort so an unrecognised platform
+       or host API still gets a device rather than nothing.
+
+    Within a tier, the first match in PortAudio's own enumeration order wins,
+    so the result is deterministic.
     """
     needle = name.lower()
-    for index, device in enumerate(sd.query_devices()):
-        if device["max_input_channels"] <= 0:
-            continue
-        if needle not in str(device["name"]).lower():
-            continue
-        if device["max_input_channels"] < channels:
+    matches = [
+        (index, device)
+        for index, device in enumerate(sd.query_devices())
+        if device["max_input_channels"] > 0 and needle in str(device["name"]).lower()
+    ]
+    usable = [
+        (index, device) for index, device in matches
+        if device["max_input_channels"] >= channels
+    ]
+    if not usable:
+        if matches:
+            _, device = matches[0]
             raise DeviceNotFound(
                 f"{device['name']!r} offers {device['max_input_channels']} input "
                 f"channels, not {channels}. The 1-channel firmware looks like "
                 "this; flash the 6-channel one to get the raw microphones."
             )
-        return index
-    raise DeviceNotFound(
-        f"no capture device whose name contains {name!r}. Plugged in? "
-        "`arecord -l` lists what the system can see."
-    )
+        raise DeviceNotFound(
+            f"no capture device whose name contains {name!r}. Plugged in? "
+            "`arecord -l` lists what the system can see."
+        )
+
+    hostapis = sd.query_hostapis()
+
+    def rate_matches(device: dict) -> bool:
+        return abs(device["default_samplerate"] - rate) < _RATE_MATCH_TOLERANCE_HZ
+
+    def host_api_name(device: dict) -> str:
+        return str(hostapis[device["hostapi"]]["name"])
+
+    for index, device in usable:
+        if host_api_name(device) == _PREFERRED_HOST_API and rate_matches(device):
+            return index
+    for index, device in usable:
+        if rate_matches(device):
+            return index
+    return usable[0][0]
 
 
 def devices() -> list[dict[str, object]]:

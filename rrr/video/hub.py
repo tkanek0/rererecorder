@@ -307,7 +307,7 @@ class FrameHub:
 
     def _publish(self, frame_set: FrameSet) -> None:
         """Store a frame set and wake everyone waiting for one."""
-        now = frame_set.received_at
+        now = frame_set.received_monotonic
         with self._updated:
             self._index += 1
             # The source's own counter restarts with each source; the hub's does

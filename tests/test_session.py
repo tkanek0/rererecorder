@@ -40,7 +40,6 @@ def _manifest(session_id: str = "2026-09-01_17-30-00".replace(":", "-")) -> Sess
             frames=600,
             dropped=0,
             skipped_duplicate=1,
-            skipped_unpaired=4,
             first_monotonic=MONO + 0.1,
             last_monotonic=MONO + 20.0,
             timestamp_domain="global_time",
@@ -273,25 +272,26 @@ def test_listing_of_a_missing_root_is_empty(tmp_path) -> None:
     assert listing(str(tmp_path / "nothing")) == []
 
 
-def test_a_manifest_from_before_the_split_keeps_its_skip_count() -> None:
-    """Reading it as zero would call a lossy recording clean.
-
-    Sessions recorded before the counts were separated have only `skipped`.
-    Real ones exist with 45 in that field.
+def test_a_manifest_from_before_mispairing_was_retired_reads_back_as_undated() -> None:
+    """Old ``skipped`` and ``skipped_unpaired`` counted a reason recording no
+    longer has: a set no longer gets discarded for its streams disagreeing
+    about the moment (decision 21), so neither old field means anything a
+    current recording can produce, and neither is read back.
     """
-    track = VideoTrack.from_dict({"frames": 290, "dropped": 0, "skipped": 45})
-    assert track.skipped == 45
-    assert track.skipped_unpaired == 45
+    track = VideoTrack.from_dict(
+        {"frames": 290, "dropped": 0, "skipped": 45, "skipped_unpaired": 45}
+    )
+    assert track.skipped == 0
+    assert track.skipped_duplicate == 0
     assert track.skipped_warmup == 0
 
 
-def test_split_counts_are_preferred_when_present() -> None:
+def test_skipped_duplicate_is_read_over_a_stale_total() -> None:
     track = VideoTrack.from_dict(
         {
             "frames": 300,
             "skipped": 99,  # stale total, must not win
-            "skipped_unpaired": 1,
-            "skipped_duplicate": 0,
+            "skipped_duplicate": 1,
             "skipped_warmup": 3,
         }
     )

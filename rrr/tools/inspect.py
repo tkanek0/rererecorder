@@ -257,15 +257,23 @@ def _check_video(
             columns = {
                 row[1] for row in connection.execute("PRAGMA table_info(frames)")
             }
-            if "capture_monotonic" not in columns:
+            # Whichever of received_monotonic (v4+), capture_monotonic (v2-v3,
+            # nullable) or received_at (v1+, never null) this file has - see
+            # ArchiveSource._timestamp_columns, which the same detection mirrors.
+            if "received_monotonic" in columns:
+                monotonic_sql = "received_monotonic"
+            elif "capture_monotonic" in columns and "received_at" in columns:
+                monotonic_sql = "COALESCE(capture_monotonic, received_at)"
+            elif "received_at" in columns:
+                monotonic_sql = "received_at"
+            else:
                 check.fail(
-                    "the archive has no capture_monotonic column, so its frames "
+                    "the archive has no capture-time column, so its frames "
                     "cannot be placed against the audio"
                 )
                 return None
             rows = connection.execute(
-                "SELECT idx, timestamp_ms, received_at, capture_monotonic "
-                "FROM frames ORDER BY idx"
+                f"SELECT idx, {monotonic_sql} FROM frames ORDER BY idx"
             ).fetchall()
     except sqlite3.Error as error:
         check.fail(f"the archive cannot be read: {error}")
@@ -283,51 +291,24 @@ def _check_video(
 
     domain = manifest.video.timestamp_domain
     if domain != "global_time":
-        check.fail(
-            f"frame timestamps are in domain {domain!r}, not global_time: they are "
-            f"on the camera's own clock and cannot be compared with audio times"
+        # Not a failure: colour and depth are stamped independently rather
+        # than through one drift-corrected clock, which is coarser but usable
+        # - see docs/windows-native.md. What that costs is left in the data
+        # (color_timestamp_ms, depth_timestamp_ms) for whoever reads it,
+        # rather than decided here.
+        check.note(
+            f"frame timestamps are in domain {domain!r}, not global_time: "
+            f"colour and depth were stamped independently"
         )
 
-    epoch_ms = np.array([row[1] for row in rows], dtype=np.float64)
-    received = np.array([row[2] for row in rows], dtype=np.float64)
-    monotonic = np.array([row[3] for row in rows], dtype=np.float64)
-
+    monotonic = np.array([row[1] for row in rows], dtype=np.float64)
     if np.any(np.isnan(monotonic)):
         check.fail("some frames have no capture time")
         return None
 
-    # The stored conversion must be the one the clock samples describe. Checked
-    # against the offset in force for each frame, so an NTP step during the
-    # recording does not look like a broken conversion.
-    track = manifest.clock_track
-    if track.samples:
-        expected = np.array(
-            [
-                (track.at(m) or track.samples[0]).epoch_ms_to_monotonic(ms)
-                for ms, m in zip(epoch_ms, monotonic, strict=True)
-            ]
-        )
-        worst_ms = float(np.max(np.abs(expected - monotonic))) * 1000.0
-        if worst_ms > 10.0:
-            check.fail(
-                f"stored capture times disagree with the session's clock samples "
-                f"by up to {worst_ms:.1f} ms"
-            )
-    else:
-        worst_ms = None
-        check.note("the session recorded no clock samples to check against")
-
     gaps = np.diff(monotonic)
     if np.any(gaps <= 0):
         check.fail("frame capture times are not increasing")
-
-    # A frame arrives after the instant it describes, never before.
-    lag_ms = (received - monotonic) * 1000.0
-    if np.any(lag_ms < -1.0):
-        check.fail(
-            f"some frames claim to have arrived {abs(float(np.min(lag_ms))):.1f} ms "
-            f"before they were taken"
-        )
 
     span = float(monotonic[-1] - monotonic[0])
     fps = (len(rows) - 1) / span if span > 0 else None
@@ -342,12 +323,6 @@ def _check_video(
             "min": float(np.min(gaps)) * 1000.0,
             "max": float(np.max(gaps)) * 1000.0,
         },
-        "arrival_lag_ms": {
-            "median": float(np.median(lag_ms)),
-            "min": float(np.min(lag_ms)),
-            "max": float(np.max(lag_ms)),
-        },
-        "conversion_worst_ms": worst_ms,
     }
 
 
@@ -668,16 +643,6 @@ def _print(manifest, audio, video, imu, overlap, doa, marks, check: Check) -> No
             f"  frame interval  {gap['median']:.1f} ms median, "
             f"{gap['min']:.1f} min, {gap['max']:.1f} max"
         )
-        lag = video["arrival_lag_ms"]
-        print(
-            f"  arrival lag     {lag['median']:.1f} ms median "
-            f"({lag['min']:.1f} to {lag['max']:.1f})"
-        )
-        if video["conversion_worst_ms"] is not None:
-            print(
-                f"  conversion      agrees with the clock samples to "
-                f"{video['conversion_worst_ms']:.3f} ms"
-            )
 
     if imu is not None:
         rates = ", ".join(

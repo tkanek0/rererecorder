@@ -14,7 +14,6 @@ from collections.abc import Callable
 import numpy as np
 import pytest
 
-from rrr.timeline import ClockPair
 from rrr.video import Calibration, Extrinsics, FrameSet, Intrinsics, Motion
 
 #: The D455 at its native depth resolution, measured on the device.
@@ -88,23 +87,24 @@ def make_frames(calibration: Calibration) -> Callable[..., FrameSet]:
             infrared: The left and right raw images, or None.
 
         Returns:
-            The frame set. Its ``capture_monotonic`` works out to
-            ``MONO + index / FPS`` exactly, which is what assertions can lean on.
+            The frame set. Its ``received_monotonic`` works out to
+            ``MONO + index / FPS + ARRIVAL_LAG_S`` exactly, which is what
+            assertions can lean on. ``color_timestamp_ms`` and
+            ``depth_timestamp_ms`` both carry the same synthetic SDK-reported
+            instant, since nothing in these fixtures exercises a skew between
+            the two.
         """
         capture = index / FPS
-        clock = ClockPair(
-            monotonic=MONO + capture + ARRIVAL_LAG_S,
-            realtime=REAL + capture + ARRIVAL_LAG_S,
-        )
+        sdk_timestamp_ms = (REAL + capture) * 1000.0
         return FrameSet(
             index=index,
-            timestamp_ms=(REAL + capture) * 1000.0,
-            received_at=clock.monotonic,
+            color_timestamp_ms=sdk_timestamp_ms if color is not None else None,
+            depth_timestamp_ms=sdk_timestamp_ms if depth is not None else None,
+            received_monotonic=MONO + capture + ARRIVAL_LAG_S,
             color=color,
             depth=depth,
             calibration=calibration,
             motion=motion,
-            clock=clock,
             timestamp_domain=timestamp_domain,
             color_format=color_format,
             infrared=infrared,

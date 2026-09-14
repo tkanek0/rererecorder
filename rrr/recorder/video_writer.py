@@ -48,8 +48,6 @@ class VideoStats:
             loss, and reported apart from the rest for that reason.
         skipped_duplicate: Sets discarded mid-stream because every frame in
             them had already been delivered.
-        skipped_unpaired: Sets discarded mid-stream because their streams
-            disagreed about when they were taken.
         bytes_written: Size of the archive at the last commit.
         first_monotonic: Capture time of the first set written, or None.
         last_monotonic: Capture time of the last set written.
@@ -65,7 +63,6 @@ class VideoStats:
     motion_overrun: int = 0
     skipped_warmup: int = 0
     skipped_duplicate: int = 0
-    skipped_unpaired: int = 0
     bytes_written: int = 0
     first_monotonic: float | None = None
     last_monotonic: float | None = None
@@ -74,8 +71,8 @@ class VideoStats:
 
     @property
     def skipped(self) -> int:
-        """Sets discarded mid-stream, for either reason. Excludes startup."""
-        return self.skipped_duplicate + self.skipped_unpaired
+        """Sets discarded mid-stream. Excludes startup."""
+        return self.skipped_duplicate
 
     @property
     def span_s(self) -> float | None:
@@ -248,7 +245,6 @@ class VideoWriter:
             snapshot.motion_overrun = getattr(source, "motion_overrun", 0)
             snapshot.skipped_warmup = getattr(source, "skipped_warmup", 0)
             snapshot.skipped_duplicate = getattr(source, "skipped_duplicate", 0)
-            snapshot.skipped_unpaired = getattr(source, "skipped_unpaired", 0)
             snapshot.timestamp_domain = getattr(
                 source, "timestamp_domain", snapshot.timestamp_domain
             )
@@ -268,9 +264,9 @@ class VideoWriter:
         self._drain_motion(writer)
         with self._lock:
             if self._stats.first_monotonic is None:
-                self._stats.first_monotonic = frames.capture_monotonic
+                self._stats.first_monotonic = frames.received_monotonic
                 self._stats.timestamp_domain = frames.timestamp_domain
-            self._stats.last_monotonic = frames.capture_monotonic
+            self._stats.last_monotonic = frames.received_monotonic
 
     def _drain_motion(self, writer: ArchiveWriter) -> None:
         """Move buffered inertial samples into the archive.

@@ -113,9 +113,6 @@ def session(tmp_path: Path) -> SessionPaths:
     ) as writer:
         for n in range(FRAMES):
             capture = MONO + n / FPS
-            clock = ClockPair(
-                monotonic=capture + 0.015, realtime=capture + 0.015 + OFFSET
-            )
             # Two inertial samples per frame, so both streams have rows.
             writer.append_motion(
                 [
@@ -132,14 +129,14 @@ def session(tmp_path: Path) -> SessionPaths:
             assert writer.append(
                 FrameSet(
                     index=n + 1,
-                    timestamp_ms=(capture + OFFSET) * 1000.0,
-                    received_at=clock.monotonic,
+                    color_timestamp_ms=(capture + OFFSET) * 1000.0,
+                    depth_timestamp_ms=(capture + OFFSET) * 1000.0,
+                    received_monotonic=capture,
                     color=rng.integers(0, 2**16, (HEIGHT, WIDTH), dtype=np.uint16),
                     color_format="yuyv",
                     depth=rng.integers(0, 4000, (HEIGHT, WIDTH), dtype=np.uint16),
                     calibration=calibration,
                     motion=None,
-                    clock=clock,
                     timestamp_domain="global_time",
                     infrared=(
                         rng.integers(0, 255, (HEIGHT, WIDTH), dtype=np.uint8),
@@ -442,17 +439,16 @@ def test_a_session_with_only_video_exports(tmp_path) -> None:
     with ArchiveWriter(
         paths.video, calibration=calibration, config=StreamConfig()
     ) as writer:
-        clock = ClockPair(monotonic=MONO, realtime=REAL)
         assert writer.append(
             FrameSet(
                 index=1,
-                timestamp_ms=REAL * 1000.0,
-                received_at=MONO,
+                color_timestamp_ms=None,
+                depth_timestamp_ms=REAL * 1000.0,
+                received_monotonic=MONO,
                 color=None,
                 motion=None,
                 depth=np.zeros((HEIGHT, WIDTH), np.uint16),
                 calibration=calibration,
-                clock=clock,
                 timestamp_domain="global_time",
             ),
             timeout=30.0,

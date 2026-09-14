@@ -88,18 +88,17 @@ def session(tmp_path: Path, calibration: Calibration) -> SessionPaths:
     ) as writer:
         for n in range(frames_total):
             capture = MONO + n / FPS
-            clock = ClockPair(monotonic=capture + 0.015, realtime=capture + 0.015 + OFFSET)
             image = moved if n == MOVEMENT_FRAME else still
             assert writer.append(
                 FrameSet(
                     index=n + 1,
-                    timestamp_ms=(capture + OFFSET) * 1000.0,
-                    received_at=clock.monotonic,
+                    color_timestamp_ms=None,
+                    depth_timestamp_ms=(capture + OFFSET) * 1000.0,
+                    received_monotonic=capture,
                     color=None,
                     depth=np.zeros((HEIGHT, WIDTH), np.uint16),
                     calibration=calibration,
                     motion=None,
-                    clock=clock,
                     timestamp_domain="global_time",
                     infrared=(image, image),
                 ),

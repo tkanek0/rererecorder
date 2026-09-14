@@ -261,12 +261,12 @@ def _find_movement(
 
     Args:
         archive: The open archive.
-        times: ``(index, capture_monotonic)`` for every frame.
+        times: ``(index, received_monotonic)`` for every frame.
         around: The audio impulse's time, to search either side of.
         stream: Which stream to difference.
 
     Returns:
-        ``(index, capture_monotonic, sharpness)`` for the frame where
+        ``(index, received_monotonic, sharpness)`` for the frame where
         successive images differ most, or None if there are too few frames near
         that instant. ``sharpness`` is how many times the median difference the
         peak is - under about 2 means there was no distinct movement.

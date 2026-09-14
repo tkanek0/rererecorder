@@ -155,8 +155,8 @@ def test_stats_track_the_recording_while_it_runs(tmp_path, hub, sets) -> None:
 # -- the time axis ------------------------------------------------------------
 
 
-def test_the_span_and_rate_come_from_capture_times(tmp_path, hub, sets) -> None:
-    """Not from arrival, and not from the mean of one-over-interval."""
+def test_the_span_and_rate_come_from_received_monotonic(tmp_path, hub, sets) -> None:
+    """Not the mean of one-over-interval, which jitter biases high."""
     from .conftest import FPS
 
     path = str(tmp_path / "video.rrdb")
@@ -167,8 +167,8 @@ def test_the_span_and_rate_come_from_capture_times(tmp_path, hub, sets) -> None:
         hub.publish(frames)
     stats = writer.stop(timeout=10.0)
 
-    assert stats.first_monotonic == pytest.approx(published[0].capture_monotonic)
-    assert stats.last_monotonic == pytest.approx(published[-1].capture_monotonic)
+    assert stats.first_monotonic == pytest.approx(published[0].received_monotonic)
+    assert stats.last_monotonic == pytest.approx(published[-1].received_monotonic)
     assert stats.span_s == pytest.approx(15 / FPS, abs=1e-6)
     assert stats.fps == pytest.approx(FPS, abs=1e-6)
 

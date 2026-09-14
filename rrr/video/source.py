@@ -58,21 +58,6 @@ STALL_LIMIT_S = 5.0
 #: reader that has stopped draining is not a reason to stop capturing.
 MOTION_BUFFER = 4096
 
-#: How far apart the depth and colour timestamps of one set may be before the
-#: set is discarded as mispaired.
-#:
-#: Measured on a D455 at 848x480/30, aligned: a properly paired set has the two
-#: within **0.03 ms** - they come off one ASIC. The first five sets after
-#: ``pipeline.start`` do not: the syncer pairs one stale depth frame with five
-#: successive colour frames, and the gap runs 294, 328, 363, 398, 432 ms. A
-#: dropped depth frame mid-stream does the same thing, once, at 32 ms.
-#:
-#: 5 ms therefore separates the two cases by two orders of magnitude in both
-#: directions, which is why the threshold is not delicate. Discarding these
-#: matters more here than in a viewer: a set whose depth is 400 ms older than
-#: its colour is not a moment in time, and writing it into a recording that
-#: claims to be synchronised would be worse than dropping it.
-MAX_PAIR_SKEW_MS = 5.0
 
 
 class StreamError(RuntimeError):
@@ -221,12 +206,10 @@ class LiveSource:
         self._stop = False
         self._metadata_fields: dict[str, tuple[rs.frame_metadata_value, ...]] = {}
         #: Frame numbers of the last set that was yielded, per stream. The SDK
-        #: re-delivers a frame it has already given out - see MAX_PAIR_SKEW_MS -
-        #: and processing one twice would put two entries in a recording for one
-        #: moment.
+        #: re-delivers a frame it has already given out, and processing one
+        #: twice would put two entries in a recording for one moment.
         self._last_numbers: dict[str, int] = {}
         self._skipped_duplicate = 0
-        self._skipped_unpaired = 0
         #: Sets discarded before the first good one was delivered. Counted
         #: apart from the rest because they mean something different: the
         #: syncer settling, not the stream faltering. Measured on a D455, the
@@ -564,6 +547,49 @@ class LiveSource:
                     continue
         return snapshot
 
+    def set_option(self, key: str, value: float) -> None:
+        """Set one sensor option, by the same key :meth:`options` reports it under.
+
+        Args:
+            key: ``"Sensor Name/option_name"`` - e.g.
+                ``"RGB Camera/enable_auto_exposure"``. The sensor name is
+                whatever :meth:`options` reports (``"RGB Camera"``, ``"Stereo
+                Module"``); the option name is the bare SDK enum member, the
+                same string :meth:`options`' own keys use after the ``/``.
+            value: The value to set.
+
+        Raises:
+            StreamError: If the source is not open, no sensor has that name,
+                the option name is not one the SDK knows, or that sensor does
+                not support it.
+
+        A narrow escape hatch, not part of ordinary recording: normal use asks
+        for everything once, through :class:`~.config.StreamConfig`, before
+        ``pipeline.start()``. This exists for a caller that needs to change
+        something mid-stream - so far, only
+        ``tests/perf/frame_number_gaps.py`` toggling auto-exposure to compare
+        against decision 21's AE-on and AE-off measurements.
+        """
+        if self._pipeline is None:
+            raise StreamError("open the source before changing its options")
+        sensor_name, _, option_name = key.partition("/")
+        try:
+            option = rs.option.__members__[option_name]
+        except KeyError:
+            raise StreamError(f"no such option {option_name!r}") from None
+        for sensor in self._pipeline.get_active_profile().get_device().sensors:
+            try:
+                name = str(sensor.get_info(rs.camera_info.name))
+            except RuntimeError:
+                continue
+            if name != sensor_name:
+                continue
+            if not sensor.supports(option):
+                raise StreamError(f"{sensor_name} does not support {option_name}")
+            sensor.set_option(option, value)
+            return
+        raise StreamError(f"no sensor named {sensor_name!r}")
+
     # -- recording ---------------------------------------------------------
 
     @property
@@ -739,23 +765,33 @@ class LiveSource:
         return self._skipped_duplicate
 
     @property
-    def skipped_unpaired(self) -> int:
-        """Sets discarded because their streams disagreed about the moment."""
-        return self._skipped_unpaired
-
-    @property
     def skipped_warmup(self) -> int:
         """Sets discarded before the first good one, while the syncer settled."""
         return self._skipped_warmup
 
     @property
     def skipped(self) -> int:
-        """Sets discarded mid-stream, for either reason.
+        """Sets discarded mid-stream.
 
         Excludes the startup ones: those are not a loss, and counting them here
         would mean every healthy recording reports a non-zero figure.
         """
-        return self._skipped_duplicate + self._skipped_unpaired
+        return self._skipped_duplicate
+
+    @property
+    def frame_numbers(self) -> dict[str, int]:
+        """The most recently delivered set's ``frame_number``, per stream.
+
+        The SDK's own per-stream sequence number, read for duplicate detection
+        in :meth:`_is_new` and exposed here for the same reason decision 21
+        used it: verifying that nothing is actually lost, independent of
+        anything this repository's own timestamp handling decides to keep or
+        discard. Not carried on ``FrameSet`` or written to the archive -
+        deliberately not something a consumer should build recording
+        behaviour on, only diagnose with. See
+        ``tests/perf/frame_number_gaps.py``.
+        """
+        return dict(self._last_numbers)
 
     @staticmethod
     def _enable_global_time(profile: rs.pipeline_profile) -> None:
@@ -920,14 +956,18 @@ class LiveSource:
             clock: Both host clocks, read when it returned.
 
         Returns:
-            The frame set, or None if this composite is not one moment worth
-            keeping. Three things cause that, and all three were observed on a
-            D455 within the first two seconds of streaming:
+            The frame set, or None if this composite is not worth keeping. Two
+            things cause that, both observed on a D455 within the first two
+            seconds of streaming:
 
             * an enabled stream was missing from the composite,
-            * every frame in it had already been delivered,
-            * its streams disagreed about when they were taken by more than
-              ``MAX_PAIR_SKEW_MS``.
+            * every frame in it had already been delivered.
+
+            Colour and depth disagreeing about when they were taken is not one
+            of them: both are kept regardless, each with its own timestamp, so
+            a consumer can judge that for itself rather than have it decided
+            here. See ``FrameSet.color_timestamp_ms`` and
+            ``depth_timestamp_ms``.
         """
         # The newest buffered sample of each stream, for consumers that want one
         # number per frame - a preview, a quick attitude estimate. The samples
@@ -972,7 +1012,7 @@ class LiveSource:
         if self._timestamp_domain == "unknown":
             self._note_timestamp_domain(next(iter(frames.values())))
 
-        if not self._is_new(frames) or not self._is_paired(frames):
+        if not self._is_new(frames):
             return None
 
         metadata: dict[str, dict[str, int]] = {
@@ -1006,14 +1046,18 @@ class LiveSource:
         self._index += 1
         return FrameSet(
             index=self._index,
-            timestamp_ms=float(composite.get_timestamp()),
-            received_at=clock.monotonic,
+            color_timestamp_ms=(
+                float(frames["color"].get_timestamp()) if "color" in frames else None
+            ),
+            depth_timestamp_ms=(
+                float(frames["depth"].get_timestamp()) if "depth" in frames else None
+            ),
+            received_monotonic=clock.monotonic,
             color=color,
             depth=depth,
             calibration=self.calibration,
             motion=motion,
             metadata=metadata or None,
-            clock=clock,
             timestamp_domain=self._timestamp_domain,
             color_format=self._config.color_format,
             infrared=infrared,
@@ -1036,49 +1080,25 @@ class LiveSource:
         self._last_numbers = numbers
         return True
 
-    def _is_paired(self, frames: dict[str, rs.frame]) -> bool:
-        """Whether the frames in this set describe the same moment.
-
-        Args:
-            frames: The set's frames by stream name.
-
-        Returns:
-            False if the streams' timestamps differ by more than
-            ``MAX_PAIR_SKEW_MS``, in which case the set is counted as skipped.
-            Always True when only one stream is enabled - there is nothing to
-            disagree with.
-        """
-        if len(frames) < 2:
-            return True
-        stamps = [frame.get_timestamp() for frame in frames.values()]
-        skew = max(stamps) - min(stamps)
-        if skew > MAX_PAIR_SKEW_MS:
-            self._count_skip("unpaired")
-            logger.debug(
-                "discarding a set whose streams are %.1f ms apart: %s",
-                skew,
-                {name: frame.get_frame_number() for name, frame in frames.items()},
-            )
-            return False
-        return True
-
     def _count_skip(self, reason: str) -> None:
         """Record a discarded set, separating startup from the stream proper.
 
         Args:
-            reason: ``"duplicate"`` or ``"unpaired"``.
+            reason: ``"duplicate"``, the only reason left - a set is no longer
+                discarded for its streams disagreeing about the moment; see
+                ``FrameSet.depth_timestamp_ms`` and ``color_timestamp_ms``,
+                which record that disagreement instead of acting on it.
 
         A set discarded before any set has been delivered is the pipeline
         starting, which every recording does once and which costs nothing. One
-        discarded later is the camera faltering mid-stream, which is worth
-        seeing. They are counted apart so a report can say which happened.
+        discarded later is the camera re-delivering a frame it already gave
+        out, which is worth seeing. They are counted apart so a report can say
+        which happened.
         """
         if self._index == 0:
             self._skipped_warmup += 1
-        elif reason == "duplicate":
-            self._skipped_duplicate += 1
         else:
-            self._skipped_unpaired += 1
+            self._skipped_duplicate += 1
 
     def _note_timestamp_domain(self, frame: rs.frame) -> None:
         """Record what the SDK's timestamps mean, once, and say so in the log.

@@ -79,15 +79,6 @@ class VideoTrack:
             nothing does not report a number that looks like it did.
         skipped_duplicate: Sets discarded mid-stream because every frame in them
             had already been delivered.
-        skipped_unpaired: Sets discarded because their streams disagreed about
-            when they were taken by more than a few milliseconds. Measured on a
-            D455: the first five sets after ``pipeline.start`` pair one stale
-            depth frame with five successive colour frames, 294 to 432 ms apart,
-            and a dropped depth frame later in the stream does the same thing
-            once. Neither is a moment in time, so neither belongs in a recording
-            that claims to be synchronised - but the count belongs in the
-            manifest, because it says how hard the camera was working to keep
-            the streams paired.
         first_monotonic: Capture time of the first frame written, on the
             monotonic axis, or None if nothing was written.
         last_monotonic: Capture time of the last frame written.
@@ -114,7 +105,6 @@ class VideoTrack:
     motion_overrun: int = 0
     skipped_warmup: int = 0
     skipped_duplicate: int = 0
-    skipped_unpaired: int = 0
     first_monotonic: float | None = None
     last_monotonic: float | None = None
     timestamp_domain: str = "unknown"
@@ -122,8 +112,8 @@ class VideoTrack:
 
     @property
     def skipped(self) -> int:
-        """Sets discarded mid-stream, for either reason. Excludes startup."""
-        return self.skipped_duplicate + self.skipped_unpaired
+        """Sets discarded mid-stream. Excludes startup."""
+        return self.skipped_duplicate
 
     @property
     def motion_hz(self) -> float | None:
@@ -153,7 +143,6 @@ class VideoTrack:
             "motion_overrun": self.motion_overrun,
             "skipped_warmup": self.skipped_warmup,
             "skipped_duplicate": self.skipped_duplicate,
-            "skipped_unpaired": self.skipped_unpaired,
             "first_monotonic": self.first_monotonic,
             "last_monotonic": self.last_monotonic,
             "timestamp_domain": self.timestamp_domain,
@@ -164,15 +153,11 @@ class VideoTrack:
     def from_dict(raw: dict[str, object]) -> VideoTrack:
         """Rebuild a track from its stored form.
 
-        A manifest written before the skip counts were split carries only
-        ``skipped``. Reading that as zero would report a session which
-        discarded 45 sets as having discarded none, so the total is put where
-        it came from: every such set observed on a real camera was a
-        mispairing, never a repeat.
+        A manifest written before mispairing was retired as a reason to
+        discard a set may carry ``skipped_unpaired`` - or, older still, a
+        single combined ``skipped`` - neither of which means anything a
+        current recording can produce, so neither is read back.
         """
-        unpaired = raw.get("skipped_unpaired")
-        if unpaired is None:
-            unpaired = raw.get("skipped", 0)
         return VideoTrack(
             file=str(raw.get("file", VIDEO_NAME)),
             frames=int(raw.get("frames", 0)),
@@ -181,7 +166,6 @@ class VideoTrack:
             motion_overrun=int(raw.get("motion_overrun", 0)),
             skipped_warmup=int(raw.get("skipped_warmup", 0)),
             skipped_duplicate=int(raw.get("skipped_duplicate", 0)),
-            skipped_unpaired=int(unpaired),  # type: ignore[arg-type]
             first_monotonic=_optional_float(raw.get("first_monotonic")),
             last_monotonic=_optional_float(raw.get("last_monotonic")),
             timestamp_domain=str(raw.get("timestamp_domain", "unknown")),

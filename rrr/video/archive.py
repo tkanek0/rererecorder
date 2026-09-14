@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import queue
 import sqlite3
 import threading
@@ -37,7 +38,7 @@ from typing import Any
 import cv2
 import numpy as np
 
-from rrr.timeline import ClockPair
+from rrr.timeline import ClockPair, read_clocks
 
 from .config import StreamConfig
 from .source import StreamError
@@ -73,9 +74,20 @@ logger = logging.getLogger(__name__)
 #: data, which is why the version moves rather than the table merely being
 #: added.
 #:
-#: The reader here still opens v1 and v2, because there are real recordings in
-#: those formats and nothing about them became wrong.
-FORMAT_VERSION = 3
+#: 4 replaces ``timestamp_ms`` / ``received_at`` / ``capture_monotonic`` with
+#: ``color_timestamp_ms``, ``depth_timestamp_ms`` and ``received_monotonic``.
+#: The old three columns conflated two different things under one name: which
+#: stream's timestamp a set's single ``timestamp_ms`` held was implicit in
+#: whatever the SDK's own composite frame happened to report, and
+#: ``capture_monotonic`` quietly stopped being more accurate than
+#: ``received_at`` the moment the timestamp domain was not ``global_time`` -
+#: see ``docs/windows-native.md``. Splitting colour and depth's timestamps into
+#: their own columns is also what stopped mismatched sets from needing to be
+#: discarded rather than kept and judged later - see decision 21.
+#:
+#: The reader here still opens v1 through v3, because there are real
+#: recordings in those formats and nothing about them became wrong.
+FORMAT_VERSION = 4
 
 #: The oldest format this reader accepts.
 MIN_READABLE_VERSION = 1
@@ -106,12 +118,39 @@ PNG_LEVEL = 1
 #: whole set - depth, three colour planes and two infrared images - takes 18.3
 #: ms, against the 33.3 ms a 30 fps recorder has. Every codec here was verified
 #: lossless by decoding and comparing, not assumed to be.
+#:
+#: That 18.3 ms figure, and decision 19's 26.2 ms one, were both measured
+#: against synthetic noise, not a real scene - and noise is not representative:
+#: a compressor gives up searching for redundancy in it almost immediately,
+#: where real depth/colour/infrared content has real redundancy to search for.
+#: Measured on real content on a Core Ultra 7 265U: ~29-30 ms/set, at any
+#: worker count from 8 to 12 - the CPU itself, not the thread count, is the
+#: limit. ``"raw"`` (depth) and ``"raw"`` (colour, infrared) exist for a
+#: machine at that ceiling: no compression, so no search, at about 3x the
+#: bytes.
 DEFAULT_CODECS = {"depth": "zlib", "color": "png", "infrared": "png"}
 
 #: Frames buffered between the camera and the encoder threads. Four seconds at
 #: 30 fps: long enough to ride out a stalled disk, short enough that the memory
 #: is bounded. Frames arriving when it is full are counted, not silently lost.
 QUEUE_DEPTH = 120
+
+#: Encoder threads, when the caller does not choose one.
+#:
+#: Four was measured on a 16-core i9-11900K (decisions.md's reference
+#: machine): "two workers clear 60 fps for a lossless colour and depth pair",
+#: and a whole six-image set stops improving past four. That knee is a
+#: property of that CPU, not of OpenCV's GIL release - measured on a 12-core/
+#: 14-thread mobile chip (Windows, Core Ultra 7 265U), four workers held only
+#: 42.2 ms/set against the 33.3 ms budget; eight held 26.2 ms/set. A
+#: ProcessPoolExecutor was slower at every worker count on that machine, so
+#: this stays threads - OpenCV and zlib already release the GIL, and Windows'
+#: process-spawn/IPC cost outweighs what it would buy.
+#:
+#: Scaling with the core count rather than hard-coding a number keeps a
+#: weaker machine out of the knee without asking a stronger one to spawn
+#: threads doing nothing.
+DEFAULT_WORKERS = min(8, max(4, os.cpu_count() or 4))
 
 #: Frames per transaction. Committing each one costs more than the encoding.
 COMMIT_EVERY = 30
@@ -135,18 +174,18 @@ CREATE TABLE IF NOT EXISTS meta(
     value TEXT NOT NULL          -- JSON
 );
 CREATE TABLE IF NOT EXISTS frames(
-    idx               INTEGER PRIMARY KEY,
-    timestamp_ms      REAL NOT NULL, -- epoch ms while the domain is global_time
-    received_at       REAL NOT NULL, -- time.monotonic() when assembled
-    capture_monotonic REAL,          -- timestamp_ms on the monotonic axis
-    depth             BLOB,          -- zlib or PNG16; meta.codecs says which
-    color             BLOB,          -- PNG, only when the colour format is rgb8
-    color_y           BLOB,          -- PNG, luma, when the format is yuyv
-    color_u           BLOB,          -- PNG, chroma at half width
-    color_v           BLOB,          -- PNG, chroma at half width
-    ir1               BLOB,          -- PNG, left infrared
-    ir2               BLOB,          -- PNG, right infrared
-    metadata          TEXT           -- JSON, per stream
+    idx                INTEGER PRIMARY KEY,
+    color_timestamp_ms REAL,          -- colour frame's own get_timestamp(), or NULL if disabled
+    depth_timestamp_ms REAL,          -- depth's (shared by ir1/ir2 - one imager), or NULL if disabled
+    received_monotonic REAL NOT NULL, -- time.monotonic() when the set was assembled
+    depth              BLOB,          -- zlib or PNG16; meta.codecs says which
+    color              BLOB,          -- PNG, only when the colour format is rgb8
+    color_y            BLOB,          -- PNG, luma, when the format is yuyv
+    color_u            BLOB,          -- PNG, chroma at half width
+    color_v            BLOB,          -- PNG, chroma at half width
+    ir1                BLOB,          -- PNG, left infrared
+    ir2                BLOB,          -- PNG, right infrared
+    metadata           TEXT           -- JSON, per stream
 );
 CREATE TABLE IF NOT EXISTS imu(
     id           INTEGER PRIMARY KEY,
@@ -200,6 +239,83 @@ def decode_depth_zlib(blob: bytes, shape: tuple[int, int]) -> np.ndarray:
     if values.size != shape[0] * shape[1]:
         raise StreamError(
             f"depth blob holds {values.size} values, not {shape[0] * shape[1]}"
+        )
+    return values.reshape(shape)
+
+
+def encode_depth_raw(depth: np.ndarray) -> bytes:
+    """Store a raw depth image's bytes directly, no compression at all.
+
+    Args:
+        depth: ``(height, width)`` uint16.
+
+    Returns:
+        The values as little-endian bytes, row-major. Self-description is
+        given up, same as :func:`encode_depth_zlib` - the shape has to come
+        from the archive's calibration.
+
+    Chosen for a machine whose CPU cannot compress real camera content fast
+    enough to hold 30 fps: measured on a Core Ultra 7 265U (real depth,
+    colour and infrared content, not synthetic noise - noise compresses much
+    faster than a real scene does), the full six-image PNG/zlib set costs
+    ~29-30 ms against a 33.3 ms budget, with no headroom for anything else in
+    the pipeline, and more encoder threads do not help - the CPU itself is
+    the limit. Raw trades disk space for reliably clearing that budget: about
+    3x the bytes of the compressed set (see the module docstring), against a
+    recording that otherwise drops frames.
+    """
+    return depth.astype("<u2", copy=False).tobytes()
+
+
+def decode_depth_raw(blob: bytes, shape: tuple[int, int]) -> np.ndarray:
+    """Decode a raw depth blob.
+
+    Args:
+        blob: What :func:`encode_depth_raw` produced.
+        shape: ``(height, width)``, from the recording's calibration.
+
+    Returns:
+        The uint16 array that was written.
+
+    Raises:
+        StreamError: If the blob does not hold exactly that many values.
+    """
+    values = np.frombuffer(blob, dtype="<u2")
+    if values.size != shape[0] * shape[1]:
+        raise StreamError(
+            f"depth blob holds {values.size} values, not {shape[0] * shape[1]}"
+        )
+    return values.reshape(shape)
+
+
+def encode_plane_raw(plane: np.ndarray) -> bytes:
+    """Store an 8-bit plane's bytes directly - infrared, or a YUYV component.
+
+    Args:
+        plane: ``(height, width)`` uint8.
+
+    Returns:
+        The raw bytes, row-major. See :func:`encode_depth_raw` for why this
+        exists: a machine whose PNG encoding of real content cannot clear the
+        30 fps budget, even with more encoder threads.
+    """
+    return plane.tobytes()
+
+
+def decode_plane_raw(blob: bytes, shape: tuple[int, int]) -> np.ndarray:
+    """Decode a raw 8-bit plane blob.
+
+    Args:
+        blob: What :func:`encode_plane_raw` produced.
+        shape: ``(height, width)``, from the recording's calibration.
+
+    Raises:
+        StreamError: If the blob does not hold exactly that many bytes.
+    """
+    values = np.frombuffer(blob, dtype=np.uint8)
+    if values.size != shape[0] * shape[1]:
+        raise StreamError(
+            f"plane blob holds {values.size} bytes, not {shape[0] * shape[1]}"
         )
     return values.reshape(shape)
 
@@ -273,6 +389,35 @@ def encode_color(color: np.ndarray) -> bytes:
     return buffer.tobytes()
 
 
+def encode_color_raw(color: np.ndarray) -> bytes:
+    """Store an rgb8 colour image's bytes directly, no compression.
+
+    Args:
+        color: ``(height, width, 3)`` uint8 RGB.
+
+    Returns:
+        The raw bytes, row-major, RGB order (not BGR - there is no OpenCV
+        conversion to undo on the way back). See :func:`encode_depth_raw`
+        for why this exists.
+    """
+    return color.tobytes()
+
+
+def decode_color_raw(blob: bytes, shape: tuple[int, int]) -> np.ndarray:
+    """Decode a raw rgb8 colour blob.
+
+    Args:
+        blob: What :func:`encode_color_raw` produced.
+        shape: ``(height, width)``, from the recording's calibration.
+    """
+    values = np.frombuffer(blob, dtype=np.uint8)
+    if values.size != shape[0] * shape[1] * 3:
+        raise StreamError(
+            f"colour blob holds {values.size} bytes, not {shape[0] * shape[1] * 3}"
+        )
+    return values.reshape((shape[0], shape[1], 3))
+
+
 def decode_depth(blob: bytes) -> np.ndarray:
     """Decode a depth blob back to the exact array that was written."""
     image = cv2.imdecode(np.frombuffer(blob, np.uint8), cv2.IMREAD_UNCHANGED)
@@ -326,7 +471,8 @@ class ArchiveWriter:
         device: DeviceInfo | None = None,
         options: dict[str, float] | None = None,
         codecs: dict[str, str] | None = None,
-        workers: int = 4,
+        workers: int = DEFAULT_WORKERS,
+        clock_anchor: ClockPair | None = None,
     ) -> None:
         """Open an archive for writing.
 
@@ -336,18 +482,33 @@ class ArchiveWriter:
             config: Stream configuration, stored once.
             device: Identity of the camera, stored once.
             options: Sensor options at the start of the recording.
-            codecs: Overrides for DEFAULT_CODECS. Only ``depth`` has a choice:
-                ``"zlib"`` (faster and smaller) or ``"png16"`` (openable by any
-                image tool).
-            workers: Encoder threads. Four, because a full set is six images
-                and measurement puts the knee there: 25.9 ms per set with two
-                threads, 18.3 with four, no better with six.
+            codecs: Overrides for DEFAULT_CODECS. ``depth`` chooses between
+                ``"zlib"`` (default, faster and smaller than PNG16),
+                ``"png16"`` (openable by any image tool) or ``"raw"`` (no
+                compression at all). ``color`` and ``infrared`` choose between
+                ``"png"`` (default) or ``"raw"``. Raw exists for a CPU that
+                cannot compress real content fast enough to hold 30 fps - see
+                DEFAULT_CODECS.
+            workers: Encoder threads. Defaults to DEFAULT_WORKERS, which scales
+                with the core count - see its docstring for why a fixed number
+                does not travel between machines.
+            clock_anchor: What names the monotonic axis in wall-clock terms,
+                for the inertial samples' own epoch-ms timestamps (see
+                ``MotionSample.capture_monotonic``). None - the default - reads
+                the host's clocks fresh when the first frame arrives, which is
+                what a live recording wants; a test supplies one explicitly so
+                its synthetic frames and its synthetic anchor agree.
         """
         self._path = path
+        self._clock_anchor = clock_anchor
         self._codecs = {**DEFAULT_CODECS, **(codecs or {})}
         self._motion_written = 0
-        if self._codecs["depth"] not in ("zlib", "png16"):
+        if self._codecs["depth"] not in ("zlib", "png16", "raw"):
             raise ValueError(f"unknown depth codec {self._codecs['depth']!r}")
+        if self._codecs["color"] not in ("png", "raw"):
+            raise ValueError(f"unknown color codec {self._codecs['color']!r}")
+        if self._codecs["infrared"] not in ("png", "raw"):
+            raise ValueError(f"unknown infrared codec {self._codecs['infrared']!r}")
         # Frames and inertial samples share one queue, so they share the
         # writer thread, its transactions and its commit interval. Two queues
         # would mean two writers contending for one SQLite connection.
@@ -376,7 +537,7 @@ class ArchiveWriter:
                 "options": options or {},
                 "codecs": self._codecs,
                 "color_format": config.color_format,
-                EXTENSIONS_KEY: ["capture_monotonic"],
+                EXTENSIONS_KEY: [],
                 # Filled in from the first frame: neither is known until one
                 # arrives, and both describe the whole recording.
                 "timestamp_domain": None,
@@ -545,31 +706,29 @@ class ArchiveWriter:
         """Encode one frame set and add it to the open transaction."""
         if self._stats.frames == 0:
             # What the timestamps mean, and one pair of host clocks to name the
-            # monotonic axis in wall-clock terms. Written from the first frame
-            # because the domain is not known until one has arrived.
+            # monotonic axis in wall-clock terms - needed for the inertial
+            # samples in `imu`, which carry only their own epoch-ms timestamp.
+            # Written from the first frame because the domain is not known
+            # until one has arrived; read fresh here rather than carried on
+            # FrameSet, since nothing else needs a whole ClockPair per frame.
             self._write_meta(
                 {
                     "timestamp_domain": frames.timestamp_domain,
-                    "clock_anchor": (
-                        frames.clock.as_dict() if frames.clock is not None else None
-                    ),
+                    "clock_anchor": (self._clock_anchor or read_clocks()).as_dict(),
                 }
             )
         # Every plane at once: the pool is what makes this keep up with 30 fps.
         futures = self._submit(frames)
         self._connection.execute(
             "INSERT OR REPLACE INTO frames"
-            "(idx, timestamp_ms, received_at, capture_monotonic, depth, color,"
-            " color_y, color_u, color_v, ir1, ir2, metadata) "
+            "(idx, color_timestamp_ms, depth_timestamp_ms, received_monotonic,"
+            " depth, color, color_y, color_u, color_v, ir1, ir2, metadata) "
             "VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 frames.index,
-                frames.timestamp_ms,
-                frames.received_at,
-                # Stored rather than recomputed on read: it depends on the clock
-                # offset that was in force for this frame, and that offset is
-                # gone once the recording ends.
-                frames.capture_monotonic,
+                frames.color_timestamp_ms,
+                frames.depth_timestamp_ms,
+                frames.received_monotonic,
                 *(
                     futures[name].result() if futures[name] else None
                     for name in _BLOB_COLUMNS
@@ -617,20 +776,31 @@ class ArchiveWriter:
         """
         futures: dict[str, Any] = dict.fromkeys(_BLOB_COLUMNS)
         if frames.depth is not None:
-            encoder = (
-                encode_depth_zlib if self._codecs["depth"] == "zlib" else encode_depth
-            )
+            if self._codecs["depth"] == "zlib":
+                encoder = encode_depth_zlib
+            elif self._codecs["depth"] == "raw":
+                encoder = encode_depth_raw
+            else:
+                encoder = encode_depth
             futures["depth"] = self._pool.submit(encoder, frames.depth)
+        plane_encoder = (
+            encode_plane_raw if self._codecs["infrared"] == "raw" else encode_plane
+        )
         if frames.color is not None:
             if frames.color_format == "yuyv":
                 planes = split_yuyv(frames.color)
+                color_plane_encoder = (
+                    encode_plane_raw if self._codecs["color"] == "raw" else encode_plane
+                )
                 for column, plane in zip(("color_y", "color_u", "color_v"), planes):
-                    futures[column] = self._pool.submit(encode_plane, plane)
+                    futures[column] = self._pool.submit(color_plane_encoder, plane)
+            elif self._codecs["color"] == "raw":
+                futures["color"] = self._pool.submit(encode_color_raw, frames.color)
             else:
                 futures["color"] = self._pool.submit(encode_color, frames.color)
         if frames.infrared is not None:
-            futures["ir1"] = self._pool.submit(encode_plane, frames.infrared[0])
-            futures["ir2"] = self._pool.submit(encode_plane, frames.infrared[1])
+            futures["ir1"] = self._pool.submit(plane_encoder, frames.infrared[0])
+            futures["ir2"] = self._pool.submit(plane_encoder, frames.infrared[1])
         return futures
 
     def _commit(self) -> None:
@@ -799,7 +969,9 @@ class ArchiveSource:
             row[1]
             for row in connection.execute("PRAGMA table_info(frames)").fetchall()
         }
-        self._has_monotonic = "capture_monotonic" in self._columns
+        self._has_monotonic = bool(
+            self._columns & {"received_monotonic", "capture_monotonic", "received_at"}
+        )
         # Which inertial table this file has: `imu` from v3, `motion` before it.
         self._tables = {
             row[0]
@@ -852,9 +1024,12 @@ class ArchiveSource:
     def has_monotonic(self) -> bool:
         """Whether frames carry a capture time on the monotonic axis.
 
-        False for an archive written by realsense-playground, whose frames can
-        still be read - the pixels and the calibration are identical - but
-        cannot be placed against an audio recording.
+        True for any archive that has at least one of ``received_monotonic``
+        (v4+), ``capture_monotonic`` (v2-v3) or ``received_at`` (every
+        version, including realsense-playground's own) - all three name the
+        same axis the audio is on, just at whatever accuracy that version
+        recorded. False only for a file with none of them, which cannot be
+        placed against an audio recording at all.
         """
         return self._has_monotonic
 
@@ -910,14 +1085,14 @@ class ArchiveSource:
         wanted = (
             set(_BLOB_COLUMNS) if only is None else set(_STREAM_COLUMNS[only])
         )
-        monotonic = "f.capture_monotonic" if self._has_monotonic else "NULL"
+        color_ts, depth_ts, monotonic = self._timestamp_columns()
         blobs = ", ".join(
             f"f.{name}" if name in self._columns and name in wanted else "NULL"
             for name in _BLOB_COLUMNS
         )
         row = self._connection.execute(
-            "SELECT f.idx, f.timestamp_ms, f.received_at, f.metadata,"
-            f"       {monotonic}, {blobs},"
+            f"SELECT f.idx, {color_ts}, {depth_ts}, {monotonic}, f.metadata,"
+            f"       {blobs},"
             f"       {self._motion_columns()} "
             f"FROM frames f {self._motion_join()} WHERE f.idx = ?",
             (index,),
@@ -938,7 +1113,7 @@ class ArchiveSource:
         """
         if self._connection is None:
             raise StreamError("open the archive before reading frames")
-        monotonic = "capture_monotonic" if self._has_monotonic else "NULL"
+        _, _, monotonic = self._timestamp_columns(prefix="")
         row = self._connection.execute(
             f"SELECT MIN(idx), MAX(idx), MIN({monotonic}), MAX({monotonic}) FROM frames"
         ).fetchone()
@@ -1029,8 +1204,8 @@ class ArchiveSource:
         """Every frame's index and capture time, without decoding anything.
 
         Returns:
-            ``(index, capture_monotonic)`` pairs in order. Empty if the archive
-            stores no capture times.
+            ``(index, received_monotonic)`` pairs in order. Empty if the
+            archive stores no capture times.
 
         Raises:
             StreamError: If the archive is not open.
@@ -1043,11 +1218,12 @@ class ArchiveSource:
             raise StreamError("open the archive before reading frames")
         if not self._has_monotonic:
             return []
+        _, _, monotonic = self._timestamp_columns(prefix="")
         return [
             (int(idx), float(t))
             for idx, t in self._connection.execute(
-                "SELECT idx, capture_monotonic FROM frames "
-                "WHERE capture_monotonic IS NOT NULL ORDER BY idx"
+                f"SELECT idx, {monotonic} FROM frames "
+                f"WHERE {monotonic} IS NOT NULL ORDER BY idx"
             )
         ]
 
@@ -1080,22 +1256,29 @@ class ArchiveSource:
             The uint16 array, or None.
 
         Raises:
-            StreamError: If the file claims a zlib depth but records no shape
-                to give it. A zlib blob is values and nothing else, so without
-                the calibration's depth size it cannot be read at all - and
-                guessing would silently produce a differently-shaped image.
+            StreamError: If the file claims a zlib or raw depth but records no
+                shape to give it. Neither blob is self-describing - both are
+                values and nothing else - so without the calibration's depth
+                size it cannot be read at all, and guessing would silently
+                produce a differently-shaped image.
         """
         if blob is None:
             return None
-        if self._codecs.get("depth") != "zlib":
+        codec = self._codecs.get("depth")
+        if codec not in ("zlib", "raw"):
             return decode_depth(blob)
         intrinsics = self.calibration.depth
         if intrinsics is None:
             raise StreamError(
-                f"{self._path} stores zlib depth but no depth calibration, so "
-                "the image shape is unknown"
+                f"{self._path} stores {codec} depth but no depth calibration, "
+                "so the image shape is unknown"
             )
-        return decode_depth_zlib(blob, (intrinsics.height, intrinsics.width))
+        shape = (intrinsics.height, intrinsics.width)
+        return (
+            decode_depth_raw(blob, shape)
+            if codec == "raw"
+            else decode_depth_zlib(blob, shape)
+        )
 
     def _motion_columns(self) -> str:
         """The six inertial columns to select, or nulls in their place.
@@ -1115,19 +1298,53 @@ class ArchiveSource:
             return "LEFT JOIN motion m ON m.idx = f.idx"
         return ""
 
+    def _timestamp_columns(self, prefix: str = "f.") -> tuple[str, str, str]:
+        """The three timestamp expressions to select, whichever version this is.
+
+        Args:
+            prefix: Table alias to qualify column names with, or ``""`` for a
+                query with no join - :meth:`bounds` has neither ``f`` nor
+                anything to alias.
+
+        Returns:
+            ``(color_timestamp_ms, depth_timestamp_ms, received_monotonic)``
+            SQL expressions. A v4 file has all three columns. A v1-v3 file has
+            none of them - only the single, ambiguous ``timestamp_ms`` and
+            ``received_at`` (and ``capture_monotonic`` from partway through
+            v2) - so it reads back with both per-stream timestamps unknown and
+            ``received_monotonic`` taken from whichever of the old columns is
+            the closest equivalent. A reader written against this format never
+            needs to know which version it opened.
+        """
+        color_ts = f"{prefix}color_timestamp_ms" if "color_timestamp_ms" in self._columns else "NULL"
+        depth_ts = f"{prefix}depth_timestamp_ms" if "depth_timestamp_ms" in self._columns else "NULL"
+        if "received_monotonic" in self._columns:
+            monotonic = f"{prefix}received_monotonic"
+        elif "capture_monotonic" in self._columns and "received_at" in self._columns:
+            # capture_monotonic is nullable in v1-v3 - NULL on any row whose
+            # domain was not global_time - so a row with nothing better falls
+            # back to received_at rather than losing its capture time entirely.
+            monotonic = f"COALESCE({prefix}capture_monotonic, {prefix}received_at)"
+        elif "received_at" in self._columns:
+            monotonic = f"{prefix}received_at"
+        else:
+            monotonic = "NULL"
+        return color_ts, depth_ts, monotonic
+
     def _to_frame_set(self, row: tuple, *, realtime: bool = False) -> FrameSet:
         """Turn one selected row into a FrameSet.
 
         Args:
-            row: The columns in the order both queries select them.
-            realtime: Stamp ``received_at`` with now rather than with what was
-                recorded, which is what a paced replay wants.
+            row: The columns in the order both queries select them:
+                ``idx, color_timestamp_ms, depth_timestamp_ms,
+                received_monotonic, metadata, <blobs>, <motion>``.
+            realtime: Stamp ``received_monotonic`` with now rather than with
+                what was recorded, which is what a paced replay wants.
 
         Returns:
             The frame set, with every stream decoded.
         """
-        idx, timestamp_ms, received_at, metadata = row[:4]
-        capture_monotonic = row[4]
+        idx, color_timestamp_ms, depth_timestamp_ms, received_monotonic, metadata = row[:5]
         depth_blob, color_blob, y_blob, u_blob, v_blob, ir1, ir2 = row[5:12]
         accel = row[12:15]
         gyro = row[15:18]
@@ -1142,35 +1359,51 @@ class ArchiveSource:
         color, color_format = self._decode_color(color_blob, y_blob, u_blob, v_blob)
         return FrameSet(
             index=idx,
-            timestamp_ms=timestamp_ms,
-            received_at=time.monotonic() if realtime else received_at,
+            color_timestamp_ms=color_timestamp_ms,
+            depth_timestamp_ms=depth_timestamp_ms,
+            received_monotonic=time.monotonic() if realtime else received_monotonic,
             color=color,
             color_format=color_format,
             depth=self._decode_depth(depth_blob),
-            infrared=(
-                (decode_plane(ir1), decode_plane(ir2))
-                if ir1 is not None and ir2 is not None
-                else None
-            ),
+            infrared=self._decode_infrared(ir1, ir2),
             calibration=self.calibration,
             motion=motion,
             metadata=json.loads(metadata) if metadata else None,
-            # Rebuilt so that FrameSet.capture_monotonic returns the value that
-            # was stored rather than recomputing it from an offset that no
-            # longer applies. The pair holds one instant expressed on both axes,
-            # which is all the conversion needs.
-            clock=(
-                ClockPair(
-                    monotonic=capture_monotonic, realtime=timestamp_ms / 1000.0
-                )
-                if capture_monotonic is not None
-                else None
-            ),
             timestamp_domain=self._meta.get("timestamp_domain") or "unknown",
         )
 
-    @staticmethod
+    def _decode_infrared(
+        self, ir1: bytes | None, ir2: bytes | None
+    ) -> tuple[np.ndarray, np.ndarray] | None:
+        """Decode the infrared pair according to what the recording says it is.
+
+        Args:
+            ir1: Left plane's blob, or None.
+            ir2: Right plane's blob, or None.
+
+        Returns:
+            ``(left, right)``, or None if either is missing.
+
+        Raises:
+            StreamError: If the codec is raw but the recording has no depth
+                calibration - infrared shares the depth sensor's resolution,
+                and a raw blob has no shape of its own to fall back on.
+        """
+        if ir1 is None or ir2 is None:
+            return None
+        if self._codecs.get("infrared") != "raw":
+            return decode_plane(ir1), decode_plane(ir2)
+        intrinsics = self.calibration.depth
+        if intrinsics is None:
+            raise StreamError(
+                f"{self._path} stores raw infrared but no depth calibration, "
+                "so the plane shape is unknown"
+            )
+        shape = (intrinsics.height, intrinsics.width)
+        return decode_plane_raw(ir1, shape), decode_plane_raw(ir2, shape)
+
     def _decode_color(
+        self,
         color: bytes | None,
         y: bytes | None,
         u: bytes | None,
@@ -1179,7 +1412,8 @@ class ArchiveSource:
         """Rebuild the colour image from whichever columns hold it.
 
         Args:
-            color: Single PNG, written when the format was rgb8.
+            color: Single blob (PNG, or raw if the codec says so), written
+                when the format was rgb8.
             y: Luma plane, written when the format was yuyv.
             u: First chroma plane.
             v: Second chroma plane.
@@ -1187,11 +1421,45 @@ class ArchiveSource:
         Returns:
             ``(image, format)``. The format travels with the array because
             nothing about a uint16 array says it holds YUYV.
+
+        Raises:
+            StreamError: If the codec is raw but the recording has no colour
+                calibration to give the planes their shape - a raw blob is
+                bytes and nothing else.
         """
+        raw = self._codecs.get("color") == "raw"
         if y is not None and u is not None and v is not None:
-            return join_yuyv(decode_plane(y), decode_plane(u), decode_plane(v)), "yuyv"
+            if not raw:
+                return join_yuyv(decode_plane(y), decode_plane(u), decode_plane(v)), "yuyv"
+            intrinsics = self.calibration.color
+            if intrinsics is None:
+                raise StreamError(
+                    f"{self._path} stores raw colour but no colour "
+                    "calibration, so the plane shapes are unknown"
+                )
+            width = intrinsics.width
+            half = (intrinsics.height, width // 2)
+            return (
+                join_yuyv(
+                    decode_plane_raw(y, (intrinsics.height, width)),
+                    decode_plane_raw(u, half),
+                    decode_plane_raw(v, half),
+                ),
+                "yuyv",
+            )
         if color is not None:
-            return decode_color(color), "rgb8"
+            if not raw:
+                return decode_color(color), "rgb8"
+            intrinsics = self.calibration.color
+            if intrinsics is None:
+                raise StreamError(
+                    f"{self._path} stores raw colour but no colour "
+                    "calibration, so the image shape is unknown"
+                )
+            return (
+                decode_color_raw(color, (intrinsics.height, intrinsics.width)),
+                "rgb8",
+            )
         return None, "rgb8"
 
     # -- frames ------------------------------------------------------------
@@ -1211,9 +1479,7 @@ class ArchiveSource:
 
         while not self._stop:
             previous: float | None = None
-            monotonic_column = (
-                "f.capture_monotonic" if self._has_monotonic else "NULL"
-            )
+            color_ts, depth_ts, monotonic = self._timestamp_columns()
             # A v1 file has neither the colour planes nor the infrared columns;
             # selecting NULL in their place keeps one code path for both.
             blobs = ", ".join(
@@ -1221,8 +1487,8 @@ class ArchiveSource:
                 for name in _BLOB_COLUMNS
             )
             rows = self._connection.execute(
-                "SELECT f.idx, f.timestamp_ms, f.received_at, f.metadata,"
-                f"       {monotonic_column}, {blobs},"
+                f"SELECT f.idx, {color_ts}, {depth_ts}, {monotonic}, f.metadata,"
+                f"       {blobs},"
                 f"       {self._motion_columns()} "
                 f"FROM frames f {self._motion_join()} ORDER BY f.idx"
             )
@@ -1231,12 +1497,12 @@ class ArchiveSource:
                 if self._stop:
                     return
                 empty = False
-                idx, timestamp_ms, received_at, metadata = row[:4]
+                received_monotonic = row[3]
                 if self._realtime and previous is not None:
-                    delay = (timestamp_ms - previous) / 1000.0
+                    delay = received_monotonic - previous
                     if 0 < delay < 5:
                         time.sleep(delay)
-                previous = timestamp_ms
+                previous = received_monotonic
 
                 yield self._to_frame_set(row, realtime=self._realtime)
             if empty or not self._loop:

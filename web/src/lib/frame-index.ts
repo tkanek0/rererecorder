@@ -3,7 +3,7 @@
 /**
  * The frame whose capture time is nearest an instant.
  *
- * @param times `[index, capture_monotonic]` pairs, in time order.
+ * @param times `[index, received_monotonic]` pairs, in time order.
  * @param at The instant to look up.
  *
  * A binary search rather than a scan: playback asks this on every animation
@@ -35,7 +35,7 @@ export const nearestFrame = (
 /**
  * The capture time of a frame index.
  *
- * @param times `[index, capture_monotonic]` pairs, in time order.
+ * @param times `[index, received_monotonic]` pairs, in time order.
  * @param index The frame to look up.
  */
 export const timeOfFrame = (

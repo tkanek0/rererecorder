@@ -142,8 +142,8 @@ def test_the_time_axis_still_works(written_native) -> None:
 
     with ArchiveSource(path) as archive:
         for original, restored in zip(originals, archive.frames(), strict=True):
-            assert restored.capture_monotonic == pytest.approx(
-                original.capture_monotonic, abs=1e-9
+            assert restored.received_monotonic == pytest.approx(
+                original.received_monotonic, abs=1e-9
             )
 
 
@@ -245,11 +245,12 @@ def test_the_split_separates_luma_from_chroma() -> None:
 def test_startup_discards_are_counted_apart_from_losses() -> None:
     """The first few sets after pipeline.start are the syncer, not a fault.
 
-    Measured on a D455, three sets are discarded within the same millisecond as
-    ``pipeline.start`` - one stale depth frame paired with successive colour
-    frames, 129 to 230 ms apart - and then nothing for the rest of the
-    recording. Counting those as losses made a recording whose frame counters
-    were provably continuous report "skipped 3".
+    A duplicate delivery - the SDK re-handing-out a frame it already gave
+    out - is the one remaining reason a set is discarded (decision 21 removed
+    the other one, streams disagreeing about the moment). Measured on a D455,
+    this happens within the same millisecond as ``pipeline.start`` and then
+    not again for the rest of the recording, so it is worth telling apart from
+    a duplicate found mid-stream, which is a real fault.
 
     Reaches into the source's counter directly because the alternative is a
     camera.
@@ -259,18 +260,15 @@ def test_startup_discards_are_counted_apart_from_losses() -> None:
     source = LiveSource(StreamConfig())
 
     # Before anything has been delivered: the pipeline is still settling.
-    source._count_skip("unpaired")
     source._count_skip("duplicate")
-    assert source.skipped_warmup == 2
+    assert source.skipped_warmup == 1
     assert source.skipped == 0, "startup must not read as a mid-stream loss"
 
     # Once a set has been delivered, the same discard means something else.
     source._index = 1
-    source._count_skip("unpaired")
     source._count_skip("duplicate")
-    assert source.skipped_warmup == 2, "unchanged"
-    assert source.skipped == 2
-    assert source.skipped_unpaired == 1
+    assert source.skipped_warmup == 1, "unchanged"
+    assert source.skipped == 1
     assert source.skipped_duplicate == 1
 
 
@@ -345,13 +343,19 @@ def test_the_measured_rate_is_reported(tmp_path, native) -> None:
 
 def test_samples_carry_the_clock_so_they_can_be_placed(tmp_path, native, make_frames) -> None:
     """An inertial sample is only useful if it lands on the common axis."""
-    from .conftest import OFFSET
+    from rrr.timeline import ClockPair
+
+    from .conftest import MONO, OFFSET, REAL
 
     path = str(tmp_path / "video.rrdb")
     with ArchiveWriter(
-        path, calibration=native, config=StreamConfig(motion=True)
+        path,
+        calibration=native,
+        config=StreamConfig(motion=True),
+        # The anchor is read fresh from the host clocks by default - fixed
+        # here so the assertion below can lean on the synthetic OFFSET.
+        clock_anchor=ClockPair(MONO, REAL),
     ) as writer:
-        # A frame first: the clock anchor is written from it.
         assert writer.append(
             make_frames(index=1, depth=np.zeros((DEPTH_H, DEPTH_W), np.uint16)),
             timeout=10.0,

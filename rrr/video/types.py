@@ -397,33 +397,34 @@ class FrameSet:
     Attributes:
         index: Monotonically increasing counter assigned by whatever produced
             this set. Used to tell a new frame from one already handled.
-        timestamp_ms: Frame timestamp in milliseconds, as
-            ``frame.get_timestamp()`` reports it. What it means depends on
-            ``timestamp_domain``, which is why they travel together.
+        color_timestamp_ms: The colour frame's own ``frame.get_timestamp()``,
+            in milliseconds, or None if colour is disabled. What it means
+            depends on ``timestamp_domain``.
+        depth_timestamp_ms: The depth frame's own ``frame.get_timestamp()``,
+            shared by both infrared frames - depth, IR1 and IR2 come off one
+            imager in one exposure, so the three are never usefully compared
+            against each other by timestamp, only against colour. None if
+            depth is disabled.
 
-            Measured on a D455 with librealsense 2.58.3: the domain is
-            ``global_time`` by default - ``global_time_enabled`` reads 1.0 on
-            all three sensors - and the value is **epoch milliseconds**, fitted
-            by the SDK onto the host's realtime clock. So it is directly
-            comparable with ``time.time() * 1000``, to within about 10 ms: the
-            fit is re-estimated while streaming, and over one minute the offset
-            was observed to move from -11 ms to +7 ms.
-
-            The upstream realsense-playground documents this field as being on
-            a firmware clock, useful for intervals but not for wall time. That
-            is what the SDK reports with global time *disabled*; it is not what
-            this camera does out of the box, and the difference is what makes
-            synchronising with a second device possible at all.
-        received_at: ``time.monotonic()`` when the set was assembled - that is,
-            when ``wait_for_frames`` returned, not when the shutter opened.
-            Measured 2-11 ms after ``timestamp_ms``.
-        clock: Both host clocks, read when this set was assembled. What converts
-            ``timestamp_ms`` onto the monotonic axis the audio is on. None for a
-            set built without one, in which case ``capture_monotonic`` falls
-            back to ``received_at``.
-        timestamp_domain: What the SDK said ``timestamp_ms`` means. Recorded
-            rather than assumed: if it reads ``hardware_clock``, the value is on
-            the device's own clock and cannot be placed against anything else.
+            Comparing this against ``color_timestamp_ms`` is what a consumer
+            uses to judge how far apart the two sensors' frames were taken -
+            including spotting a stale depth frame reused under several
+            colour frames, which shows up as the same value repeating across
+            consecutive sets. Nothing here discards a set for that; it is
+            left in the data to find, not decided for the reader.
+        received_monotonic: ``time.monotonic()`` when this set was assembled -
+            that is, when ``wait_for_frames`` returned. The one field every
+            set is guaranteed to have, and the axis the audio recording is
+            also on (see ``rrr.audio.capture``), so this is what a consumer
+            uses to place a video frame against an audio sample.
+        timestamp_domain: What the SDK said ``color_timestamp_ms`` and
+            ``depth_timestamp_ms`` mean. ``global_time`` means the SDK fitted
+            the device's own clock onto the host's realtime clock, so the two
+            are directly comparable to each other and to wall-clock time.
+            Anything else - measured as ``system_time`` on Windows - means
+            each was stamped independently when its own frame reached the
+            SDK, which is coarser but still usable: see
+            ``docs/windows-native.md``.
         color: The colour image as the sensor produced it, or None if
             disabled. Its shape depends on ``color_format``: ``(height, width)``
             uint16 for ``"yuyv"`` - each element one pixel's two bytes - or
@@ -451,35 +452,14 @@ class FrameSet:
     """
 
     index: int
-    timestamp_ms: float
-    received_at: float
+    received_monotonic: float
     color: np.ndarray | None
     depth: np.ndarray | None
     calibration: Calibration
     motion: Motion | None
+    color_timestamp_ms: float | None = None
+    depth_timestamp_ms: float | None = None
     metadata: dict[str, dict[str, int]] | None = None
-    clock: ClockPair | None = None
     timestamp_domain: str = "unknown"
     color_format: str = "rgb8"
     infrared: tuple[np.ndarray, np.ndarray] | None = None
-
-    @property
-    def capture_monotonic(self) -> float:
-        """When this frame was captured, on the axis everything else uses.
-
-        Returns:
-            The frame's instant as ``time.monotonic()`` would have reported it.
-
-        This is the number to compare with an audio sample's time. It is
-        computed from ``timestamp_ms`` - the camera's own estimate of when the
-        frame happened - rather than from ``received_at``, which includes
-        however long the frame spent in the SDK and the USB stack.
-
-        Falls back to ``received_at`` when the timestamp cannot be placed: no
-        clock pair, or a domain other than ``global_time``. That is a real loss
-        of accuracy - 2 to 11 ms, measured - so it is worth knowing which one
-        happened, and ``timestamp_domain`` says.
-        """
-        if self.clock is not None and self.timestamp_domain == "global_time":
-            return self.clock.epoch_ms_to_monotonic(self.timestamp_ms)
-        return self.received_at

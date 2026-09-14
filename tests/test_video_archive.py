@@ -2,8 +2,10 @@
 
 The lossless round trip is inherited from realsense-playground and re-checked
 here because this repository changed the writer. What is new is the time axis:
-a frame's ``capture_monotonic`` has to survive the file, because that is the
-only thing that can be compared with an audio sample.
+a frame's ``received_monotonic`` has to survive the file, because that is the
+only thing that can be compared with an audio sample - and, since decision 21,
+so must ``color_timestamp_ms`` / ``depth_timestamp_ms``, which a consumer
+uses to judge how far apart the two sensors' own frames were.
 """
 
 from __future__ import annotations
@@ -26,7 +28,7 @@ from rrr.video import (
     StreamConfig,
 )
 
-from .conftest import FPS, HEIGHT, MONO, OFFSET, REAL, WIDTH
+from .conftest import ARRIVAL_LAG_S, FPS, HEIGHT, MONO, OFFSET, REAL, WIDTH
 
 
 @pytest.fixture
@@ -91,25 +93,24 @@ def test_capture_time_survives_the_file(written) -> None:
     with ArchiveSource(path) as archive:
         assert archive.has_monotonic
         for original, restored in zip(originals, archive.frames(), strict=True):
-            assert restored.capture_monotonic == pytest.approx(
-                original.capture_monotonic, abs=1e-9
+            assert restored.received_monotonic == pytest.approx(
+                original.received_monotonic, abs=1e-9
             )
 
 
-def test_capture_time_is_the_frames_own_instant_not_its_arrival(written) -> None:
-    """Independently: frame n was taken at MONO + n/30, and arrival was later.
+def test_each_streams_own_timestamp_survives(written) -> None:
+    """Independently: frame n's colour and depth were both taken at MONO + n/30.
 
-    Checked against the arithmetic rather than against the object it came from,
-    so that a writer storing ``received_at`` in the wrong column cannot pass.
+    Checked against the arithmetic rather than against the object it came
+    from, so that a writer storing the wrong column cannot pass.
     """
     path, _ = written(count=5)
 
     with ArchiveSource(path) as archive:
         for restored in archive.frames():
-            assert restored.capture_monotonic == pytest.approx(
-                MONO + restored.index / FPS, abs=1e-6
-            )
-            assert restored.received_at > restored.capture_monotonic
+            expected_ms = (MONO + restored.index / FPS + OFFSET) * 1000.0
+            assert restored.color_timestamp_ms == pytest.approx(expected_ms, abs=1e-3)
+            assert restored.depth_timestamp_ms == pytest.approx(expected_ms, abs=1e-3)
 
 
 def test_intervals_between_frames_survive(written) -> None:
@@ -117,23 +118,19 @@ def test_intervals_between_frames_survive(written) -> None:
     path, _ = written(count=10)
 
     with ArchiveSource(path) as archive:
-        times = [frames.capture_monotonic for frames in archive.frames()]
+        times = [frames.received_monotonic for frames in archive.frames()]
     gaps = np.diff(times)
     assert gaps == pytest.approx(1.0 / FPS, abs=1e-6)
 
 
 def test_the_domain_and_an_anchor_are_recorded(written) -> None:
-    path, originals = written()
+    path, _ = written(clock_anchor=ClockPair(MONO, REAL))
 
     with ArchiveSource(path) as archive:
         assert archive.timestamp_domain == "global_time"
         anchor = archive.clock_anchor
         assert anchor is not None
         assert anchor.offset == pytest.approx(OFFSET, abs=1e-6)
-        # The anchor is what names the monotonic axis in wall-clock terms.
-        assert anchor.to_realtime(originals[0].capture_monotonic) == pytest.approx(
-            REAL + 1 / FPS, abs=1e-3
-        )
 
 
 def test_a_hardware_clock_recording_says_so(
@@ -155,9 +152,11 @@ def test_a_hardware_clock_recording_says_so(
     with ArchiveSource(path) as archive:
         assert archive.timestamp_domain == "hardware_clock"
         restored = next(archive.frames())
-        # Falls back to arrival, and the domain says why.
-        assert restored.capture_monotonic == pytest.approx(
-            restored.received_at, abs=1e-9
+        # received_monotonic is stored as-is regardless of domain; the domain
+        # itself is what tells a consumer color_timestamp_ms/depth_timestamp_ms
+        # are not to be trusted against anything but each other.
+        assert restored.received_monotonic == pytest.approx(
+            MONO + 1 / FPS + ARRIVAL_LAG_S, abs=1e-9
         )
 
 
@@ -215,12 +214,14 @@ def test_calibration_and_device_survive(written, calibration) -> None:
 # -- compatibility, both ways -------------------------------------------------
 
 
-def test_an_upstream_archive_without_the_column_still_reads(written) -> None:
-    """A file from realsense-playground has no capture_monotonic column.
+def test_an_upstream_archive_without_the_new_columns_still_reads(written) -> None:
+    """A file from realsense-playground (or this repo's own v1-v3) has none of
+    ``color_timestamp_ms`` / ``depth_timestamp_ms`` / ``received_monotonic``.
 
     Its frames are identical - the pixels, the calibration, the inertial samples -
-    and only the time axis is missing. Refusing to open it would be worse than
-    saying so, because there is a lot in such a file that is still correct.
+    and only the newer, finer-grained timing is missing. Refusing to open it
+    would be worse than saying so, because there is a lot in such a file that
+    is still correct.
     """
     path, originals = written(count=3)
 
@@ -230,7 +231,8 @@ def test_an_upstream_archive_without_the_column_still_reads(written) -> None:
         connection.executescript(
             """
             CREATE TABLE old AS
-                SELECT idx, timestamp_ms, received_at, depth, color, metadata
+                SELECT idx, depth_timestamp_ms AS timestamp_ms,
+                       received_monotonic AS received_at, depth, color, metadata
                 FROM frames;
             DROP TABLE frames;
             ALTER TABLE old RENAME TO frames;
@@ -240,37 +242,35 @@ def test_an_upstream_archive_without_the_column_still_reads(written) -> None:
         connection.execute("DELETE FROM meta WHERE key = 'codecs'")
 
     with ArchiveSource(path) as archive:
-        assert archive.has_monotonic is False
+        # received_at alone is still enough to place a frame against audio -
+        # just without color_timestamp_ms/depth_timestamp_ms's finer detail.
+        assert archive.has_monotonic is True
         restored = list(archive.frames())
 
     assert len(restored) == 3
     assert np.array_equal(restored[0].depth, originals[0].depth)
-    assert restored[0].clock is None
-    # Without the column, the best available answer is when the frame arrived.
-    assert restored[0].capture_monotonic == pytest.approx(
-        originals[0].received_at, abs=1e-9
+    assert restored[0].color_timestamp_ms is None
+    assert restored[0].depth_timestamp_ms is None
+    # Without the newer columns, the best available answer is arrival time -
+    # the same value this format always used for received_monotonic anyway.
+    assert restored[0].received_monotonic == pytest.approx(
+        originals[0].received_monotonic, abs=1e-9
     )
-
-
-def test_the_column_is_declared_in_the_meta(written) -> None:
-    """A reader should be able to ask what a file carries, not just try it."""
-    path, _ = written()
-    with ArchiveSource(path) as archive:
-        assert "capture_monotonic" in archive.meta["extensions"]
 
 
 def test_written_files_declare_the_current_version(written) -> None:
     """Each version changed what an existing structure means.
 
-    ``capture_monotonic`` was an added column and left the version alone, on
-    the grounds that an older reader could ignore it. v2 and v3 are different:
-    colour moved to three columns, depth may be zlib rather than PNG, and the
-    per-frame ``motion`` table became ``imu`` at the sensor's own rate. A reader
-    of an older version would misread or silently miss those, so it refuses.
+    v2 and v3 are different: colour moved to three columns, depth may be zlib
+    rather than PNG, and the per-frame ``motion`` table became ``imu`` at the
+    sensor's own rate. v4 replaces ``timestamp_ms`` / ``received_at`` /
+    ``capture_monotonic`` with ``color_timestamp_ms`` / ``depth_timestamp_ms``
+    / ``received_monotonic`` (decision 21). A reader of an older version would
+    misread or silently miss all of these, so it refuses.
     """
     path, _ = written()
     with ArchiveSource(path) as archive:
-        assert archive.meta["format_version"] == 3
+        assert archive.meta["format_version"] == 4
 
 
 def test_the_file_is_readable_as_plain_sql(written) -> None:
@@ -279,16 +279,15 @@ def test_the_file_is_readable_as_plain_sql(written) -> None:
 
     with sqlite3.connect(f"file:{path}?mode=ro", uri=True) as connection:
         rows = connection.execute(
-            "SELECT idx, timestamp_ms, capture_monotonic FROM frames ORDER BY idx"
+            "SELECT idx, color_timestamp_ms, depth_timestamp_ms, received_monotonic "
+            "FROM frames ORDER BY idx"
         ).fetchall()
 
     assert len(rows) == 4
-    for (idx, timestamp_ms, capture_monotonic), original in zip(
+    for (idx, color_ms, depth_ms, monotonic), original in zip(
         rows, originals, strict=True
     ):
         assert idx == original.index
-        assert timestamp_ms == pytest.approx(original.timestamp_ms)
-        # And the two agree with each other through the recorded offset.
-        assert timestamp_ms / 1000.0 - capture_monotonic == pytest.approx(
-            OFFSET, abs=1e-6
-        )
+        assert color_ms == pytest.approx(original.color_timestamp_ms)
+        assert depth_ms == pytest.approx(original.depth_timestamp_ms)
+        assert monotonic == pytest.approx(original.received_monotonic)

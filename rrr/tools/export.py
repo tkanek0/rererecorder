@@ -334,7 +334,7 @@ def _write_frames(
             if (index - start) % stride:
                 continue
 
-            nanoseconds = _ns(frames.capture_monotonic)
+            nanoseconds = _ns(frames.received_monotonic)
             planes = {
                 "color": _rgb(frames),
                 "ir_left": frames.infrared[0] if frames.infrared else None,

@@ -91,25 +91,37 @@ to read rather than the mode that was asked for.
 
 ## Timing
 
-Every frame carries `capture_monotonic`: the camera's own idea of when the frame
-happened, converted onto `CLOCK_MONOTONIC` using the clock offset measured for
-that frame. This is the number to compare against an audio sample.
+Every frame carries `received_monotonic`: `time.monotonic()` when the set was
+assembled - the one field every set is guaranteed to have, and the axis the
+audio recording is also on. This is the number to compare against an audio
+sample.
 
-Also stored per frame, because they answer different questions:
+Also stored per frame, because they answer a different question - not "when
+does this line up with the audio", but "how far apart were colour and depth
+themselves":
 
 | Field | What it means |
 |---|---|
-| `timestamp_ms` | epoch milliseconds as the SDK reports them (`global_time`) |
-| `received_at` | when `wait_for_frames` returned - 16.8 ms later, measured |
-| `capture_monotonic` | `timestamp_ms` on the common axis |
+| `color_timestamp_ms` | the colour frame's own `frame.get_timestamp()`, or None if colour is disabled |
+| `depth_timestamp_ms` | the depth frame's own, shared by both infrared frames - one imager, one exposure |
+| `received_monotonic` | `time.monotonic()` when the set was assembled |
+
+Neither of the first two is discarded, or a set with them, if they disagree
+(decision 21): depth and infrared are validation data for a SLAM pipeline that
+runs on colour, so a consumer reconciles the two after the fact rather than
+have this repository guess at capture time which pairing to keep.
 
 `session.json` holds a `(monotonic, realtime)` pair per second, so wall-clock
 time is recoverable and an NTP step during the recording is visible rather than
 smeared.
 
-The accuracy limit is the camera's, not this code's: librealsense re-fits its
-global-time estimate while streaming, which moved the mapping by about 10 ms over
-one minute of observation.
+When `timestamp_domain` is `global_time` - librealsense's own device-to-host
+clock fit, the default on Linux/RSUSB - `color_timestamp_ms` and
+`depth_timestamp_ms` are also directly comparable to each other and to
+`time.time() * 1000`, re-fitted while streaming (moved the mapping by about
+10 ms over one minute of observation on a D455). Anything else - measured as
+`system_time` on Windows - means each was stamped independently when its own
+frame reached the SDK: see `docs/windows-native.md`.
 
 ## Honesty about losses
 
@@ -119,10 +131,9 @@ they went wrong would let a bad session look fine.
 | Count | Means |
 |---|---|
 | `dropped` | the encoder queue was full: the disk or CPU fell behind, and the recording has holes |
-| `skipped_unpaired` | a set whose streams disagreed by more than 5 ms - discarded, since it is not one moment |
 | `skipped_duplicate` | a set the SDK re-delivered |
 | `skipped_warmup` | discarded before the first good set, while the syncer settled. Two or three every time; not a loss |
-| `timestamp_domain` | anything but `global_time` means the frames cannot be placed against audio |
+| `timestamp_domain` | anything but `global_time` means colour and depth were stamped independently rather than through one drift-corrected clock - see `color_timestamp_ms` / `depth_timestamp_ms` (decision 21) |
 
 ## The page
 
@@ -200,7 +211,7 @@ from rrr.video import ArchiveSource
 
 with ArchiveSource("var/sessions/x/video.rrdb") as archive:
     for frames in archive.frames():
-        frames.capture_monotonic   # the common axis
+        frames.received_monotonic  # the common axis
         frames.depth               # (720, 1280) uint16, raw z16
         frames.color               # (800, 1280) uint16 YUYV
         frames.infrared            # (left, right), each (720, 1280) uint8
@@ -209,7 +220,7 @@ with ArchiveSource("var/sessions/x/video.rrdb") as archive:
 Or without the SDK, since the container is SQLite:
 
 ```sql
-SELECT idx, capture_monotonic, length(depth) FROM frames ORDER BY idx;
+SELECT idx, received_monotonic, length(depth) FROM frames ORDER BY idx;
 ```
 
 For one frame out of the middle, `archive.frame_at(index, only="color")` decodes

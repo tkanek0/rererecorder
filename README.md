@@ -43,8 +43,9 @@ var/sessions/2026-09-02_15-28-36/
     events.jsonl        marks made by hand, saying what was happening
 ```
 
-Every frame carries `capture_monotonic` - the camera's own idea of when it
-happened, on the one axis everything else uses. Check a recording with:
+Every frame carries `received_monotonic` - the one axis everything else uses -
+plus `color_timestamp_ms` and `depth_timestamp_ms`, each sensor's own idea of
+when it happened. Check a recording with:
 
 ```bash
 make inspect DIR=var/sessions/2026-09-02_15-28-36
@@ -60,7 +61,7 @@ from rrr.video import ArchiveSource
 
 with ArchiveSource("var/sessions/x/video.rrdb") as archive:
     for frames in archive.frames():
-        frames.capture_monotonic   # the common axis
+        frames.received_monotonic  # the common axis
         frames.depth               # (720, 1280) uint16, raw z16
         frames.color               # (800, 1280) uint16 YUYV
         frames.infrared            # (left, right), each (720, 1280) uint8
@@ -74,11 +75,12 @@ container is SQLite.
 | | |
 |---|---|
 | [design.md](docs/design.md) | the one idea, module boundaries, why the camera is shared two ways |
-| [decisions.md](docs/decisions.md) | eighteen choices, the alternatives, and the measurement that decided each |
+| [decisions.md](docs/decisions.md) | twenty-three choices, the alternatives, and the measurement that decided each |
 | [features.md](docs/features.md) | what it records, what it reports, and how to drive it |
 | [frame-loss.md](docs/frame-loss.md) | the frame-loss investigation: seven wrong hypotheses and the right one |
+| [windows-native.md](docs/windows-native.md) | recording on Windows, natively and under WSL2: what's fixed, what's still open |
 
-Eighteen decisions, nearly all of them settled by a measurement rather than by
+Twenty-two decisions, nearly all of them settled by a measurement rather than by
 taste.
 
 ## State
@@ -90,5 +92,17 @@ Both devices record together, on one clock, cross-checked. What is left:
   `rrr/tools/calibrate.py`. Until it runs, `session.json` says "unmeasured" rather
   than claiming zero.
 - **A Raspberry Pi** has not run this. Lossless at 54 MB/s will not fit there.
+- **Native Windows records every frame, with no fixed cross-sensor sync.**
+  Media Foundation does not correct colour and depth onto one clock, so each
+  is timestamped independently rather than discarded when they disagree.
+  **Operate with colour alone and the raw codec on this platform** - the one
+  combination measured to hold a lossless 30 fps with zero drops, confirmed
+  over both a 10-minute CLI recording and a 73-minute run through the server
+  with a live preview attached. Adding depth and/or infrared costs more than
+  encoding alone predicts, for reasons not fully isolated - see
+  [windows-native.md](docs/windows-native.md). Which streams are captured and
+  how each is stored (`compressed` or `raw`) can both be chosen from the CLI
+  (`--no-depth`, `--color-codec`, ...) or the page's settings panel, rather
+  than only through `RRR_*` environment variables - decision 23.
 
-Tests: `make check` - 229 of them, none needing a device.
+Tests: `make check` - 252 of them, none needing a device.

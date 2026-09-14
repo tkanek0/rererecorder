@@ -39,7 +39,7 @@ from rrr.timeline import (
     read_events,
     read_manifest,
 )
-from rrr.video import ArchiveSource, FrameHub, LiveSource, StreamError
+from rrr.video import ArchiveSource, FrameHub, LiveSource, StreamConfig, StreamError
 
 from . import config, preview
 
@@ -55,7 +55,6 @@ class State:
     """
 
     def __init__(self) -> None:
-        self.streams = recording_config.DEFAULT_STREAMS
         self.sessions_root = recording_config.SESSIONS_ROOT
         self.hub = FrameHub(
             self._open_camera,
@@ -64,12 +63,12 @@ class State:
         )
         self.recorder = SessionRecorder(
             self.sessions_root,
-            streams=self.streams,
+            streams=recording_config.DEFAULT_STREAMS,
             serial=recording_config.SERIAL,
             record_video=recording_config.RECORD_VIDEO,
             record_audio=recording_config.RECORD_AUDIO,
             record_doa=recording_config.RECORD_DOA,
-            codecs=recording_config.CODECS,
+            codecs=dict(recording_config.CODECS),
             hub=self.hub,
         )
         #: Bytes per second the last recording achieved. Kept so that the
@@ -77,6 +76,23 @@ class State:
         #: what makes free space meaningful, and "measured while recording" is
         #: not an answer to "how long can I record".
         self.last_write_rate: float | None = None
+
+    @property
+    def streams(self) -> StreamConfig:
+        """What the camera is asked for.
+
+        The recorder is the source of truth - reading through it here rather
+        than keeping a second copy is what keeps this and the archive's own
+        metadata from being able to disagree.
+        """
+        return self.recorder.streams
+
+    @property
+    def codecs(self) -> dict[str, str]:
+        """How each stream's archive is encoded. See ``streams`` for why this
+        reads through the recorder rather than keeping its own copy.
+        """
+        return self.recorder.codecs or {}
 
     def _open_camera(self) -> LiveSource:
         """Open the camera. Called by the hub, and again after a failure."""
@@ -441,7 +457,7 @@ def session_frame(session_id: str, index: int, request: Request) -> Response:
         media_type="image/jpeg",
         headers={
             "X-Frame-Index": str(frames.index),
-            "X-Capture-Monotonic": repr(frames.capture_monotonic),
+            "X-Received-Monotonic": repr(frames.received_monotonic),
             # A recorded frame never changes, so the browser may keep it. This
             # is what makes seeking backwards and looping feel immediate.
             "Cache-Control": "public, max-age=3600",
@@ -457,7 +473,7 @@ def session_frames(session_id: str) -> dict[str, Any]:
         session_id: Directory name.
 
     Returns:
-        ``times`` as ``[[index, capture_monotonic], ...]`` in order.
+        ``times`` as ``[[index, received_monotonic], ...]`` in order.
 
     Raises:
         HTTPException: 404 if the session or its archive cannot be read.
@@ -568,42 +584,72 @@ def get_settings() -> dict[str, Any]:
     return {
         "sessions_dir": state.sessions_root,
         "writable": config.ALLOW_SETTINGS_WRITE,
-        # Read-only here: resolution and frame rate are settled when the
-        # pipeline starts, so changing them means restarting the camera. Left
-        # to the environment so that a session's conditions cannot drift
-        # between recordings without someone meaning it.
+        # Resolution and frame rate are settled when the pipeline starts and
+        # stay read-only here; which streams are asked for at all, and how
+        # each is encoded, can both be changed - see _apply_streams and
+        # _apply_codecs.
         "streams": state.streams.as_dict(),
-        "codecs": recording_config.CODECS,
+        "codecs": state.codecs,
     }
 
 
 @app.put("/api/settings")
 async def put_settings(request: Request) -> dict[str, Any]:
-    """Change the recording directory.
+    """Change the recording directory, which streams are captured, or their codecs.
 
     Args:
-        request: JSON body with ``sessions_dir``.
+        request: JSON body with any of:
+            ``sessions_dir``: a directory path.
+            ``streams``: an object with any of ``color``, ``depth``,
+                ``infrared`` as booleans - whether to ask the camera for that
+                stream at all. Resolution and frame rate stay as the
+                environment set them.
+            ``codecs``: an object with any of ``color``, ``depth``,
+                ``infrared`` mapped to ``"compressed"`` or ``"raw"``. See
+                ``rrr.recorder.config.codec_for``.
 
     Returns:
         The settings afterwards.
 
     Raises:
         HTTPException: 403 if changing settings is disabled, 409 while a
-            recording is running - moving the directory mid-session would
-            split it across two disks - and 400 if the path cannot be written.
+            recording is running - a session cannot describe two
+            configurations at once - and 400 if a value cannot be applied.
     """
     if not config.ALLOW_SETTINGS_WRITE:
         raise HTTPException(status_code=403, detail="settings are read-only")
-    if state.recorder.recording:
-        raise HTTPException(
-            status_code=409, detail="stop the recording before moving its directory"
-        )
 
     body = await request.json()
-    wanted = str(body.get("sessions_dir") or "").strip()
+    changing = [key for key in ("sessions_dir", "streams", "codecs") if key in body]
+    if not changing:
+        raise HTTPException(status_code=400, detail="nothing to change")
+    if state.recorder.recording:
+        raise HTTPException(
+            status_code=409,
+            detail="stop the recording before changing settings",
+        )
+
+    if "sessions_dir" in body:
+        await _apply_sessions_dir(body["sessions_dir"])
+    if "streams" in body:
+        _apply_streams(body["streams"])
+    if "codecs" in body:
+        _apply_codecs(body["codecs"])
+    return get_settings()
+
+
+async def _apply_sessions_dir(raw: Any) -> None:
+    """Move where future recordings are written.
+
+    Args:
+        raw: What the request body carried under ``sessions_dir``.
+
+    Raises:
+        HTTPException: 400 if it is empty or cannot be written to.
+    """
+    wanted = str(raw or "").strip()
     if not wanted:
         raise HTTPException(status_code=400, detail="sessions_dir is required")
-
     try:
         await asyncio.to_thread(_check_writable, wanted)
     except OSError as error:
@@ -614,7 +660,85 @@ async def put_settings(request: Request) -> dict[str, Any]:
     # properly - so the root moves rather than the recorder being replaced.
     state.recorder.root = wanted
     logger.info("recordings now go to %s", wanted)
-    return get_settings()
+
+
+_STREAM_KEYS = ("color", "depth", "infrared")
+
+
+def _apply_streams(raw: Any) -> None:
+    """Change which streams the camera is asked for.
+
+    Args:
+        raw: What the request body carried under ``streams`` - a mapping of
+            any of ``color``, ``depth``, ``infrared`` to a boolean. A key left
+            out keeps its current value.
+
+    Raises:
+        HTTPException: 400 for a key this does not recognise, or a
+            combination :class:`~rrr.video.StreamConfig` refuses - most
+            commonly infrared left on with depth turned off, since infrared is
+            the depth sensor's own pair.
+
+    Takes effect the next time the camera opens: the SDK settles resolution
+    and frame rate at pipeline start, so a hub already running - because a
+    preview or a recording holds it open - is restarted, exactly as a
+    resolution change would need.
+    """
+    if not isinstance(raw, dict):
+        raise HTTPException(status_code=400, detail="streams must be an object")
+    unknown = set(raw) - set(_STREAM_KEYS)
+    if unknown:
+        raise HTTPException(
+            status_code=400, detail=f"unknown stream setting: {', '.join(unknown)}"
+        )
+
+    current = state.streams
+    defaults = recording_config.DEFAULT_STREAMS
+    fields: dict[str, Any] = {}
+    if "color" in raw:
+        fields["color"] = defaults.color if raw["color"] else None
+    if "depth" in raw:
+        fields["depth"] = defaults.depth if raw["depth"] else None
+    if "infrared" in raw:
+        fields["infrared"] = bool(raw["infrared"])
+
+    try:
+        updated = current.with_changes(**fields)
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+
+    state.recorder.streams = updated
+    state.hub.restart()
+    logger.info("streams now %s", updated.as_dict())
+
+
+def _apply_codecs(raw: Any) -> None:
+    """Change how each stream's archive is encoded.
+
+    Args:
+        raw: What the request body carried under ``codecs`` - a mapping of any
+            of ``color``, ``depth``, ``infrared`` to ``"compressed"`` or
+            ``"raw"``. A key left out keeps its current codec.
+
+    Raises:
+        HTTPException: 400 for an unknown stream name or codec choice.
+
+    Nothing about the camera restarts for this: the archive is created fresh
+    at the start of each recording, so this only has to be set before the
+    next one begins.
+    """
+    if not isinstance(raw, dict):
+        raise HTTPException(status_code=400, detail="codecs must be an object")
+
+    updated = dict(state.codecs)
+    for stream, choice in raw.items():
+        try:
+            updated[stream] = recording_config.codec_for(stream, choice)
+        except ValueError as error:
+            raise HTTPException(status_code=400, detail=str(error)) from error
+
+    state.recorder.codecs = updated
+    logger.info("codecs now %s", updated)
 
 
 def _check_writable(path: str) -> None:

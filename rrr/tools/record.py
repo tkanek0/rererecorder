@@ -3,6 +3,10 @@
     uv run python -m rrr.tools.record --seconds 20
     uv run python -m rrr.tools.record --session kitchen-test --no-doa
 
+    # color only, uncompressed: the one combination measured to hold 30 fps
+    # with nothing dropped on native Windows - see docs/windows-native.md.
+    uv run python -m rrr.tools.record --no-depth --no-infrared --color-codec raw
+
 The same :class:`~recorder.SessionRecorder` the server uses, with a progress
 line instead of a browser. Nothing here needs the web stack, which is the point:
 a machine that only records does not need one installed.
@@ -18,6 +22,7 @@ import time
 
 from rrr.recorder import SessionRecorder, config
 from rrr.timeline import SessionManifest
+from rrr.video import StreamConfig
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -49,6 +54,35 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--no-video", action="store_true", help="skip the camera")
     parser.add_argument("--no-audio", action="store_true", help="skip the array")
     parser.add_argument("--no-doa", action="store_true", help="skip the direction")
+    parser.add_argument(
+        "--no-color", action="store_true", help="do not capture the colour stream"
+    )
+    parser.add_argument(
+        "--no-depth", action="store_true", help="do not capture the depth stream"
+    )
+    parser.add_argument(
+        "--no-infrared",
+        action="store_true",
+        help="do not capture the infrared pair",
+    )
+    parser.add_argument(
+        "--color-codec",
+        choices=("compressed", "raw"),
+        default=None,
+        help="how the colour stream is stored (default: from the environment)",
+    )
+    parser.add_argument(
+        "--depth-codec",
+        choices=("compressed", "raw"),
+        default=None,
+        help="how the depth stream is stored (default: from the environment)",
+    )
+    parser.add_argument(
+        "--infrared-codec",
+        choices=("compressed", "raw"),
+        default=None,
+        help="how the infrared pair is stored (default: from the environment)",
+    )
     parser.add_argument("--quiet", action="store_true", help="no progress line")
     parser.add_argument(
         "--verbose",
@@ -63,14 +97,20 @@ def main(argv: list[str] | None = None) -> int:
         stream=sys.stderr,
     )
 
+    try:
+        streams = _build_streams(args)
+    except ValueError as error:
+        print(f"could not start recording: {error}", file=sys.stderr)
+        return 1
+
     recorder = SessionRecorder(
         args.root,
-        streams=config.DEFAULT_STREAMS,
+        streams=streams,
         serial=config.SERIAL,
         record_video=config.RECORD_VIDEO and not args.no_video,
         record_audio=config.RECORD_AUDIO and not args.no_audio,
         record_doa=config.RECORD_DOA and not args.no_doa,
-        codecs=config.CODECS,
+        codecs=_build_codecs(args),
     )
 
     try:
@@ -90,6 +130,57 @@ def main(argv: list[str] | None = None) -> int:
 
     _report(manifest, paths.directory)
     return _status(manifest)
+
+
+def _build_streams(args: argparse.Namespace) -> StreamConfig:
+    """Apply --no-color/--no-depth/--no-infrared to the configured defaults.
+
+    Args:
+        args: Parsed command line arguments.
+
+    Returns:
+        The stream configuration to record. Untouched, and so the exact same
+        object, when none of the three flags was given.
+
+    Raises:
+        ValueError: If the combination asked for is not valid - most commonly
+            turning off depth while infrared is still on, since infrared is
+            the depth sensor's own pair. Not checked here: it is
+            ``StreamConfig`` itself that refuses it.
+
+    Skipped entirely when ``--no-video`` is also given: a configuration
+    nothing will use should not be able to fail a recording that does not need
+    it, e.g. ``--no-video --no-color --no-depth``.
+    """
+    streams = config.DEFAULT_STREAMS
+    if args.no_video or not (args.no_color or args.no_depth or args.no_infrared):
+        return streams
+    return streams.with_changes(
+        color=None if args.no_color else streams.color,
+        depth=None if args.no_depth else streams.depth,
+        infrared=False if args.no_infrared else streams.infrared,
+    )
+
+
+def _build_codecs(args: argparse.Namespace) -> dict[str, str]:
+    """Apply --color-codec/--depth-codec/--infrared-codec to the defaults.
+
+    Args:
+        args: Parsed command line arguments.
+
+    Returns:
+        Codec overrides for the archive, one entry per stream - see
+        ``rrr.recorder.config.codec_for``.
+    """
+    codecs = dict(config.CODECS)
+    for stream, choice in (
+        ("color", args.color_codec),
+        ("depth", args.depth_codec),
+        ("infrared", args.infrared_codec),
+    ):
+        if choice is not None:
+            codecs[stream] = config.codec_for(stream, choice)
+    return codecs
 
 
 def _wait(recorder: SessionRecorder, seconds: float, *, quiet: bool) -> None:
@@ -175,8 +266,7 @@ def _report(manifest: SessionManifest, directory: str) -> None:
         if video.skipped:
             print(
                 f"  video skipped   {video.skipped} mid-stream"
-                f" ({video.skipped_unpaired} mispaired,"
-                f" {video.skipped_duplicate} repeated)"
+                f" (already delivered before)"
             )
         if video.skipped_warmup:
             print(

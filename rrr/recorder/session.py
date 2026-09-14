@@ -381,6 +381,50 @@ class SessionRecorder:
         self._root = value
 
     @property
+    def streams(self) -> StreamConfig:
+        """What the camera is asked for."""
+        return self._streams
+
+    @streams.setter
+    def streams(self, value: StreamConfig) -> None:
+        """Change what the next recording asks the camera for.
+
+        Args:
+            value: The new stream configuration.
+
+        Raises:
+            RecorderBusy: If a recording is running. The SDK settles
+                resolution and frame rate at pipeline start, so this takes
+                effect only the next time the camera opens - restart the hub
+                after setting this if one is shared with a preview.
+        """
+        if self.recording:
+            raise RecorderBusy("cannot change streams while recording")
+        self._streams = value
+
+    @property
+    def codecs(self) -> dict[str, str] | None:
+        """Overrides for the archive's default codecs, or None for all of them."""
+        return self._codecs
+
+    @codecs.setter
+    def codecs(self, value: dict[str, str] | None) -> None:
+        """Change how the next recording's archive encodes each stream.
+
+        Args:
+            value: Overrides for the default codecs, or None to use them
+                unchanged. See ``video.archive.DEFAULT_CODECS``.
+
+        Raises:
+            RecorderBusy: If a recording is running - an archive's codecs are
+                fixed for its whole life, so this can only affect one that has
+                not started yet.
+        """
+        if self.recording:
+            raise RecorderBusy("cannot change codecs while recording")
+        self._codecs = value
+
+    @property
     def recording(self) -> bool:
         """Whether a session is currently being written."""
         monitor = self._monitor
@@ -424,7 +468,6 @@ class SessionRecorder:
                     "frames": video.frames,
                     "dropped": video.dropped,
                     "skipped": video.skipped,
-                    "skipped_unpaired": video.skipped_unpaired,
                     "skipped_duplicate": video.skipped_duplicate,
                     "skipped_warmup": video.skipped_warmup,
                     "motion": video.motion,
@@ -494,7 +537,6 @@ class SessionRecorder:
                 motion_overrun=stats.motion_overrun,
                 skipped_warmup=stats.skipped_warmup,
                 skipped_duplicate=stats.skipped_duplicate,
-                skipped_unpaired=stats.skipped_unpaired,
                 first_monotonic=stats.first_monotonic,
                 last_monotonic=stats.last_monotonic,
                 timestamp_domain=stats.timestamp_domain,

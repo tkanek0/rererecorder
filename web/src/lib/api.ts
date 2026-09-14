@@ -54,7 +54,6 @@ export type VideoState = {
   motion: number;
   motion_overrun: number;
   skipped: number;
-  skipped_unpaired: number;
   skipped_duplicate: number;
   skipped_warmup: number;
   fps: number | null;
@@ -177,6 +176,12 @@ export type Settings = {
   codecs: Record<string, string>;
 };
 
+/** A stream whose capture can be turned on or off from the page. */
+export type StreamName = 'color' | 'depth' | 'infrared';
+
+/** How a stream's archive is encoded, without naming the algorithm. */
+export type CodecChoice = 'compressed' | 'raw';
+
 const request = async <T>(path: string, init?: RequestInit): Promise<T> => {
   const response = await fetch(`${controlBase()}${path}`, {
     headers: init?.body ? { 'Content-Type': 'application/json' } : undefined,
@@ -248,6 +253,36 @@ export const setSessionsDir = (sessionsDir: string): Promise<Settings> =>
   request<Settings>('/api/settings', {
     method: 'PUT',
     body: JSON.stringify({ sessions_dir: sessionsDir }),
+  });
+
+/**
+ * Change which streams the camera is asked for.
+ *
+ * @param streams Any of color/depth/infrared to turn on or off; a key left out
+ *   keeps its current value. Takes effect the next time the camera opens -
+ *   refused with 409 while a recording is running.
+ */
+export const setStreams = (
+  streams: Partial<Record<StreamName, boolean>>,
+): Promise<Settings> =>
+  request<Settings>('/api/settings', {
+    method: 'PUT',
+    body: JSON.stringify({ streams }),
+  });
+
+/**
+ * Change how each stream's archive is encoded.
+ *
+ * @param codecs Any of color/depth/infrared mapped to a choice; a key left out
+ *   keeps its current codec. Applies to the next recording - nothing about
+ *   the camera restarts for this.
+ */
+export const setCodecs = (
+  codecs: Partial<Record<StreamName, CodecChoice>>,
+): Promise<Settings> =>
+  request<Settings>('/api/settings', {
+    method: 'PUT',
+    body: JSON.stringify({ codecs }),
   });
 
 /** URL of a live preview, for an `<img>` element. */
@@ -340,7 +375,7 @@ export const loadFrame = async (
     const body = await response.json().catch(() => null);
     throw new Error(body?.detail ?? `${response.status} ${response.statusText}`);
   }
-  const monotonic = response.headers.get('X-Capture-Monotonic');
+  const monotonic = response.headers.get('X-Received-Monotonic');
   return {
     url: URL.createObjectURL(await response.blob()),
     meta: {

@@ -12,6 +12,7 @@ import { PlayerPanel } from './components/player-panel';
 import { PreviewPanel } from './components/preview-panel';
 import { RecordingPanel } from './components/recording-panel';
 import { SessionList } from './components/session-list';
+import { SettingsPanel } from './components/settings-panel';
 import { StoragePanel } from './components/storage-panel';
 
 /** How often the status is polled, in milliseconds. */
@@ -103,6 +104,11 @@ export const App = () => {
           />
           <StoragePanel
             storage={status.storage}
+            settings={settings}
+            recording={status.recording.recording}
+            onChanged={refreshSessions}
+          />
+          <SettingsPanel
             settings={settings}
             recording={status.recording.recording}
             onChanged={refreshSessions}

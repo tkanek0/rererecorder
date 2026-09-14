@@ -17,6 +17,7 @@ import os
 import pytest
 from fastapi.testclient import TestClient
 
+from rrr.recorder import config as recording_config
 from rrr.server import app as server_app
 from rrr.timeline import (
     ClockPair,
@@ -32,6 +33,8 @@ class FakeRecorder:
 
     def __init__(self, root: str) -> None:
         self.root = root
+        self.streams = recording_config.DEFAULT_STREAMS
+        self.codecs = dict(recording_config.CODECS)
         self.recording = False
         self.stopped = 0
         self.marks: list[Event] = []
@@ -143,6 +146,60 @@ def test_an_unwritable_directory_is_refused(client) -> None:
 
 def test_an_empty_directory_is_refused(client) -> None:
     response = client.put("/api/settings", json={"sessions_dir": "   "})
+    assert response.status_code == 400
+
+
+def test_streams_can_be_narrowed_to_color_only(client) -> None:
+    body = client.put(
+        "/api/settings",
+        json={"streams": {"depth": False, "infrared": False}},
+    ).json()
+
+    assert body["streams"]["depth"] is None
+    assert body["streams"]["infrared"] is False
+    assert server_app.state.recorder.streams.depth is None
+
+
+def test_turning_off_depth_alone_is_refused_when_infrared_is_still_on(client) -> None:
+    """Infrared is the depth sensor's own pair; it needs depth enabled."""
+    if not recording_config.DEFAULT_STREAMS.infrared:
+        pytest.skip("infrared is off by configuration in this environment")
+    response = client.put("/api/settings", json={"streams": {"depth": False}})
+    assert response.status_code == 400
+    assert "infrared" in response.json()["detail"]
+
+
+def test_an_unknown_stream_setting_is_refused(client) -> None:
+    response = client.put("/api/settings", json={"streams": {"nope": True}})
+    assert response.status_code == 400
+
+
+def test_streams_cannot_change_while_recording(client) -> None:
+    server_app.state.recorder.recording = True
+    response = client.put("/api/settings", json={"streams": {"depth": False}})
+    assert response.status_code == 409
+
+
+def test_codecs_choose_between_compressed_and_raw(client) -> None:
+    body = client.put("/api/settings", json={"codecs": {"color": "raw"}}).json()
+
+    assert body["codecs"]["color"] == "raw"
+    assert body["codecs"]["depth"] != "raw", "an untouched stream keeps its codec"
+
+
+def test_an_unknown_codec_choice_is_refused(client) -> None:
+    response = client.put("/api/settings", json={"codecs": {"color": "lossy"}})
+    assert response.status_code == 400
+
+
+def test_codecs_cannot_change_while_recording(client) -> None:
+    server_app.state.recorder.recording = True
+    response = client.put("/api/settings", json={"codecs": {"color": "raw"}})
+    assert response.status_code == 409
+
+
+def test_an_empty_settings_body_is_refused(client) -> None:
+    response = client.put("/api/settings", json={})
     assert response.status_code == 400
 
 

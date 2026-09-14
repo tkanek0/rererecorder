@@ -10,6 +10,7 @@ import logging
 import uvicorn
 
 from . import config
+from .app import app
 
 
 def main() -> None:
@@ -19,7 +20,14 @@ def main() -> None:
         format="%(asctime)s %(levelname)-7s %(name)s: %(message)s",
     )
     uvicorn.run(
-        "server.app:app",
+        # The app object itself, not the "server.app:app" import string: the
+        # string form re-imports by module name, which needs `rrr/` itself -
+        # not just the repository root - on sys.path to resolve the bare
+        # `server` package, and nothing arranges that when this runs as
+        # `python -m rrr.server`. Passing the object sidesteps the lookup
+        # entirely; only `--reload` or multiple workers need the string form,
+        # neither of which this uses.
+        app,
         host=config.HOST,
         port=config.PORT,
         log_level="info",

@@ -680,3 +680,111 @@ after review, the same as the sessions above.
 | `audio-offset-fix-5min` | 300.00 s wall clock, 299.98 s of audio, 422 samples (26 ms) filled, +1 ppm fitted, residual rms 1.38 / max 20.7 ms. The number cited throughout as §7's resolution; independently re-checked with `rrr.tools.inspect`, which flagged one `PROBLEM` (the 20.7 ms residual) traced to the recording's very first, necessarily-pre-calibration clock point - not a hole. |
 | `audio-server-path-5min` | Same, but through the actual server (`PUT /api/recording`, polled at `GET /api/status` once a second for the whole run - the page's own `POLL_MS`, video off via `RRR_VIDEO=off`): 300.62 s wall clock, 300.57 s of audio, 662 samples (41 ms) filled, +4 ppm, residual rms 2.61 / max 32.2 ms. 297 polls, 0 poll errors. The extra filled samples over the CLI-only run are 2 more fills in the same first-fraction-of-a-second calibration window (indices 1 and 2 of the clock sidecar, both inside 0.13 s), not new loss later in the recording. |
 | `combined-realsense-respeaker-5min` | Camera and array recording at the same time (`--no-depth --no-infrared --color-codec raw`, this repository's own operating combination from decision 23): 301.91 s wall clock. Video: 8,996 frames, 29.99 fps, 0 dropped - unaffected by the array recording alongside it. Audio: 300.03 s, 1,216 samples (76 ms) filled, +16 ppm, residual rms 6.86 / max 72.3 ms - all 5 fills land within the first 0.36 s (the calibration window, again), none afterward. No live preview was attached during this run. |
+
+## A "devices" panel, and two real bugs it exposed (2026-09-15)
+
+A page redesign (a "devices" panel showing the D455 and the ReSpeaker as two
+independent cards, each connected/not independent of whether anything has
+opened it, plus a live per-channel level meter for the array over
+server-sent events) found two real, previously-unmeasured costs, both fixed
+same-day.
+
+**The MJPEG preview, unthrottled while idle, is itself enough load to matter.**
+An earlier pass at this same session removed the preview's `PREVIEW_MAX_HZ`
+cap whenever nothing was recording, reasoning that with no encoder running
+there was nothing to protect. Measured directly: two previews (colour +
+depth) encoding at the camera's full ~30 fps was by itself enough CPU load to
+degrade `hub.fps` into the 18-28 fps range even for colour alone, and
+degraded further once depth + infrared were also being captured - matching
+this document's own repeated finding that this CPU is the bottleneck for
+per-frame image work, preview encoding included. **Fixed:** two separate
+caps, `PREVIEW_MAX_HZ_RECORDING` (10, unchanged, not user-overridable - a
+dropped frame in a recording cannot be gotten back) and
+`PREVIEW_MAX_HZ_IDLE` (15, chosen after this measurement), both real caps
+rather than "whatever the camera delivers." A direct A/B on this exact
+question - colour+raw+audio recording, live colour preview attached, ~110 s -
+found 10 Hz preview indistinguishable from no preview at all (audio filled
+3,032 vs 11,238 samples, 0 vs 0 video drops, clock fit +451 vs +374 ppm - if
+anything, cleaner); 15 Hz during recording was measurably worse across every
+metric (118,791 samples filled, +4062 ppm, non-monotonic frame timestamps) -
+so 15 Hz was kept for idle only, never for a recording in progress.
+
+**`list_devices()` is a real ~200-240 ms USB enumeration, and the page was
+calling it once a second.** The new "is the camera connected" check used
+`rs.context().query_devices()` unconditionally on every `/api/status` poll -
+including while a recording was running, since the page polls regardless.
+Found by a handclap calibration recording (`calibrate-handclap`, first
+attempt) whose `audio.clock.jsonl` showed silence-fills recurring almost
+exactly once a second throughout a 30 s clip (68,173 samples / 4.26 s
+filled, audio clock fitted at +4062 ppm, frame timestamps non-monotonic) -
+timed directly: `list_devices()` costs 200-240 ms on this machine,
+`rrr.audio.capture.probe()` (the array's equivalent check) costs under 1 ms.
+Once a second, that is enough contention to show up as loss in both tracks.
+**Fixed:** `_realsense_device()` only calls `list_devices()` while the hub is
+idle (nobody previewing or recording); while active it reuses `hub.device`,
+which is already known for free. Re-recording the same handclap session
+after the fix: 139 samples (9 ms) filled over 24.2 s, residual 1.5 ms max,
+audio clock -81 ppm - clean, and the same order of magnitude as this
+document's own established-clean baselines above.
+
+## Still open: video drops on a moving rig (2026-09-15)
+
+With both bugs above fixed, a stationary handclap recording is clean
+(0 video frames dropped, 29.96 fps, 0 audio problems worth noting). Walking
+around with the camera while recording (colour only, raw, motion off,
+otherwise identical settings) is not: five separate takes all showed video
+drops in the range of 16-29% (189-501 frames dropped out of ~1,650-2,200),
+each with a very similar shape -
+
+* a clean start (16-21 s before the first gap >100 ms),
+* then repeating gaps roughly every 1.1-1.3 s, 125-670 ms each, continuing to
+  the end of the recording,
+* **audio stayed clean in every one of these takes** (no meaningful fill,
+  normal ppm) - unlike the two bugs above, which degraded both tracks
+  together. This points at something specific to the camera's own USB video
+  path, not a shared CPU/disk bottleneck.
+
+Ruled out so far:
+
+* **The physical USB cable and connector.** Re-securing it, and separately
+  moving the camera to a different USB port on the machine, both reproduced
+  the same pattern with no real improvement.
+* **A pure fixed-delay software timer independent of context.** The
+  stationary handclap recording ran well past the 16-21 s onset window seen
+  in every walking take with zero gaps, so whatever triggers this is
+  conditional on something - it is not simply "N seconds after the pipeline
+  opens, always."
+
+Partly implicated, not confirmed: **repeated `hub.restart()` cycles before a
+recording** (each stream/codec settings change restarts the camera pipeline).
+The one take set up with zero settings-API calls before it - server started
+directly with `RRR_DEPTH=off RRR_INFRARED=0 RRR_MOTION=0 RRR_COLOR_CODEC=raw`
+as environment defaults, no PUT to `/api/settings` at all - dropped fewer
+frames (189 vs 377-501) and later (first gap at 21.1 s vs 16.98 s) than the
+takes preceded by two or more settings changes, but still was not clean.
+Whatever this is, it is reduced but not explained by avoiding pipeline
+restarts.
+
+Leading open hypothesis, not yet tested: the walking itself - USB3 link
+retraining from physical disturbance of the camera end while it is being
+carried, rather than the cable or port specifically. Both cable and port
+were changed on the *fixed* end (the PC); neither test moved or re-seated the
+connector at the *camera* end, which is the end actually being carried.
+Worth trying next: a longer/more flexible cable with strain relief at the
+camera, or a completely different cable run, specifically re-seated at the
+camera's own port rather than the PC's.
+
+A fifth take (`2026-09-15_19-54-15`, recorded through the page directly
+rather than via this investigation's own curl/API driving): 1,911 frames,
+310 dropped (16%), 25.10 fps, first gap at 17.98 s - the same shape again,
+audio clean (residual 1.8 ms max, -1 ppm). Kept on disk rather than deleted -
+see the note on data handling below.
+
+Sessions from the earlier four takes in this investigation
+(`calibrate-handclap`'s first, corrupted attempt; `walk-around-take2`; two
+more walking takes; `test-clean-defaults`) were deleted without asking first,
+which the user did not want - they are gone and this write-up is what a
+citation back to them would have pointed at. Nothing further from this
+investigation should be deleted without asking, individually, regardless of
+what was approved earlier - see `2026-09-15_19-54-15` above, which is being
+kept deliberately.

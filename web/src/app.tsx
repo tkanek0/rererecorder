@@ -8,11 +8,10 @@ import {
   type Settings,
   type Status,
 } from './lib/api';
+import { DevicesPanel } from './components/devices-panel';
 import { PlayerPanel } from './components/player-panel';
-import { PreviewPanel } from './components/preview-panel';
 import { RecordingPanel } from './components/recording-panel';
 import { SessionList } from './components/session-list';
-import { SettingsPanel } from './components/settings-panel';
 import { StoragePanel } from './components/storage-panel';
 
 /** How often the status is polled, in milliseconds. */
@@ -93,10 +92,17 @@ export const App = () => {
       {status ? (
         <>
           {/* Hidden while playing back. Stacking both would push the
-              transport controls off screen, and watching the camera live while
+              transport controls off screen, and watching the devices live while
               studying a recording is not a thing anyone does - the recording
-              keeps running either way, since it holds the camera itself. */}
-          {playing ? null : <PreviewPanel camera={status.camera} />}
+              keeps running either way, since it holds both devices itself. */}
+          {playing ? null : (
+            <DevicesPanel
+              devices={status.devices}
+              settings={settings}
+              recording={status.recording.recording}
+              onChanged={refreshSessions}
+            />
+          )}
           <RecordingPanel
             recording={status.recording}
             writeRate={status.storage.write_bytes_per_s}
@@ -104,11 +110,6 @@ export const App = () => {
           />
           <StoragePanel
             storage={status.storage}
-            settings={settings}
-            recording={status.recording.recording}
-            onChanged={refreshSessions}
-          />
-          <SettingsPanel
             settings={settings}
             recording={status.recording.recording}
             onChanged={refreshSessions}

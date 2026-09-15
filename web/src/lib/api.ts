@@ -106,11 +106,57 @@ export type StorageStatus = {
   error?: string;
 };
 
+/**
+ * What the SDK currently sees of the D455, independent of whether a preview
+ * or a recording has opened it.
+ */
+export type RealsenseDeviceStatus = {
+  connected: boolean;
+  device: DeviceInfo | null;
+  /** What is being asked for right now - shown here rather than elsewhere,
+   * since it describes this device rather than the page in general. */
+  streams: StreamConfig;
+  streaming: boolean;
+  fps: number;
+  error: string | null;
+};
+
+/**
+ * What PortAudio currently sees of the array, independent of whether a
+ * recording has opened it.
+ */
+export type RespeakerDeviceStatus = {
+  connected: boolean;
+  name: string | null;
+  host_api: string | null;
+  channels: number | null;
+  rate: number | null;
+  error: string | null;
+  recording: boolean;
+  overruns: number;
+};
+
+/** Whether each device is plugged in right now. */
+export type Devices = {
+  realsense: RealsenseDeviceStatus;
+  respeaker: RespeakerDeviceStatus;
+};
+
 /** Everything the page polls for. */
 export type Status = {
   camera: CameraStatus;
   recording: RecordingState;
   storage: StorageStatus;
+  devices: Devices;
+};
+
+/** One channel's current level, in dBFS, or null for silence. */
+export type AudioLevels = {
+  mix: number | null;
+  mic1: number | null;
+  mic2: number | null;
+  mic3: number | null;
+  mic4: number | null;
 };
 
 /** One finished session, as its manifest describes it. */
@@ -176,8 +222,11 @@ export type Settings = {
   codecs: Record<string, string>;
 };
 
-/** A stream whose capture can be turned on or off from the page. */
+/** A stream whose archive codec can be chosen from the page. */
 export type StreamName = 'color' | 'depth' | 'infrared';
+
+/** Anything the camera can be asked to capture at all, codec or not. */
+export type CaptureName = StreamName | 'motion';
 
 /** How a stream's archive is encoded, without naming the algorithm. */
 export type CodecChoice = 'compressed' | 'raw';
@@ -258,12 +307,12 @@ export const setSessionsDir = (sessionsDir: string): Promise<Settings> =>
 /**
  * Change which streams the camera is asked for.
  *
- * @param streams Any of color/depth/infrared to turn on or off; a key left out
- *   keeps its current value. Takes effect the next time the camera opens -
- *   refused with 409 while a recording is running.
+ * @param streams Any of color/depth/infrared/motion to turn on or off; a key
+ *   left out keeps its current value. Takes effect the next time the camera
+ *   opens - refused with 409 while a recording is running.
  */
 export const setStreams = (
-  streams: Partial<Record<StreamName, boolean>>,
+  streams: Partial<Record<CaptureName, boolean>>,
 ): Promise<Settings> =>
   request<Settings>('/api/settings', {
     method: 'PUT',
@@ -288,6 +337,10 @@ export const setCodecs = (
 /** URL of a live preview, for an `<img>` element. */
 export const previewUrl = (kind: PreviewKind, width = 640): string =>
   `${controlBase()}/stream/${kind}.mjpg?width=${width}`;
+
+/** URL of the live per-channel audio level stream (server-sent events). */
+export const audioLevelsUrl = (): string =>
+  `${controlBase()}/stream/audio-levels`;
 
 /** Fetch one session in full, enough to play it back. */
 export const fetchSession = (sessionId: string): Promise<SessionDetail> =>

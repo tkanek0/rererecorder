@@ -234,6 +234,85 @@ th {
   }
 }
 
+/* -- devices ----------------------------------------------------------- */
+
+/* RealSense above ReSpeaker, each as wide as the panel - not side by side,
+   which left both squeezed into less than half the available width. */
+.device-grid {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: 1fr;
+}
+
+.device-card {
+  display: grid;
+  grid-template-columns: 260px 1fr;
+  align-items: center;
+  gap: 18px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 12px 16px;
+}
+
+/* The capture controls describe the whole device, not just its info column -
+   a third row spanning both, set off from the identity/preview row above. */
+.device-card .capture {
+  grid-column: 1 / -1;
+  margin-top: 4px;
+  padding-top: 10px;
+  border-top: 1px solid var(--line);
+}
+
+.device-card h3 {
+  margin: 0 0 6px;
+  font-size: 13px;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.device-card .meta {
+  color: var(--dim);
+  font-size: 11px;
+  line-height: 1.6;
+}
+
+.device-card .visual.previews {
+  grid-template-columns: 1fr 1fr;
+}
+
+/* The mic radial is a fixed-aspect diagram, not an image filling a frame -
+   centering it in flex rather than stretching it is what keeps it from
+   reading as "a small icon lost in a lot of empty space". */
+.device-card .visual:not(.previews) {
+  display: flex;
+  justify-content: center;
+}
+
+.mic-radial {
+  width: 100%;
+  max-width: 320px;
+  aspect-ratio: 1 / 1;
+  display: block;
+}
+
+.mic-radial circle {
+  transition: r 150ms ease-out, fill 150ms ease-out;
+}
+
+.mic-radial text {
+  fill: var(--dim);
+  font-size: 9px;
+  font-variant-numeric: tabular-nums;
+}
+
+@media (max-width: 700px) {
+  .device-card {
+    grid-template-columns: 1fr;
+  }
+}
+
 /* -- playback -------------------------------------------------------------- */
 
 .player h2 {

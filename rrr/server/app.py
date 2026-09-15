@@ -676,9 +676,9 @@ async def put_settings(request: Request) -> dict[str, Any]:
         request: JSON body with any of:
             ``sessions_dir``: a directory path.
             ``streams``: an object with any of ``color``, ``depth``,
-                ``infrared`` as booleans - whether to ask the camera for that
-                stream at all. Resolution and frame rate stay as the
-                environment set them.
+                ``infrared``, ``motion`` as booleans - whether to ask the
+                camera for that stream at all. Resolution and frame rate stay
+                as the environment set them.
             ``codecs``: an object with any of ``color``, ``depth``,
                 ``infrared`` mapped to ``"compressed"`` or ``"raw"``. See
                 ``rrr.recorder.config.codec_for``.
@@ -737,7 +737,7 @@ async def _apply_sessions_dir(raw: Any) -> None:
     logger.info("recordings now go to %s", wanted)
 
 
-_STREAM_KEYS = ("color", "depth", "infrared")
+_STREAM_KEYS = ("color", "depth", "infrared", "motion")
 
 
 def _apply_streams(raw: Any) -> None:
@@ -745,8 +745,8 @@ def _apply_streams(raw: Any) -> None:
 
     Args:
         raw: What the request body carried under ``streams`` - a mapping of
-            any of ``color``, ``depth``, ``infrared`` to a boolean. A key left
-            out keeps its current value.
+            any of ``color``, ``depth``, ``infrared``, ``motion`` to a
+            boolean. A key left out keeps its current value.
 
     Raises:
         HTTPException: 400 for a key this does not recognise, or a
@@ -776,6 +776,8 @@ def _apply_streams(raw: Any) -> None:
         fields["depth"] = defaults.depth if raw["depth"] else None
     if "infrared" in raw:
         fields["infrared"] = bool(raw["infrared"])
+    if "motion" in raw:
+        fields["motion"] = bool(raw["motion"])
 
     try:
         updated = current.with_changes(**fields)

@@ -184,6 +184,12 @@ def test_an_unknown_stream_setting_is_refused(client) -> None:
     assert response.status_code == 400
 
 
+def test_motion_can_be_turned_off(client) -> None:
+    body = client.put("/api/settings", json={"streams": {"motion": False}}).json()
+    assert body["streams"]["motion"] is False
+    assert server_app.state.recorder.streams.motion is False
+
+
 def test_streams_cannot_change_while_recording(client) -> None:
     server_app.state.recorder.recording = True
     response = client.put("/api/settings", json={"streams": {"depth": False}})

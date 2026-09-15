@@ -60,12 +60,31 @@ PREVIEW_WIDTH = int(os.environ.get("RRR_PREVIEW_WIDTH", "640"))
 #: JPEG quality for the preview.
 JPEG_QUALITY = int(os.environ.get("RRR_JPEG_QUALITY", "80"))
 
-#: Upper bound on preview frame rate.
+#: Upper bound on preview frame rate while a recording is running.
 #:
-#: 10, not 30. The preview is for framing the shot and for noticing that the
-#: depth has gone blank; three times the frames buys none of that and takes CPU
-#: from the encoders that are keeping the recording whole.
-PREVIEW_MAX_HZ = float(os.environ.get("RRR_PREVIEW_MAX_HZ", "10"))
+#: Measured directly rather than assumed (2026-09-15): a colour+raw+audio
+#: recording with a live colour preview attached at 15 Hz filled 118,791
+#: audio samples (7.4 s) over 118.7 s and fitted the audio clock at +4062 ppm,
+#: against 11,238 samples (0.7 s) and +374 ppm with no preview attached at
+#: all over a 176.9 s recording of the same configuration - roughly 16x more
+#: loss with the preview open. The 15 Hz test also showed non-monotonic frame
+#: timestamps and a 320 ms IMU gap that the no-preview run did not. Back to
+#: 10, which is what the 73-minute server-preview-test session in
+#: docs/windows-native.md measured clean for video - but that test had no
+#: audio attached, so 10 Hz is carried forward as the safer prior rather than
+#: itself confirmed clean for this three-way combination.
+PREVIEW_MAX_HZ_RECORDING = float(os.environ.get("RRR_PREVIEW_MAX_HZ_RECORDING", "10"))
+
+#: Upper bound on preview frame rate while nothing is recording.
+#:
+#: Higher than the recording limit, but still a real cap rather than "however
+#: fast the camera delivers" - measured on this machine (see
+#: docs/windows-native.md): two MJPEG previews encoding at the camera's full
+#: ~30 fps is by itself enough CPU load to stall the frame hub once depth and
+#: infrared are also being captured, which reads as the preview freezing
+#: rather than as a smooth 30 fps. 15 Hz is comfortably below where that
+#: happened and still reads as close to real time.
+PREVIEW_MAX_HZ_IDLE = float(os.environ.get("RRR_PREVIEW_MAX_HZ_IDLE", "15"))
 
 #: Depth colour scale defaults. The page overrides these per request.
 DEPTH_NEAR_M = float(os.environ.get("RRR_DEPTH_NEAR_M", "0.3"))

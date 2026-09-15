@@ -871,6 +871,23 @@ def stream(kind: str, request: Request) -> StreamingResponse:
     )
 
 
+def _preview_max_hz() -> float:
+    """The preview's current rate cap.
+
+    Lower while recording, to leave the CPU to the encoders that are keeping
+    the recording whole - a dropped frame there cannot be gotten back, so this
+    is not something a page control gets to relax in the moment. Still capped
+    rather than "whatever the camera delivers" even with nothing recording:
+    measured on this machine (docs/windows-native.md), two MJPEG previews
+    encoding at the camera's full ~30 fps is by itself enough load to stall the
+    frame hub once depth and infrared are also being captured - which reads as
+    the preview freezing, the opposite of what an uncapped rate was for.
+    """
+    if state.recorder.recording:
+        return config.PREVIEW_MAX_HZ_RECORDING
+    return config.PREVIEW_MAX_HZ_IDLE
+
+
 def _frames(kind: str, near: float, far: float, colormap: str, width: int):
     """Yield MJPEG parts until the client goes away.
 
@@ -882,7 +899,6 @@ def _frames(kind: str, near: float, far: float, colormap: str, width: int):
     hub.acquire()
     try:
         after = 0
-        interval = 1.0 / config.PREVIEW_MAX_HZ if config.PREVIEW_MAX_HZ > 0 else 0.0
         next_at = 0.0
         while True:
             frames = hub.latest(timeout=5.0, after=after)
@@ -895,7 +911,7 @@ def _frames(kind: str, near: float, far: float, colormap: str, width: int):
             now = time.monotonic()
             if now < next_at:
                 continue
-            next_at = now + interval
+            next_at = now + 1.0 / _preview_max_hz()
 
             image = preview.render(
                 frames, kind, near_m=near, far_m=far, colormap=colormap

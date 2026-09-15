@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import asyncio
 import io
+import json
 import logging
 import os
 import shutil
@@ -30,7 +31,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
-from rrr.audio import probe as probe_audio
+from rrr.audio import AudioTap, dbfs, probe as probe_audio, rms
 from rrr.recorder import RecorderBusy, SessionRecorder
 from rrr.recorder import config as recording_config
 from rrr.timeline import (
@@ -907,6 +908,79 @@ def _frames(kind: str, near: float, far: float, colormap: str, width: int):
         pass
     finally:
         hub.release()
+
+
+@app.get("/stream/audio-levels")
+def audio_levels() -> StreamingResponse:
+    """Stream each channel's current level, for a live meter.
+
+    Returns:
+        A ``text/event-stream`` response, one JSON object per update: ``mix``
+        (the beamformed channel) and ``mic1``-``mic4`` (the raw microphones),
+        each in dBFS or ``null`` for silence.
+
+    Raises:
+        HTTPException: 404 if this server was started with audio recording
+            disabled entirely, so there is no tap to read.
+
+    Server-sent events rather than MJPEG: there is nothing to decode, just a
+    handful of numbers a few times a second, so plain JSON needs no binary
+    framing. Opens the array for as long as the connection lasts, the same
+    way the video preview holds the camera - see ``_frames`` above - sharing
+    the one tap a recording would also use.
+    """
+    tap = state.recorder.tap
+    if tap is None:
+        raise HTTPException(
+            status_code=404, detail="this server was started with audio off"
+        )
+    return StreamingResponse(
+        _levels(tap),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-store"},
+    )
+
+
+def _levels(tap: AudioTap):
+    """Yield one SSE event per interval with each channel's level.
+
+    Runs whether or not a session is being recorded - the same tap either
+    way, reference counted like the camera's hub.
+    """
+    tap.acquire()
+    try:
+        after = 0
+        interval = (
+            1.0 / config.AUDIO_LEVEL_HZ if config.AUDIO_LEVEL_HZ > 0 else 0.0
+        )
+        next_at = 0.0
+        while True:
+            window = tap.latest(
+                seconds=config.AUDIO_LEVEL_WINDOW_S, timeout=5.0, after=after
+            )
+            if window is None:
+                # Nothing new: the array may be starting or gone. Keep the
+                # connection open, the same as the video preview does.
+                continue
+            after = window.index
+            now = time.monotonic()
+            if now < next_at:
+                continue
+            next_at = now + interval
+
+            mics = rms(window.mics)
+            payload = {
+                "mix": dbfs(float(rms(window.processed))),
+                "mic1": dbfs(float(mics[0])),
+                "mic2": dbfs(float(mics[1])),
+                "mic3": dbfs(float(mics[2])),
+                "mic4": dbfs(float(mics[3])),
+            }
+            yield f"data: {json.dumps(payload)}\n\n"
+    except (GeneratorExit, ConnectionError):
+        pass
+    finally:
+        tap.release()
 
 
 # -- the page ----------------------------------------------------------------

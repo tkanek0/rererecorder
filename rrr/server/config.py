@@ -72,6 +72,16 @@ DEPTH_NEAR_M = float(os.environ.get("RRR_DEPTH_NEAR_M", "0.3"))
 DEPTH_FAR_M = float(os.environ.get("RRR_DEPTH_FAR_M", "6.0"))
 DEPTH_COLORMAP = os.environ.get("RRR_DEPTH_COLORMAP", "turbo")
 
+# -- the audio level meter -----------------------------------------------------
+
+#: Updates a second for the devices panel's live per-channel level meter.
+#: Matches the video preview's own rate: fast enough to read as live, far
+#: below what would compete with the encoders or the audio writer for CPU.
+AUDIO_LEVEL_HZ = float(os.environ.get("RRR_AUDIO_LEVEL_HZ", "10"))
+
+#: Seconds of audio each level is measured over.
+AUDIO_LEVEL_WINDOW_S = float(os.environ.get("RRR_AUDIO_LEVEL_WINDOW_S", "0.1"))
+
 # -- the frontend ------------------------------------------------------------
 
 #: Built frontend to serve, if it has been built. Vite serves it on its own port

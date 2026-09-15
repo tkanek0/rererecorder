@@ -10,7 +10,7 @@ Imports sounddevice, pyusb and numpy, and nothing else in this repository except
 :mod:`timeline` conventions. It knows nothing about HTTP or about the camera.
 """
 
-from .capture import AudioTap, DeviceNotFound, devices
+from .capture import AudioTap, DeviceNotFound, DeviceStatus, devices, probe
 from .config import (
     BLOCK_SIZE,
     CHANNEL_MICS,
@@ -35,10 +35,12 @@ __all__ = [
     "BlockStamp",
     "Chunk",
     "DeviceNotFound",
+    "DeviceStatus",
     "Reading",
     "DoaTap",
     "Window",
     "dbfs",
     "devices",
+    "probe",
     "rms",
 ]

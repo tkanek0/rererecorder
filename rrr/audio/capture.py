@@ -36,6 +36,7 @@ import math
 import sys
 import threading
 import time
+from dataclasses import dataclass
 
 import numpy as np
 
@@ -696,6 +697,62 @@ def _resolve_device(name: str, channels: int, rate: int) -> int:
         if rate_matches(device):
             return index
     return usable[0][0]
+
+
+@dataclass(frozen=True)
+class DeviceStatus:
+    """What PortAudio can currently see of the configured capture device.
+
+    Built by enumerating devices only - nothing is opened - so a caller can
+    show "is the array plugged in" before anything actually acquires it.
+
+    Attributes:
+        connected: Whether a matching device is present.
+        name: The device's name, as PortAudio reports it.
+        host_api: Which host API it would be opened through.
+        channels: Input channels it offers.
+        rate: Its default sample rate.
+        error: Why no device was found, when ``connected`` is False.
+    """
+
+    connected: bool
+    name: str | None = None
+    host_api: str | None = None
+    channels: int | None = None
+    rate: float | None = None
+    error: str | None = None
+
+
+def probe(
+    name: str = config.DEVICE_NAME,
+    channels: int = config.CHANNELS,
+    rate: int = config.SAMPLE_RATE,
+) -> DeviceStatus:
+    """Check whether the configured array is visible, without opening it.
+
+    Args:
+        name: Substring matched against the device's name.
+        channels: Channels a real open would ask for.
+        rate: Sample rate a real open would ask for.
+
+    Returns:
+        What :func:`_resolve_device` would choose right now - the same
+        ranking an actual open uses, so this reports what opening it would
+        get rather than a separate guess.
+    """
+    try:
+        index = _resolve_device(name, channels, rate)
+    except DeviceNotFound as error:
+        return DeviceStatus(connected=False, error=str(error))
+    device = sd.query_devices(index)
+    host_api = str(sd.query_hostapis()[device["hostapi"]]["name"])
+    return DeviceStatus(
+        connected=True,
+        name=str(device["name"]),
+        host_api=host_api,
+        channels=int(device["max_input_channels"]),
+        rate=float(device["default_samplerate"]),
+    )
 
 
 def devices() -> list[dict[str, object]]:

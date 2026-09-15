@@ -236,6 +236,13 @@ th {
 
 /* -- devices ----------------------------------------------------------- */
 
+/* Spans the row height of Recording+Storage stacked beside it in the other
+   column, so the layout reads as one row (Devices | Recording/Storage) above
+   Sessions, rather than the three interleaving. */
+.panel.devices {
+  grid-row: span 2;
+}
+
 /* RealSense above ReSpeaker, each as wide as the panel - not side by side,
    which left both squeezed into less than half the available width. */
 .device-grid {

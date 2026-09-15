@@ -71,13 +71,19 @@ header .sub {
   display: grid;
   gap: 10px;
   grid-template-columns: 1fr 1fr;
+  /* Without this, a grid track sized 1fr still refuses to shrink an <img>
+     below its intrinsic width (a replaced element's default min-width is
+     "auto", not 0) - which is what let two 640px previews overflow the
+     page instead of scaling down to fit their column. */
+  min-width: 0;
 }
 
-.preview figure {
+.previews figure {
   margin: 0;
+  min-width: 0;
 }
 
-.preview img {
+.previews img {
   width: 100%;
   display: block;
   background: #000;
@@ -86,7 +92,7 @@ header .sub {
   object-fit: contain;
 }
 
-.preview figcaption {
+.previews figcaption {
   color: var(--dim);
   font-size: 11px;
   padding-top: 4px;

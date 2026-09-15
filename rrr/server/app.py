@@ -30,6 +30,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
+from rrr.audio import probe as probe_audio
 from rrr.recorder import RecorderBusy, SessionRecorder
 from rrr.recorder import config as recording_config
 from rrr.timeline import (
@@ -39,7 +40,14 @@ from rrr.timeline import (
     read_events,
     read_manifest,
 )
-from rrr.video import ArchiveSource, FrameHub, LiveSource, StreamConfig, StreamError
+from rrr.video import (
+    ArchiveSource,
+    FrameHub,
+    LiveSource,
+    StreamConfig,
+    StreamError,
+    list_devices,
+)
 
 from . import config, preview
 
@@ -147,6 +155,72 @@ def status() -> dict[str, Any]:
         "camera": _camera(),
         "recording": state.recorder.state(),
         "storage": _storage(),
+        "devices": _devices(),
+    }
+
+
+def _devices() -> dict[str, Any]:
+    """Whether each device is plugged in, independent of whether it is in use.
+
+    ``_camera()`` and the recorder's own state only know a device once
+    something has opened it - a preview, or a recording. This asks each SDK
+    directly instead, the same way ``make devices`` and
+    ``rrr.audio.capture.probe`` do, so a devices panel can show a camera or
+    array is present before anything has started using it.
+    """
+    return {
+        "realsense": _realsense_device(),
+        "respeaker": _respeaker_device(),
+    }
+
+
+def _realsense_device() -> dict[str, Any]:
+    """Describe the D455 as the SDK currently sees it, streaming or not.
+
+    ``list_devices()`` is a real USB enumeration - measured at 200-240 ms on
+    this machine, not a cheap read - so it is only called while the hub has
+    nobody watching it. While the hub is active (a preview or a recording
+    holds it open), its own ``device`` is used instead: re-enumerating every
+    second on top of an open stream was found to periodically stall the USB
+    bus enough to show up as silence-fills in a recording's own audio,
+    spaced almost exactly one second apart - the page's own status-poll
+    interval. Idle, the 200 ms is free: nothing time-critical is running.
+    """
+    hub = state.hub
+    if hub.active:
+        device = hub.device
+    else:
+        try:
+            found = list_devices()
+        except Exception as error:  # noqa: BLE001 - reported to the page
+            return {"connected": False, "error": str(error)}
+        serial = recording_config.SERIAL
+        device = next((d for d in found if not serial or d.serial == serial), None)
+    return {
+        "connected": device is not None,
+        "device": device.as_dict() if device else None,
+        # What is currently being asked for, shown here rather than in a
+        # separate area: it describes this device, not the page in general.
+        "streams": state.streams.as_dict(),
+        "streaming": hub.active,
+        "fps": round(hub.fps, 2),
+        "error": hub.error,
+    }
+
+
+def _respeaker_device() -> dict[str, Any]:
+    """Describe the array as PortAudio currently sees it, recording or not."""
+    found = probe_audio()
+    tap = state.recorder.tap
+    return {
+        "connected": found.connected,
+        "name": found.name,
+        "host_api": found.host_api,
+        "channels": found.channels,
+        "rate": found.rate,
+        "error": found.error,
+        "recording": tap.active if tap else False,
+        "overruns": tap.overruns if tap else 0,
     }
 
 

@@ -425,6 +425,16 @@ class SessionRecorder:
         self._codecs = value
 
     @property
+    def tap(self) -> AudioTap | None:
+        """The audio tap this recorder reads, or None if audio is not recorded.
+
+        Exposed read-only so a caller can ask whether the array is open right
+        now (``tap.active``) independent of whether a recording is running -
+        the same thing ``hub`` already lets a caller ask about the camera.
+        """
+        return self._tap
+
+    @property
     def recording(self) -> bool:
         """Whether a session is currently being written."""
         monitor = self._monitor

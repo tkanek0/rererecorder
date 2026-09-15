@@ -38,6 +38,9 @@ class FakeRecorder:
         self.recording = False
         self.stopped = 0
         self.marks: list[Event] = []
+        # No audio tap: this stand-in never records, so there is nothing for
+        # the devices panel to say is "being recorded" either.
+        self.tap = None
 
     def state(self) -> dict[str, object]:
         return {
@@ -88,9 +91,16 @@ def test_health_reports_the_camera_without_opening_it(client) -> None:
 
 def test_status_carries_what_the_page_polls_for(client) -> None:
     body = client.get("/api/status").json()
-    assert set(body) == {"camera", "recording", "storage"}
+    assert set(body) == {"camera", "recording", "storage", "devices"}
     assert body["camera"]["streams"]["infrared"] is True
     assert body["camera"]["streams"]["align_to_color"] is False
+
+
+def test_status_devices_report_each_sdk_directly(client) -> None:
+    """Independent of the hub or the tap being open - see `_devices`."""
+    devices = client.get("/api/status").json()["devices"]
+    assert "connected" in devices["realsense"]
+    assert devices["respeaker"]["recording"] is False
 
 
 def test_storage_reports_free_space_and_no_rate_when_idle(client) -> None:

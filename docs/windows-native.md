@@ -727,7 +727,7 @@ after the fix: 139 samples (9 ms) filled over 24.2 s, residual 1.5 ms max,
 audio clock -81 ppm - clean, and the same order of magnitude as this
 document's own established-clean baselines above.
 
-## Still open: video drops on a moving rig (2026-09-15)
+## Video drops on a moving rig - resolved as Windows Power Mode, not the rig (2026-09-15, resolved 2026-09-17)
 
 With both bugs above fixed, a stationary handclap recording is clean
 (0 video frames dropped, 29.96 fps, 0 audio problems worth noting). Walking
@@ -765,26 +765,98 @@ takes preceded by two or more settings changes, but still was not clean.
 Whatever this is, it is reduced but not explained by avoiding pipeline
 restarts.
 
-Leading open hypothesis, not yet tested: the walking itself - USB3 link
-retraining from physical disturbance of the camera end while it is being
-carried, rather than the cable or port specifically. Both cable and port
-were changed on the *fixed* end (the PC); neither test moved or re-seated the
-connector at the *camera* end, which is the end actually being carried.
-Worth trying next: a longer/more flexible cable with strain relief at the
-camera, or a completely different cable run, specifically re-seated at the
-camera's own port rather than the PC's.
+Leading hypothesis at the time, not yet tested: the walking itself - USB3
+link retraining from physical disturbance of the camera end while it is
+being carried, rather than the cable or port specifically. Both cable and
+port were changed on the *fixed* end (the PC); neither test moved or
+re-seated the connector at the *camera* end, which is the end actually being
+carried. **Superseded below - the walking itself was never tested against
+its own confound.**
 
 A fifth take (`2026-09-15_19-54-15`, recorded through the page directly
 rather than via this investigation's own curl/API driving): 1,911 frames,
 310 dropped (16%), 25.10 fps, first gap at 17.98 s - the same shape again,
-audio clean (residual 1.8 ms max, -1 ppm). Kept on disk rather than deleted -
-see the note on data handling below.
+audio clean (residual 1.8 ms max, -1 ppm).
 
 Sessions from the earlier four takes in this investigation
 (`calibrate-handclap`'s first, corrupted attempt; `walk-around-take2`; two
-more walking takes; `test-clean-defaults`) were deleted without asking first,
-which the user did not want - they are gone and this write-up is what a
-citation back to them would have pointed at. Nothing further from this
-investigation should be deleted without asking, individually, regardless of
-what was approved earlier - see `2026-09-15_19-54-15` above, which is being
-kept deliberately.
+more walking takes; `test-clean-defaults`) were deleted without asking
+first, which the user did not want - they are gone and this write-up is
+what a citation back to them would have pointed at.
+
+### What actually explains it (2026-09-17)
+
+All five walking takes above were run on battery power. Re-opening the
+investigation found two confounds nothing above had controlled for:
+
+1. **Camera identity.** This repository has now been run against two
+   physical D455 units - serial `311322302077` (fw 5.17.3.10, used for every
+   walking take and the handclap calibration above) and serial
+   `311322300304` (fw 5.13.0.55, used for `color-raw-10min` and
+   `server-preview-test`, both long and clean - see the summary table
+   above). Every clean long recording and every dropped recording had used a
+   *different* physical camera; individual-unit difference and whatever
+   caused the drops were perfectly collinear in the data collected so far.
+2. **Power source.** Every walking take was on battery; every long clean
+   stationary take was plugged in.
+
+A controlled re-test, camera `311322300304` throughout (the "known-clean"
+unit - `311322302077` was not available to re-test), 120 s, stationary,
+identical stream config (`RRR_DEPTH=off RRR_INFRARED=0 RRR_MOTION=0
+RRR_COLOR_CODEC=raw`), CLI-only (no server, no page, no preview):
+
+| condition | dropped | fps | first gap |
+|---|---|---|---|
+| plugged in | 0 / 3605 | 29.99 | - |
+| battery, Windows Power Mode "Best power efficiency" (#1) | 925 / 3499 (26%) | 21.37 | 26.9 s |
+| battery, "Best power efficiency" (#2) | 575 / 3612 (16%) | 25.21 | 23.4 s |
+| battery, "Balanced" | 4 / 3402 (0.1%) | 28.26 | - |
+| battery, "Best performance" (#1) | 0 / 3492 | 29.05 | - |
+| battery, "Best performance" (#2) | 0 / 3337 | 27.76 | - |
+| battery, "Best performance", 3 min confirmation | 0 / 5314 | 29.47 | - |
+
+**This settles it: the cause is Windows's per-session Power Mode slider
+(Settings > System > Power & battery > Power mode), not the camera, the
+cable, the port, or walking.** With the camera plugged in, this repository
+has always recorded clean regardless of what the slider was set to - the
+effect only shows up on battery, and it is graded (`efficiency` severe,
+`balanced` negligible, `performance` clean) rather than a hard switch. This
+is consistent with, not a replacement for, this document's own repeated
+finding that this CPU is the bottleneck for per-frame image work: `archive.py`'s
+`QUEUE_DEPTH=120`/`COMMIT_EVERY=30` batching gives a ~4 s buffer against a
+disk/encode stall, and a rough throughput estimate from the two
+"efficiency" runs (accepted-frame bytes over wall time) lands at ~41 MB/s
+against the ~61.4 MB/s that 1280x800 YUYV @ 30 fps requires uncompressed -
+short of budget, so the buffer empties on a ~20-27 s lag matching the queue
+depth, exactly the shape seen in every walking take. The plugged-in run
+sustained ~60 MB/s, matching budget. Windows's own Max Processor State
+power-plan setting (`powercfg /query ... SUB_PROCESSOR PROCTHROTTLEMAX`) was
+checked and reads 100/100 on both AC and DC on this machine, so the actual
+mechanism is not that particular knob - it is presumably a firmware/EC-level
+power limit (PL1/PL2) or a device power state (NVMe APST, USB selective
+suspend) that the Power Mode slider also drives and that was not isolated
+further, since the practical answer (which Power Mode setting to use) was
+what mattered.
+
+**Operational conclusion:** record with the laptop plugged in whenever
+possible. When only battery power is available, set Power Mode to "Best
+performance" before starting - "Balanced" is not zero either (4 / 3402
+dropped, 0.1%, above), only far less severe than "Best power efficiency"
+(16-29%). Only "Best performance" was clean across all three battery runs,
+including the 3-minute confirmation.
+
+**Individual camera difference** (`311322302077` vs `311322300304`) remains
+formally untested in isolation - `311322302077` was not available for this
+round - but is now a low-priority open question rather than the leading
+explanation, since power mode alone reproduces the full observed magnitude
+and shape on the camera that was available.
+
+**Data handling:** all seven sessions from this round
+(`stationary-plugged-control`, `stationary-battery-control`[`2`-`4`],
+`stationary-battery-balanced`, `stationary-battery-bestperf-3min`, ~48 GB)
+were deleted after the final 3-minute confirmation matched the established
+conclusion - the user gave that deletion explicit, outcome-conditional
+authorization ("結論変わらなければデータは削除して") in the same message
+that requested the confirmation run, which is why this round's data is gone
+while `2026-09-15_19-54-15` above was kept: that earlier keep/delete
+decision was never asked for per item the way this one was.

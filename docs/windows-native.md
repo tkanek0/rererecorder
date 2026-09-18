@@ -797,8 +797,20 @@ investigation found two confounds nothing above had controlled for:
    above). Every clean long recording and every dropped recording had used a
    *different* physical camera; individual-unit difference and whatever
    caused the drops were perfectly collinear in the data collected so far.
-2. **Power source.** Every walking take was on battery; every long clean
-   stationary take was plugged in.
+2. **Power source vs. Power Mode.** Every walking take was on battery; every
+   long clean stationary take was plugged in - initially read as "power
+   source matters." Checked directly afterward
+   (`HKLM\SYSTEM\CurrentControlSet\Control\Power\User\PowerSchemes`,
+   `ActiveOverlayAcPowerScheme`/`ActiveOverlayDcPowerScheme`): this machine's
+   *AC* Power Mode overlay has read `ded574b5-45a0-4f42-8737-46345c09c238`
+   ("Best performance") throughout this entire investigation and was never
+   touched. The real variable being tested below is Power Mode, not AC vs.
+   battery - AC happened to be clean here only because this machine's AC
+   profile has always been "Best performance," which the single plugged-in
+   data point cannot distinguish from "AC power is inherently safe." An AC
+   profile set to "Best power efficiency" would likely reproduce the same
+   drops with the cable connected - not tested, since the practical answer
+   (which Power Mode to use) did not require it.
 
 A controlled re-test, camera `311322300304` throughout (the "known-clean"
 unit - `311322302077` was not available to re-test), 120 s, stationary,
@@ -815,12 +827,15 @@ RRR_COLOR_CODEC=raw`), CLI-only (no server, no page, no preview):
 | battery, "Best performance" (#2) | 0 / 3337 | 27.76 | - |
 | battery, "Best performance", 3 min confirmation | 0 / 5314 | 29.47 | - |
 
-**This settles it: the cause is Windows's per-session Power Mode slider
-(Settings > System > Power & battery > Power mode), not the camera, the
-cable, the port, or walking.** With the camera plugged in, this repository
-has always recorded clean regardless of what the slider was set to - the
-effect only shows up on battery, and it is graded (`efficiency` severe,
-`balanced` negligible, `performance` clean) rather than a hard switch. This
+**This settles it: the cause is Windows's Power Mode setting (Settings >
+System > Power & battery > Power mode), not the camera, the cable, the
+port, walking, or AC vs. battery as such.** The DC sweep above is the clean
+controlled experiment - power source held constant (battery) while Power
+Mode was varied across all three levels - and it is graded (`efficiency`
+severe, `balanced` negligible, `performance` clean) rather than a hard
+switch. The single AC data point only shows that *this machine's AC
+profile*, already "Best performance," is clean; it says nothing about AC
+power by itself. This
 is consistent with, not a replacement for, this document's own repeated
 finding that this CPU is the bottleneck for per-frame image work: `archive.py`'s
 `QUEUE_DEPTH=120`/`COMMIT_EVERY=30` batching gives a ~4 s buffer against a
@@ -838,12 +853,17 @@ suspend) that the Power Mode slider also drives and that was not isolated
 further, since the practical answer (which Power Mode setting to use) was
 what mattered.
 
-**Operational conclusion:** record with the laptop plugged in whenever
-possible. When only battery power is available, set Power Mode to "Best
-performance" before starting - "Balanced" is not zero either (4 / 3402
-dropped, 0.1%, above), only far less severe than "Best power efficiency"
-(16-29%). Only "Best performance" was clean across all three battery runs,
-including the 3-minute confirmation.
+**Operational conclusion:** set Power Mode to "Best performance" before
+recording, for whichever power source is active - this is the actual
+variable, not AC vs. battery. Check both `ActiveOverlayAcPowerScheme` and
+`ActiveOverlayDcPowerScheme` read `ded574b5-45a0-4f42-8737-46345c09c238`
+(Settings > System > Power & battery > Power mode, checked once per power
+source), rather than trusting "it's plugged in" as a proxy - on a machine
+whose AC profile is not "Best performance," a plugged-in recording could
+drop frames the same way the battery runs did. "Balanced" is not zero
+either (4 / 3402 dropped, 0.1%, above), only far less severe than "Best
+power efficiency" (16-29%); only "Best performance" was clean across all
+three battery runs, including the 3-minute confirmation.
 
 **Individual camera difference** (`311322302077` vs `311322300304`) remains
 formally untested in isolation - `311322302077` was not available for this

@@ -28,11 +28,6 @@ build-backend = "hatchling.build"
 [tool.hatch.build.targets.wheel]
 packages = ["src/rrr"]
 
-[tool.uv]
-# Follow pyenv rather than letting uv download its own interpreter, matching the
-# two playground repositories this borrows from.
-python-preference = "only-system"
-
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q --strict-markers"

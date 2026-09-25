@@ -54,6 +54,16 @@ make inspect DIR=var/sessions/2026-09-02_15-28-36
 which re-reads the files and makes them argue with each other, rather than
 repeating what the recorder believed.
 
+Make an ordinary H.264/AAC review movie directly from the colour camera and
+ReSpeaker recording with:
+
+```bash
+uv run python -m rrr.tools.render_mp4 var/sessions/<name> -o <name>.mp4
+```
+
+Recorded clocks and calibration are applied when available; unset calibration
+falls back to a simple start-together movie without claiming a correction.
+
 ## Reading one back
 
 ```python

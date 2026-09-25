@@ -372,6 +372,27 @@ without the source recording with:
 uv run python -m rrr.tools.validate_export export/<session>
 ```
 
+## MP4 review copies
+
+The raw session remains the measurement, but a colour-and-sound review copy can
+be made without exporting every stream first:
+
+```bash
+uv run python -m rrr.tools.render_mp4 var/sessions/walk-01 -o walk-01.mp4
+```
+
+The movie keeps the recorded frame timestamps, maps the WAV through
+`audio.clock.jsonl`, and applies `calibration.offset_s` when it has been
+measured. ReSpeaker's processed channel 0 is the default; `--audio-channel mix`
+mixes the physical channels named by `rig.channels`, or nominal channels 1-4
+when the rig is unset. A recorded DOA is drawn as a compass. With a complete
+rig transform it is rotated into the colour-camera frame; otherwise it is
+labelled as an unregistered array-frame angle. Missing calibration never
+silently becomes an identity transform: without clock, offset, rig, or DOA the
+tool falls back independently to a simple start-together audio/video movie.
+
+Use `--no-doa` for a clean picture and `--force` to replace an existing movie.
+
 ## Not yet
 
 - **A Raspberry Pi.** The image is built to be portable but has not run on one.

@@ -430,7 +430,7 @@ alone as out of scope for this investigation:
   `ID_PATTERN` (correctly) refuses anything that is not a plain name, so it
   refuses the test's own path.
 
-None of these are about recording; they are about whether `make check`
+None of these are about recording; they are about whether the test suite
 itself runs clean on Windows, which is a separate decision from whether
 recording does.
 

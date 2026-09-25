@@ -165,7 +165,7 @@ def _devices() -> dict[str, Any]:
 
     ``_camera()`` and the recorder's own state only know a device once
     something has opened it - a preview, or a recording. This asks each SDK
-    directly instead, the same way ``make devices`` and
+    directly instead, the same way ``rrr.video.list_devices`` and
     ``rrr.audio.capture.probe`` do, so a devices panel can show a camera or
     array is present before anything has started using it.
     """
@@ -1027,6 +1027,6 @@ else:
         return {
             "detail": (
                 f"no built frontend at {config.STATIC_DIR!r}. Run `make web` for "
-                "the dev server, or `make web-build` to build it into this one."
+                "the dev server, or `npm run build` in web/ to build it into this one."
             )
         }

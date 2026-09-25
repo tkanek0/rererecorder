@@ -19,7 +19,7 @@ supports:
     uv run python tests/perf/soak_record.py --session soak-full-compressed \\
         --seconds 60
 
-Needs a live device. Not part of `make check`, which runs with none attached -
+Needs a live device. Not part of `pytest`, which runs with none attached -
 run this by hand, or wire it into a separate device-equipped CI runner if one
 ever exists.
 """

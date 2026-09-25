@@ -1,7 +1,7 @@
 # Recording from inside the container.
 #
-#   docker compose -f docker/compose.yaml build
-#   docker compose -f docker/compose.yaml run --rm recorder
+#   make image / make dserver    (the Makefile passes UID, GID and AUDIO_GID)
+#   docker compose -f docker/compose.yaml run --rm recorder python -m rrr.tools.record --seconds 30
 #
 # The camera reaches the container through /dev/bus/usb, which is all the RSUSB
 # backend needs - no /dev/video*, no kernel module, nothing privileged. That is
@@ -36,6 +36,10 @@ services:
       RRR_COLOR: ${RRR_COLOR:-1280x800@30}
       RRR_SESSIONS_DIR: ${RRR_SESSIONS_DIR:-/data/sessions}
       RRR_AUDIO: ${RRR_AUDIO:-1}
+      RRR_SERVER_PORT: ${RRR_SERVER_PORT:-8040}
+    # Published only by `run --service-ports`, which is what `make dserver` uses.
+    ports:
+      - "${RRR_SERVER_PORT:-8040}:${RRR_SERVER_PORT:-8040}"
     # Run as the invoking user, so recordings under data/ do not come out owned
     # by root. The camera stays reachable because the RealSense udev rule makes
     # its node world-writable (crw-rw-rw- root plugdev), so no group membership

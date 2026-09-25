@@ -13,7 +13,7 @@ encoding cost at all. That is why decision 22's raw codec fixes colour alone
     uv run python tests/perf/sqlite_write_benchmark.py
     uv run python tests/perf/sqlite_write_benchmark.py --dir data/ --frames 3600
 
-No device needed - only a disk to measure. Not part of `make check`: it takes
+No device needed - only a disk to measure. Not part of `pytest`: it takes
 real wall-clock time and its answer is about the disk and machine it runs on,
 not about this repository's correctness. Worth rerunning after a disk change,
 an OS update, or on a different machine before trusting decision 22's numbers

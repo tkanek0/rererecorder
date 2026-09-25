@@ -170,12 +170,18 @@ while the button still said Pause.
 Nothing here needs the server, and the server records through exactly this code.
 
 ```
-make record SECONDS=30 SESSION=kitchen     # on the host: V4L2, loses frames
-make drecord SECONDS=30                    # in the container: RSUSB, does not
-make inspect DIR=data/sessions/kitchen     # cross-check a recording
-make dserver                               # the page, on :8040
-make export DIR=data/sessions/kitchen      # write it out as plain files
-make check                                 # 229 tests, no device needed
+uv run python -m rrr.tools.record --seconds 30 --session kitchen   # on the host: V4L2, loses frames
+uv run python -m rrr.tools.inspect data/sessions/kitchen          # cross-check a recording
+uv run python -m rrr.tools.export data/sessions/kitchen           # write it out as plain files
+uv run pytest                                                      # no device needed
+```
+
+Recording in the container - RSUSB, which does not lose frames - is the same
+command through compose; the Makefile's `COMPOSE` line shows the variables it
+needs:
+
+```
+docker compose -f docker/compose.yaml run --rm recorder python -m rrr.tools.record --seconds 30
 ```
 
 `rrr.tools.inspect` is the one that matters after a recording. It re-reads the files
@@ -268,7 +274,7 @@ audio - and the mark only says what that onset was.
 
 Marked from the page while recording (Enter in the field, or the button), and
 the label stays after marking because a run is marked over and over with the
-same condition. `make inspect` counts them and **fails if any of them falls
+same condition. `rrr.tools.inspect` counts them and **fails if any of them falls
 outside the recording**, which is how a sidecar from a different session gets
 caught.
 

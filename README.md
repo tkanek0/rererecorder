@@ -25,11 +25,12 @@ RSUSB backend instead, which loses none - the investigation is in
 ```bash
 make image                      # build it (compiles librealsense, ~4 min)
 make dserver                    # the page, on http://localhost:8040
-make drecord SECONDS=30         # or just record, from the terminal
 ```
 
-`make help` lists the rest. Running on the host works and is fine for developing
-the page, but it will drop frames.
+Recording from the terminal instead is in
+[docs/features.md](docs/features.md#the-command-line). Running on the host
+(`make server` and `make web`) is fine for developing the page, but it will drop
+frames.
 
 ## Where recordings go
 
@@ -60,7 +61,7 @@ plus `color_timestamp_ms` and `depth_timestamp_ms`, each sensor's own idea of
 when it happened. Check a recording with:
 
 ```bash
-make inspect DIR=data/sessions/2026-09-02_15-28-36
+uv run python -m rrr.tools.inspect data/sessions/2026-09-02_15-28-36
 ```
 
 which re-reads the files and makes them argue with each other, rather than
@@ -127,4 +128,4 @@ Both devices record together, on one clock, cross-checked. What is left:
   (`--no-depth`, `--color-codec`, ...) or the page's settings panel, rather
   than only through `RRR_*` environment variables - decision 23.
 
-Tests: `make check` - 252 of them, none needing a device.
+Tests: `uv run pytest`, none needing a device.

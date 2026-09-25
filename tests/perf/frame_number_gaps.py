@@ -17,7 +17,7 @@ both if colour/depth timing is what is actually in question:
     uv run python tests/perf/frame_number_gaps.py --seconds 60
     uv run python tests/perf/frame_number_gaps.py --seconds 60 --auto-exposure off
 
-Needs a live device. Not part of `make check`.
+Needs a live device. Not part of `pytest`.
 """
 
 from __future__ import annotations

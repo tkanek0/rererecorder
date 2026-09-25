@@ -21,13 +21,19 @@ dependencies = [
     "av>=18.1.0",
 ]
 
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/rrr"]
+
 [tool.uv]
 # Follow pyenv rather than letting uv download its own interpreter, matching the
 # two playground repositories this borrows from.
 python-preference = "only-system"
 
 [tool.pytest.ini_options]
-pythonpath = ["."]
 testpaths = ["tests"]
 addopts = "-q --strict-markers"
 # Nothing under tests/ touches a device. The camera admits one process at a

@@ -44,7 +44,7 @@ const codecChoiceOf = (codec: string | undefined): CodecChoice =>
 /**
  * Where each microphone sits on the circle, in degrees - the same convention
  * as the chip's own DOA angle. **Not yet verified against the physical
- * board** (see `rrr/audio/config.py` MIC_ANGLES): the spacing is real, the
+ * board** (see `src/rrr/audio/config.py` MIC_ANGLES): the spacing is real, the
  * absolute rotation is a guess, so the panel says so rather than implying a
  * measurement.
  */

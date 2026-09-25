@@ -58,7 +58,7 @@ FROM python:3.12-slim-bookworm
 
 # libusb for the camera; libgomp is what the OpenCV wheel links against;
 # libportaudio2 is loaded at import time by sounddevice, so the audio package
-# cannot even be imported without it - and rrr/recorder/ imports it unconditionally.
+# cannot even be imported without it - and src/rrr/recorder/ imports it unconditionally.
 # No v4l-utils, no uvcvideo: the RSUSB backend talks to /dev/bus/usb directly.
 RUN apt-get update && apt-get install -y --no-install-recommends \
         libusb-1.0-0 libgomp1 libportaudio2 \
@@ -78,18 +78,22 @@ COPY pyproject.toml uv.lock .python-version ./
 ENV UV_PROJECT_ENVIRONMENT=/usr/local \
     UV_PYTHON=/usr/local/bin/python3.12 \
     UV_PYTHON_DOWNLOADS=never
-RUN uv sync --frozen --no-install-package pyrealsense2 --inexact
+# --no-install-project: dependencies only, so this layer survives a source
+# change. The project itself is installed below, once src/ is in the image.
+RUN uv sync --frozen --no-install-package pyrealsense2 --no-install-project --inexact
 
 COPY . .
 # After COPY, so a stale local web/dist cannot shadow the one just built.
 COPY --from=web /web/dist ./web/dist
+# Editable, so the development bind mount of the checkout over /app is what
+# runs: the install points at /app/src rather than at a copy of it.
+RUN uv sync --frozen --no-install-package pyrealsense2 --inexact
 
 # Fail loudly at start if the wrong backend somehow ended up in the image: a
 # silent fallback to V4L2 would look like a working recorder that drops 8% of
 # its frames.
 RUN python -c "import pyrealsense2 as rs; print('librealsense', rs.__version__)"
 
-ENV PYTHONPATH=/app
 EXPOSE 8040
 # The server rather than the CLI: the image is the recorder, and the recorder
 # has a page. `docker run ... python -m rrr.tools.record` still works.

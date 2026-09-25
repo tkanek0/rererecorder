@@ -127,7 +127,7 @@ Separately confirmed: the SDK's own native recording
 163 MB/s. So the camera, the USB link, and the OS capture path were never
 the bottleneck for throughput - only this repository's per-frame lossless
 compression was, and only until the thread count matched this CPU. (Also
-found in passing: `rrr/tools/record.py --format db3`, mentioned in
+found in passing: `src/rrr/tools/record.py --format db3`, mentioned in
 `archive.py`'s module docstring, does not exist as a CLI flag - the comment
 is stale.)
 
@@ -270,7 +270,7 @@ traced to the recording's very first clock point, sample 0, which is
 necessarily timed by the coarser pre-calibration fallback since calibration
 itself has not decided anything yet at that instant. Every point after the
 first two sits under 0.4 ms. `RESIDUAL_WARN_MS = 1.0` was calibrated against
-Linux/ALSA's 0.03 ms jitter (see `rrr/tools/inspect.py`), so this one-time,
+Linux/ALSA's 0.03 ms jitter (see `src/rrr/tools/inspect.py`), so this one-time,
 understood startup transient trips it on Windows; not adjusted, since it is
 not evidence of an ongoing problem and the repository's practice is to
 explain a flagged number rather than silence the check that found it.
@@ -280,7 +280,7 @@ explain a flagged number rather than silence the check that found it.
 `doa read failed: No backend available` was seen throughout this
 investigation's own test recordings, with the array physically attached -
 unlike the `server-preview-test` run in the appendix below, where the same
-message meant the array was simply not plugged in. `rrr/audio/doa.py`'s
+message meant the array was simply not plugged in. `src/rrr/audio/doa.py`'s
 `pyusb` backend needs a libusb-compatible driver (WinUSB, or Zadig) bound to
 the array's control interface, which this machine does not have installed.
 Not investigated further here: it was out of scope for what this session set
@@ -643,7 +643,7 @@ and nothing refuses the combination, but every measurement in this document
 shows a real, unresolved cost to adding either on this machine.
 
 Decision 23 makes this a choice rather than a set of environment variables to
-remember: `rrr/tools/record.py --no-depth --no-infrared --color-codec raw`
+remember: `src/rrr/tools/record.py --no-depth --no-infrared --color-codec raw`
 from the terminal, or the same three toggles from the page's settings panel -
 both drive the same `StreamConfig`/codec plumbing, so neither path is a
 second implementation of the other.

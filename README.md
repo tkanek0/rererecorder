@@ -99,7 +99,7 @@ Both devices record together, on one clock, cross-checked. What is left:
 
 - **The offset between them is unmeasured.** They share a clock, but the residual
   between a microphone and a shutter has to be measured from a handclap -
-  `rrr/tools/calibrate.py`. Until it runs, `session.json` says "unmeasured" rather
+  `src/rrr/tools/calibrate.py`. Until it runs, `session.json` says "unmeasured" rather
   than claiming zero.
 - **A Raspberry Pi** has not run this. Lossless at 54 MB/s will not fit there.
 - **Native Windows records every frame, with no fixed cross-sensor sync.**

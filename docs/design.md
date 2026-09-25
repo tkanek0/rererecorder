@@ -25,7 +25,10 @@ measured `(monotonic, realtime)` pairs rather than as the axis itself.
 
 Everything lives under one package, `rrr`. Dependencies run one way:
 `rrr.timeline` imports nothing but numpy, `rrr.video` and `rrr.audio` import no
-web framework, and nothing below `rrr.server` knows HTTP exists.
+web framework, and nothing below `rrr.server` knows HTTP exists. Nothing in
+`rrr` opens a window either - the interface is the page in `web/` - which is
+why OpenCV is the headless build: the full one drags in GTK, dead weight in a
+container and slow to install on a Pi.
 
 ```mermaid
 flowchart TD
@@ -49,6 +52,10 @@ flowchart TD
 point: it holds the arithmetic everything else depends on, so all of it can be
 tested without a camera attached. If that arithmetic is wrong, nothing
 downstream can detect it.
+
+Nothing under `tests/` opens a device, beyond that: the camera admits one
+process at a time and the array is not much better, so a suite that needed
+either could not run beside the server.
 
 ## The camera is shared, two different ways
 

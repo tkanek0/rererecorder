@@ -5,10 +5,10 @@ automated tests. Each is a standalone script with its own `--help`, meant to
 be rerun by hand: after a driver update, on a different machine, or when a
 future change to `FrameHub`/`VideoWriter` needs the same question asked again.
 
-**None of these run under `make check` or plain `pytest tests/`.** `pytest`
+**None of these run under plain `pytest tests/`.** `pytest`
 only auto-collects `test_*.py`, and nothing here is named that on purpose -
-`pyproject.toml`'s own test configuration says why: "the camera admits one
-process at a time... a suite that needed [a device] could not run beside the
+`docs/design.md` (Module boundaries) says why: "the camera admits one
+process at a time... a suite that needed either could not run beside the
 server." Two of these three need the device attached and nothing else using
 it; the third needs neither, but still takes real wall-clock time to mean
 anything.

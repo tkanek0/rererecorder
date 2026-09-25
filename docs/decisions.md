@@ -22,6 +22,11 @@ hypotheses that turned out wrong - is in [frame-loss.md](frame-loss.md).
 time if the import does not work, because a silent fallback to V4L2 would look
 like a working recorder that drops 8% of its frames.
 
+**Version:** 2.58.3, in both the image (`LIBREALSENSE_VERSION`) and the host
+wheel, the series the realsense-playground checkout uses. It is also the
+release that ships a cp312 `manylinux2014_aarch64` wheel, which is what makes a
+Raspberry Pi possible without building librealsense from source there.
+
 ---
 
 ## 2. Record without aligning depth to colour

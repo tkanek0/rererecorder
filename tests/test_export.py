@@ -545,3 +545,19 @@ def test_failed_overwrite_leaves_the_previous_export(
 
     assert marker.read_text() == "keep me"
     assert not list(out.parent.glob(".whole.exporting-*"))
+
+
+def test_the_command_line_writes_inside_the_session_by_default(session) -> None:
+    assert exporter.main([session.directory, "--quiet"]) == 0
+
+    out = Path(session.export)
+    assert out == Path(session.directory) / "export"
+    assert exporter.validate_export(str(out)) == []
+
+
+def test_an_explicit_destination_is_used_as_given(session, tmp_path) -> None:
+    out = tmp_path / "elsewhere" / "copy"
+    assert exporter.main([session.directory, "-o", str(out), "--quiet"]) == 0
+
+    assert json.loads((out / "manifest.json").read_text())["session_id"] == "whole"
+    assert not os.path.exists(session.export)

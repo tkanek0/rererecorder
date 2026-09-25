@@ -12,6 +12,8 @@ what anyone would want to do with it.
         audio.clock.jsonl   measured capture time per block
         doa.jsonl           the array's direction estimate
         events.jsonl        marks made by whoever was recording
+        export/             rrr.tools.export's neutral copy, when one is made
+        review.mp4          rrr.tools.render_mp4's review movie, likewise
 
 The manifest is what ties them together. Without it the directory is three
 recordings that happen to share a folder: the WAV has no start time, and the
@@ -49,6 +51,12 @@ AUDIO_NAME = "audio.wav"
 AUDIO_CLOCK_NAME = f"audio{AUDIO_CLOCK_SUFFIX}"
 DOA_NAME = "doa.jsonl"
 EVENTS_NAME = f"events{EVENTS_SUFFIX}"
+
+#: Where derived copies go by default. Inside the session, so that a recording
+#: and what was made from it are kept, moved and deleted together; nothing here
+#: reads them back, and the recording never depends on them.
+EXPORT_NAME = "export"
+REVIEW_NAME = "review.mp4"
 
 #: Session directory names this module will produce and accept back.
 #:
@@ -642,12 +650,30 @@ class SessionPaths:
         """Path to the mark sidecar."""
         return self._path(EVENTS_NAME)
 
+    @property
+    def export(self) -> str:
+        """Default directory for the neutral export."""
+        return self._path(EXPORT_NAME)
+
+    @property
+    def review(self) -> str:
+        """Default path for the review movie."""
+        return self._path(REVIEW_NAME)
+
     def size_bytes(self) -> int:
-        """Total size of everything in the session directory."""
+        """Total size of everything in the session directory.
+
+        Recursive, because an export and a review movie are written inside the
+        session, and deleting the session deletes them with it.
+        """
         total = 0
-        for entry in os.scandir(self.directory):
-            if entry.is_file():
-                total += entry.stat().st_size
+        for root, _, files in os.walk(self.directory):
+            for name in files:
+                try:
+                    total += os.lstat(os.path.join(root, name)).st_size
+                except FileNotFoundError:
+                    # An export renaming its temporary directory into place.
+                    pass
         return total
 
 

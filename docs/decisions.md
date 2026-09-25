@@ -852,6 +852,17 @@ started, and exports and review movies went to a third and fourth place
 property of the machine rather than of the code. `data` rather than `var`
 matches the name the container already used.
 
+What is derived from a session lives inside it: `rrr.tools.export` writes to
+`<session>/export/` and `rrr.tools.render_mp4` to `<session>/review.mp4` unless
+told otherwise, rather than to `export/<id>/` and `mp4/<id>.mp4` beside the
+code. A recording and what was made from it are then kept, moved and deleted
+together, and a session's reported size - the page's list and the figure shown
+before a delete - counts them, since deleting the session deletes them too.
+Fixed names, like the raw files', so a directory can be understood without
+reading anything first. `-o` on export now names the export directory itself
+rather than a parent to create `<id>/` in, so the default and an explicit
+destination mean the same kind of thing.
+
 **Cost:** the container cannot follow the link from inside the bind-mounted
 checkout - its target is not in the container - so `/data` stays a separate
 mount, of the link, which Docker resolves on the host. The new target disk is

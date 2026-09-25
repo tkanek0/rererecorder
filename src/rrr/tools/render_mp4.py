@@ -8,7 +8,7 @@ calibration it still makes a useful movie by starting both tracks together.
 Usage::
 
     uv run python -m rrr.tools.render_mp4 data/sessions/walk-01
-    uv run python -m rrr.tools.render_mp4 data/sessions/walk-01 -o walk-01.mp4
+    uv run python -m rrr.tools.render_mp4 data/sessions/walk-01 -o /tmp/walk-01.mp4
 """
 
 from __future__ import annotations
@@ -30,6 +30,7 @@ import cv2
 import numpy as np
 
 from rrr.timeline import (
+    REVIEW_NAME,
     AudioClockPoint,
     AudioTimeline,
     Rig,
@@ -73,7 +74,9 @@ def main(argv: list[str] | None = None) -> int:
         description="Combine a recorded RealSense colour stream and ReSpeaker audio.",
     )
     parser.add_argument("directory", help="recorded session directory")
-    parser.add_argument("-o", "--output", help="MP4 path (default: <session>.mp4)")
+    parser.add_argument(
+        "-o", "--output", help=f"MP4 path (default: <session>/{REVIEW_NAME})"
+    )
     parser.add_argument(
         "--audio-channel",
         default="processed",
@@ -85,7 +88,7 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     directory = Path(args.directory)
-    output = Path(args.output) if args.output else Path(f"{directory.name}.mp4")
+    output = Path(args.output) if args.output else directory / REVIEW_NAME
     try:
         report = render(
             directory,

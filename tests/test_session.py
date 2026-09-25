@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 
 import pytest
 
@@ -240,6 +241,15 @@ def test_size_counts_the_files_in_the_session(tmp_path) -> None:
     open(paths.audio, "wb").write(b"x" * 100)
     open(paths.video, "wb").write(b"y" * 250)
     assert paths.size_bytes() == 350
+
+
+def test_size_counts_what_was_derived_inside_the_session(tmp_path) -> None:
+    paths = SessionPaths.create(str(tmp_path), "session1")
+    open(paths.video, "wb").write(b"y" * 250)
+    os.makedirs(os.path.join(paths.export, "color", "data"))
+    open(os.path.join(paths.export, "color", "data", "0.png"), "wb").write(b"z" * 40)
+    open(paths.review, "wb").write(b"m" * 10)
+    assert paths.size_bytes() == 300
 
 
 # -- listing ------------------------------------------------------------------

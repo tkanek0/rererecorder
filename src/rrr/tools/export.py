@@ -1,7 +1,7 @@
 """Turn a session into a neutral directory that needs none of this code.
 
     uv run python -m rrr.tools.export data/sessions/2026-09-02_15-28-36
-    uv run python -m rrr.tools.export data/sessions/x -o /mnt/dataspace01/rrr
+    uv run python -m rrr.tools.export data/sessions/x -o /mnt/elsewhere/x
     uv run python -m rrr.tools.export data/sessions/x --stride 5 --end 600
 
 ``video.rrdb`` is shaped for recording: one SQLite row per frame, colour left in
@@ -144,8 +144,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "-o",
         "--out",
-        default="export",
-        help="where to write the exported session (default: export/)",
+        default=None,
+        help="directory to write the export into (default: <session>/export)",
     )
     parser.add_argument(
         "--start", type=int, default=0, help="first frame index to write"
@@ -193,7 +193,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"cannot read the session: {error}", file=sys.stderr)
         return 1
 
-    destination = os.path.join(args.out, manifest.session_id)
+    destination = args.out or paths.export
     if os.path.exists(destination) and not args.force:
         print(
             f"{destination} exists; pass --force to overwrite it",

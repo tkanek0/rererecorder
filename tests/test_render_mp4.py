@@ -20,7 +20,7 @@ from rrr.timeline import (
     read_manifest,
     write_manifest,
 )
-from rrr.tools.render_mp4 import _Direction, _directions, render
+from rrr.tools.render_mp4 import _Direction, _directions, main, render
 from rrr.video import (
     ArchiveWriter,
     Calibration,
@@ -164,3 +164,12 @@ def test_existing_movie_is_not_replaced(session, tmp_path: Path) -> None:
     with pytest.raises(FileExistsError):
         render(session.directory, output)
     assert output.read_bytes() == b"keep"
+
+
+def test_the_command_line_writes_inside_the_session_by_default(session) -> None:
+    assert main([session.directory]) == 0
+
+    output = Path(session.review)
+    assert output == Path(session.directory) / "review.mp4"
+    with av.open(str(output)) as container:
+        assert container.streams.video

@@ -33,7 +33,8 @@
 SECONDS   ?= 10
 SESSION   ?=
 DIR       ?=
-OUT       ?= export
+#: Export destination; empty means export/ inside the session.
+OUT       ?=
 #: Where recordings go, mounted as /data in the container. Normally a symbolic
 #: link to a disk with room; Docker resolves it on the host.
 DATA      ?= $(CURDIR)/data
@@ -107,8 +108,8 @@ inspect:
 	uv run python -m rrr.tools.inspect $(DIR)
 
 export:
-	@test -n "$(DIR)" || (echo "usage: make export DIR=data/sessions/<name> [OUT=export]"; exit 1)
-	uv run python -m rrr.tools.export $(DIR) -o $(OUT)
+	@test -n "$(DIR)" || (echo "usage: make export DIR=data/sessions/<name> [OUT=dir]"; exit 1)
+	uv run python -m rrr.tools.export $(DIR) $(if $(OUT),-o $(OUT),)
 
 devices:
 	uv run python -c "from rrr.video import list_devices; \

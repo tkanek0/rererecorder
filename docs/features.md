@@ -172,9 +172,9 @@ Nothing here needs the server, and the server records through exactly this code.
 ```
 make record SECONDS=30 SESSION=kitchen     # on the host: V4L2, loses frames
 make drecord SECONDS=30                    # in the container: RSUSB, does not
-make inspect DIR=data/sessions/kitchen      # cross-check a recording
+make inspect DIR=data/sessions/kitchen     # cross-check a recording
 make dserver                               # the page, on :8040
-make export DIR=data/sessions/kitchen       # write it out as plain files
+make export DIR=data/sessions/kitchen      # write it out as plain files
 make check                                 # 229 tests, no device needed
 ```
 
@@ -321,12 +321,17 @@ recording as plain files - PNG images, CSV tables, a WAV - so a consumer needs a
 filesystem and nothing else.
 
 ```bash
-uv run python -m rrr.tools.export data/sessions/x -o /mnt/dataspace01/rrr
+uv run python -m rrr.tools.export data/sessions/x                  # into data/sessions/x/export
+uv run python -m rrr.tools.export data/sessions/x -o /mnt/other/x  # exactly there
 uv run python -m rrr.tools.export data/sessions/x --stride 5 --end 600
 ```
 
+By default the export goes inside the session, so a recording and what was made
+from it are kept, moved and deleted together. `-o` names the export directory
+itself, not a parent to put one in.
+
 ```
-whole/
+data/sessions/x/export/
     manifest.json     the index: every stream, what it holds, where it is
     calibration.json  every sensor, every transform, and what is still unknown
     color/            index.csv + data/<sample>.png
@@ -369,7 +374,7 @@ place, so an interrupted conversion does not look complete. Check one again
 without the source recording with:
 
 ```bash
-uv run python -m rrr.tools.validate_export export/<session>
+uv run python -m rrr.tools.validate_export data/sessions/<session>/export
 ```
 
 ## MP4 review copies
@@ -378,7 +383,7 @@ The raw session remains the measurement, but a colour-and-sound review copy can
 be made without exporting every stream first:
 
 ```bash
-uv run python -m rrr.tools.render_mp4 data/sessions/walk-01 -o walk-01.mp4
+uv run python -m rrr.tools.render_mp4 data/sessions/walk-01   # data/sessions/walk-01/review.mp4
 ```
 
 The movie keeps the recorded frame timestamps, maps the WAV through
@@ -391,7 +396,8 @@ labelled as an unregistered array-frame angle. Missing calibration never
 silently becomes an identity transform: without clock, offset, rig, or DOA the
 tool falls back independently to a simple start-together audio/video movie.
 
-Use `--no-doa` for a clean picture and `--force` to replace an existing movie.
+Use `--no-doa` for a clean picture, `--force` to replace an existing movie, and
+`-o` to write it somewhere other than `review.mp4` inside the session.
 
 ## Not yet
 

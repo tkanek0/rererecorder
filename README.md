@@ -51,6 +51,8 @@ data/sessions/2026-09-02_15-28-36/
     audio.clock.jsonl   measured capture time per block
     doa.jsonl           the array's direction estimate
     events.jsonl        marks made by hand, saying what was happening
+    export/             plain-file copy for other code, once exported
+    review.mp4          colour and sound for watching, once rendered
 ```
 
 Every frame carries `received_monotonic` - the one axis everything else uses -
@@ -68,7 +70,7 @@ Make an ordinary H.264/AAC review movie directly from the colour camera and
 ReSpeaker recording with:
 
 ```bash
-uv run python -m rrr.tools.render_mp4 data/sessions/<name> -o <name>.mp4
+uv run python -m rrr.tools.render_mp4 data/sessions/<name>   # writes <name>/review.mp4
 ```
 
 Recorded clocks and calibration are applied when available; unset calibration

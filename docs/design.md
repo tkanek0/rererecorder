@@ -84,7 +84,12 @@ data/sessions/2026-09-02_15-28-36/
     audio.clock.jsonl   measured capture time per block
     doa.jsonl           the array's direction estimate
     events.jsonl        marks made by whoever was recording
+    export/             derived: rrr.tools.export's neutral copy
+    review.mp4          derived: rrr.tools.render_mp4's review movie
 ```
+
+The derived entries are written only when asked for, and nothing reads them
+back; they live here so that deleting a session deletes them too.
 
 The manifest is what ties them together. Without it the directory is three
 recordings sharing a folder: a WAV has no start time, and the archive's frame

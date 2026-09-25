@@ -389,10 +389,24 @@ which is why `manifest.json` is the index rather than something a reader
 reconstructs by walking directories.
 
 **Four properties, each of which would hurt later if reversed:** names are roles
-and not numbers; `manifest.json` answers what a session holds; every stream has
-the same shape (`index.csv` whose first column is `t_ns`, plus `data/` for
-images); anything variable-length is an array rather than a layout, so eight
+and not numbers; `manifest.json` answers what a session holds; every sampled
+stream has an explicit time-bearing index plus `data/` when its samples are
+files; anything variable-length is an array rather than a layout, so eight
 microphones instead of four is a longer list and not a new directory.
+
+Export format 2 names image files with a zero-padded sample id rather than
+`t_ns`. `received_monotonic` can repeat when two sets are delivered back-to-back
+(measured twice in 17,996 frames on Windows); using it as a filename could make
+the second image silently replace the first. Each image index therefore keeps
+`sample_id`, the archive's `group_id`, the common host `t_ns`, the stream's own
+sensor timestamp and its timestamp domain. Variable per-frame firmware metadata
+is retained separately as JSONL, keyed by the same `group_id`.
+
+A frame-range export derives a half-open host-clock interval from the selected
+frames and crops audio, inertial samples, DOA and marks to it as well. It is
+written beside the destination, validated using only the neutral files, then
+renamed into place. A failed conversion therefore leaves neither a plausible
+partial result nor, with `--force`, the previous valid export destroyed.
 
 **Everything is expressed against the depth stream's frame,** which is what the
 SDK reports `depth_to_color` and the rest against, and on a D400 is the left

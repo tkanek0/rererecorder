@@ -12,6 +12,7 @@ from __future__ import annotations
 import csv
 import json
 import os
+import sqlite3
 import wave
 from pathlib import Path
 
@@ -138,6 +139,10 @@ def session(tmp_path: Path) -> SessionPaths:
                     calibration=calibration,
                     motion=None,
                     timestamp_domain="global_time",
+                    metadata={
+                        "color": {"actual_exposure": 100 + n},
+                        "depth": {"laser_power": 150},
+                    },
                     infrared=(
                         rng.integers(0, 255, (HEIGHT, WIDTH), dtype=np.uint8),
                         rng.integers(0, 255, (HEIGHT, WIDTH), dtype=np.uint8),
@@ -227,6 +232,7 @@ def test_every_stream_is_written_and_indexed(session, tmp_path) -> None:
         "audio",
         "doa",
         "events",
+        "frame_metadata",
     }
     for name in ("color", "ir_left", "ir_right", "depth"):
         assert manifest["streams"][name]["count"] == FRAMES
@@ -245,7 +251,8 @@ def test_the_manifest_is_the_index(session, tmp_path) -> None:
                 assert (out / stream[key]).exists(), stream[key]
 
     named = {"manifest.json", "calibration.json", "derived"} | {
-        entry.split("/")[0] for stream in manifest["streams"].values()
+        entry.split("/")[0]
+        for stream in manifest["streams"].values()
         for key, entry in stream.items()
         if key in ("index", "data", "file", "clock", "fit")
     }
@@ -257,8 +264,45 @@ def test_times_are_nanoseconds_on_the_recording_axis(session, tmp_path) -> None:
 
     first = _rows(out / "color" / "index.csv")[0]
     assert int(first["t_ns"]) == pytest.approx(MONO * 1e9, abs=1e6)
-    # The filename is the time, so a directory listing sorts into order.
-    assert first["file"] == f"data/{first['t_ns']}.png"
+    # Filenames use a stable sequence rather than a possibly repeated clock value.
+    assert first["sample_id"] == "0"
+    assert first["group_id"] == "1"
+    assert first["file"] == "data/000000000.png"
+    assert first["sensor_timestamp_ms"] == str(REAL * 1000.0)
+    assert first["timestamp_domain"] == "global_time"
+
+
+def test_per_frame_metadata_is_kept(session, tmp_path) -> None:
+    out, manifest = _export(session, tmp_path)
+
+    path = out / manifest["streams"]["frame_metadata"]["index"]
+    records = [json.loads(line) for line in path.read_text().splitlines()]
+    assert len(records) == FRAMES
+    assert records[0] == {
+        "group_id": 1,
+        "streams": {
+            "color": {"actual_exposure": 100},
+            "depth": {"laser_power": 150},
+        },
+        "t_ns": exporter._ns(MONO),
+        "timestamp_domain": "global_time",
+    }
+
+
+def test_repeated_host_times_do_not_overwrite_images(session, tmp_path) -> None:
+    with sqlite3.connect(session.video) as connection:
+        first = connection.execute(
+            "SELECT received_monotonic FROM frames ORDER BY idx LIMIT 1"
+        ).fetchone()[0]
+        connection.execute(
+            "UPDATE frames SET received_monotonic = ? WHERE idx = 2", (first,)
+        )
+
+    out, _ = _export(session, tmp_path)
+    rows = _rows(out / "color" / "index.csv")
+    assert rows[0]["t_ns"] == rows[1]["t_ns"]
+    assert rows[0]["file"] != rows[1]["file"]
+    assert all((out / "color" / row["file"]).exists() for row in rows)
 
 
 def test_depth_keeps_its_sixteen_bits(session, tmp_path) -> None:
@@ -333,9 +377,7 @@ def test_transforms_name_both_frames(session, tmp_path) -> None:
     assert calibration["infrared_baseline_m"] == pytest.approx(BASELINE_M)
 
 
-def test_a_sensor_the_device_did_not_report_is_simply_absent(
-    session, tmp_path
-) -> None:
+def test_a_sensor_the_device_did_not_report_is_simply_absent(session, tmp_path) -> None:
     """The gyro has no calibration here, which must not become an identity."""
     out, _ = _export(session, tmp_path)
     calibration = json.loads((out / "calibration.json").read_text())
@@ -398,9 +440,7 @@ def test_the_device_offset_is_written_but_not_applied(session, tmp_path) -> None
     assert calibration["time_offset_s"]["value"] == 0.08
     assert not any("unmeasured" in note for note in written["notes"])
     # The audio's own times are untouched by it.
-    assert _rows(out / "audio" / "clock.csv")[0]["t_ns"] == str(
-        exporter._ns(MONO)
-    )
+    assert _rows(out / "audio" / "clock.csv")[0]["t_ns"] == str(exporter._ns(MONO))
 
 
 # -- choosing what to write ---------------------------------------------------
@@ -418,7 +458,16 @@ def test_a_range_writes_only_that_range(session, tmp_path) -> None:
     out, manifest = _export(session, tmp_path, start=2, end=5)
 
     rows = _rows(out / "color" / "index.csv")
-    assert [int(row["frame"]) for row in rows] == [2, 3, 4]
+    assert [int(row["sample_id"]) for row in rows] == [0, 1, 2]
+    assert [int(row["group_id"]) for row in rows] == [3, 4, 5]
+    assert len(_rows(out / "imu_accel" / "index.csv")) == 3
+    assert len(_rows(out / "doa" / "index.csv")) == 1
+    with wave.open(str(out / "audio" / "audio.wav")) as audio:
+        assert audio.getnframes() == 1600
+    assert manifest["source"]["time_range"] == {
+        "start_t_ns": exporter._ns(MONO + 2 / FPS),
+        "end_t_ns": exporter._ns(MONO + 5 / FPS),
+    }
 
 
 def test_jpeg_is_offered_and_recorded_as_lossy(session, tmp_path) -> None:
@@ -464,5 +513,35 @@ def test_a_session_with_only_video_exports(tmp_path) -> None:
     destination = tmp_path / "export" / "videoonly"
     written = exporter.export(paths, read_manifest(paths), str(destination))
 
-    assert set(written["streams"]) == {"depth"}
+    assert set(written["streams"]) == {"depth", "frame_metadata"}
     assert not (destination / "audio").exists()
+
+
+def test_validator_reports_a_missing_image(session, tmp_path) -> None:
+    out, _ = _export(session, tmp_path)
+    first = _rows(out / "color" / "index.csv")[0]
+    os.remove(out / "color" / first["file"])
+
+    assert exporter.validate_export(str(out)) == [
+        "stream color has 1 missing image files"
+    ]
+
+
+def test_failed_overwrite_leaves_the_previous_export(
+    session, tmp_path, monkeypatch
+) -> None:
+    out, _ = _export(session, tmp_path)
+    marker = out / "previous.txt"
+    marker.write_text("keep me")
+
+    def fail(*args, **kwargs):
+        raise OSError("synthetic failure")
+
+    monkeypatch.setattr(exporter, "_write_json", fail)
+    from rrr.timeline import read_manifest
+
+    with pytest.raises(OSError, match="synthetic failure"):
+        exporter.export(session, read_manifest(session), str(out), overwrite=True)
+
+    assert marker.read_text() == "keep me"
+    assert not list(out.parent.glob(".whole.exporting-*"))

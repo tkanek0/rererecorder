@@ -329,10 +329,11 @@ uv run python -m rrr.tools.export var/sessions/x --stride 5 --end 600
 whole/
     manifest.json     the index: every stream, what it holds, where it is
     calibration.json  every sensor, every transform, and what is still unknown
-    color/            index.csv + data/<ns>.png
-    ir_left/          index.csv + data/<ns>.png
-    ir_right/         index.csv + data/<ns>.png
-    depth/            index.csv + data/<ns>.png   16-bit, raw z16
+    color/            index.csv + data/<sample>.png
+    ir_left/          index.csv + data/<sample>.png
+    ir_right/         index.csv + data/<sample>.png
+    depth/            index.csv + data/<sample>.png   16-bit, raw z16
+    frame_metadata/   index.jsonl
     imu_accel/        index.csv
     imu_gyro/         index.csv
     audio/            audio.wav + clock.csv + clock_fit.json
@@ -341,10 +342,14 @@ whole/
     derived/          empty: where whatever is computed from this goes
 ```
 
-Times are integer nanoseconds on `CLOCK_MONOTONIC`, and a frame's filename *is*
-its time, so a directory listing sorts into order. Streams are named for their
-role rather than numbered, so removing a camera from the rig does not renumber
-the others. Anything variable-length - eight microphones instead of four - is a
+Times are integer nanoseconds on `CLOCK_MONOTONIC`. Image indexes also retain
+each sensor's own timestamp and its timestamp domain. Files are named with a
+zero-padded sample id rather than a time: host clock values can repeat when two
+frames arrive back-to-back, and a repeated time must not overwrite an image.
+`frame_metadata/index.jsonl` keeps exposure, gain, laser power and other
+variable firmware fields keyed by frame-set id. Streams are named for their role
+rather than numbered, so removing a camera from the rig does not renumber the
+others. Anything variable-length - eight microphones instead of four - is a
 longer array in `calibration.json` rather than a change of layout.
 
 One conversion happens, and the manifest names it: colour is written as RGB,
@@ -356,6 +361,16 @@ inertial streams stay apart rather than being resampled onto shared timestamps.
 would bake one alignment into files meant to outlast the decision. Where
 something is unknown - an unset rig, an unmeasured offset - the export says so
 in `notes` rather than substituting an identity.
+
+`--start` and `--end` choose image-frame positions. Their half-open host-clock
+interval is applied to audio, IMU, DOA and marks too; `--stride` only decimates
+images. An export is written to a temporary directory, checked, and renamed into
+place, so an interrupted conversion does not look complete. Check one again
+without the source recording with:
+
+```bash
+uv run python -m rrr.tools.validate_export export/<session>
+```
 
 ## Not yet
 

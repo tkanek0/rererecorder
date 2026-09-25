@@ -131,5 +131,7 @@ dserver:
 
 # -- cleanup ----------------------------------------------------------------
 
+# Build output only. Recordings are never touched: data/ is usually a link to the
+# disk holding every session, and nothing here should be one command from it.
 clean:
-	rm -rf data/sessions/* web/dist
+	rm -rf web/dist

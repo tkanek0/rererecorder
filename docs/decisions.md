@@ -196,8 +196,13 @@ to 242 MB/s, while the SATA drive held 195-207 MB/s for 6 GB without wavering.
 For long recordings the slower drive is the steadier one.
 
 **Since 28:** recordings go to the checkout's `data/`, which on this machine
-links to `/mnt/dataspace01/rererecorder` - `/dev/sdb1`, a different SATA drive
-from the `/dev/sdc1` measured above. That drive has not been measured.
+links to `/mnt/dataspace01/rererecorder` - `/dev/sdb1`, a second drive of the
+same model as `/dev/sdc1` above (Samsung 860 QVO 2TB). Measured on both, one
+after the other, with `tests/perf/sqlite_write_benchmark.py --frames 3600`,
+timed until the WAL is checkpointed and the file fsynced: 190 MB/s (2.2 GB of
+600 KB rows) and 200 MB/s (6.6 GB of 1.8 MB rows) on each, within 1% of each
+other and of the 198 MB/s above. Not measured: anything past 6.6 GB, which is
+where a QLC drive's write cache would run out; an hour of recording is 195 GB.
 
 ---
 
@@ -866,7 +871,7 @@ destination mean the same kind of thing.
 **Cost:** the container cannot follow the link from inside the bind-mounted
 checkout - its target is not in the container - so `/data` stays a separate
 mount, of the link, which Docker resolves on the host. The new target disk is
-unmeasured; see 11.
+measured in 11 and matches the old one.
 
 ---
 

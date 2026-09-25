@@ -11,6 +11,7 @@ encoding cost at all. That is why decision 22's raw codec fixes colour alone
 (about 61 MB/s, comfortably inside this) but not the full six-image set.
 
     uv run python tests/perf/sqlite_write_benchmark.py
+    uv run python tests/perf/sqlite_write_benchmark.py --dir data/ --frames 3600
 
 No device needed - only a disk to measure. Not part of `make check`: it takes
 real wall-clock time and its answer is about the disk and machine it runs on,
@@ -85,11 +86,22 @@ def _run(path: str, frames: int, blob_bytes: int, label: str) -> bool:
         connection.executescript(SCHEMA)
         connection.execute("PRAGMA journal_mode=WAL")
         connection.execute("PRAGMA synchronous=NORMAL")
+        began = time.perf_counter()
         durations = _insert_batch(connection, frames, blob_bytes)
         connection.commit()
         connection.execute("PRAGMA wal_checkpoint(TRUNCATE)")
     finally:
         connection.close()
+    # Until it is on the disk, not in the page cache. With synchronous=NORMAL an
+    # insert returns once the kernel has the bytes, so the per-insert figure is
+    # SQLite's cost and says nothing about the disk; on a machine with RAM to
+    # spare, gigabytes fit in the cache and never wait for it. This one does.
+    descriptor = os.open(path, os.O_RDONLY)
+    try:
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
+    durable_s = time.perf_counter() - began
 
     mean_ms = 1000 * sum(durations) / len(durations)
     worst_ms = 1000 * max(durations)
@@ -97,7 +109,12 @@ def _run(path: str, frames: int, blob_bytes: int, label: str) -> bool:
     verdict = "OK" if ok else f"OVER the {FRAME_BUDGET_MS:.1f} ms/frame budget"
     print(
         f"{label:>16}: {blob_bytes / 1024:7.0f} KB/blob -> "
-        f"{mean_ms:6.2f} ms/insert mean, {worst_ms:6.2f} ms worst  [{verdict}]"
+        f"{mean_ms:6.2f} ms/insert mean, {worst_ms:6.2f} ms worst, "
+        f"{blob_bytes / 1e6 / (mean_ms / 1000):6.1f} MB/s  [{verdict}]"
+    )
+    print(
+        f"{'':>16}  {frames * blob_bytes / 1e9:.1f} GB durable in {durable_s:.1f} s"
+        f" -> {frames * blob_bytes / 1e6 / durable_s:6.1f} MB/s to the disk"
     )
     return ok
 
@@ -132,10 +149,16 @@ def main(argv: list[str] | None = None) -> int:
         default=1800,
         help="decision 22's measured size for the uncompressed six-image set",
     )
+    parser.add_argument(
+        "--dir",
+        default=None,
+        help="disk to measure: where the scratch archives go (default: the "
+        "system temporary directory, which is usually not where recordings go)",
+    )
     args = parser.parse_args(argv)
 
     ok = True
-    with tempfile.TemporaryDirectory(prefix="rrr-sqlite-bench-") as tmp:
+    with tempfile.TemporaryDirectory(prefix="rrr-sqlite-bench-", dir=args.dir) as tmp:
         ok &= _run(
             os.path.join(tmp, "compressed.rrdb"),
             args.frames,

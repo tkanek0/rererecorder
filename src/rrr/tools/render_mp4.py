@@ -7,8 +7,8 @@ calibration it still makes a useful movie by starting both tracks together.
 
 Usage::
 
-    uv run python -m rrr.tools.render_mp4 var/sessions/walk-01
-    uv run python -m rrr.tools.render_mp4 var/sessions/walk-01 -o walk-01.mp4
+    uv run python -m rrr.tools.render_mp4 data/sessions/walk-01
+    uv run python -m rrr.tools.render_mp4 data/sessions/walk-01 -o walk-01.mp4
 """
 
 from __future__ import annotations

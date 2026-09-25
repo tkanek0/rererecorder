@@ -1,7 +1,7 @@
 """Measure the offset between the camera and the array, from a handclap.
 
-    uv run python -m rrr.tools.calibrate var/sessions/2026-09-02_15-28-36
-    uv run python -m rrr.tools.calibrate var/sessions/... --apply
+    uv run python -m rrr.tools.calibrate data/sessions/2026-09-02_15-28-36
+    uv run python -m rrr.tools.calibrate data/sessions/... --apply
 
 Both devices timestamp their own measurements, and both are believable to about
 ten milliseconds. What neither says is how long a sound takes to reach the

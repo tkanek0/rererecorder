@@ -5,10 +5,11 @@ __pycache__/
 .mypy_cache/
 .pytest_cache/
 
-# Recorded sessions and logs
-/var/
+# Recorded sessions, exports and review movies. No trailing slash: data is
+# usually a symbolic link to a disk with room, and git sees a link as a file.
+/data
 
-# Loose recording artefacts, in case anything is written outside var/
+# Loose recording artefacts, in case anything is written outside data/
 *.rsdb
 *.db3
 *.wav

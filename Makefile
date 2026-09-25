@@ -12,8 +12,8 @@
 # Neither is needed to record. The CLI does it on its own:
 #
 #   make record       record a session   (SECONDS=10 SESSION=name)
-#   make inspect      cross-check a recorded session   (DIR=var/sessions/x)
-#   make export       write it out as plain files      (DIR=var/sessions/x)
+#   make inspect      cross-check a recorded session   (DIR=data/sessions/x)
+#   make export       write it out as plain files      (DIR=data/sessions/x)
 #   make devices      what the SDK can see
 #
 # The camera loses frames through the kernel's uvcvideo, so recording happens
@@ -34,7 +34,9 @@ SECONDS   ?= 10
 SESSION   ?=
 DIR       ?=
 OUT       ?= export
-DATA      ?= /mnt/dataspace02/rererecorder
+#: Where recordings go, mounted as /data in the container. Normally a symbolic
+#: link to a disk with room; Docker resolves it on the host.
+DATA      ?= $(CURDIR)/data
 
 #: Control plane port. Kept in step with web/src/lib/api.ts's default.
 PORT      ?= 8040
@@ -42,7 +44,7 @@ PORT      ?= 8040
 WEB_PORT  ?= 5177
 
 IMAGE     ?= rererecorder:latest
-#: --user: recordings under var/ would otherwise come out owned by root.
+#: --user: recordings under data/ would otherwise come out owned by root.
 #: --device: the RSUSB backend needs the USB bus and nothing else - no
 #: /dev/video*, no kernel module, nothing privileged.
 #: The audio group, because /dev/snd/* is root:audio 0660. On the host an ACL
@@ -101,11 +103,11 @@ record:
 		$(if $(SESSION),--session $(SESSION),)
 
 inspect:
-	@test -n "$(DIR)" || (echo "usage: make inspect DIR=var/sessions/<name>"; exit 1)
+	@test -n "$(DIR)" || (echo "usage: make inspect DIR=data/sessions/<name>"; exit 1)
 	uv run python -m rrr.tools.inspect $(DIR)
 
 export:
-	@test -n "$(DIR)" || (echo "usage: make export DIR=var/sessions/<name> [OUT=export]"; exit 1)
+	@test -n "$(DIR)" || (echo "usage: make export DIR=data/sessions/<name> [OUT=export]"; exit 1)
 	uv run python -m rrr.tools.export $(DIR) -o $(OUT)
 
 devices:
@@ -129,4 +131,4 @@ dserver:
 # -- cleanup ----------------------------------------------------------------
 
 clean:
-	rm -rf var/sessions/* web/dist
+	rm -rf data/sessions/* web/dist

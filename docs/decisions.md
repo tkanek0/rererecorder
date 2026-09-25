@@ -195,6 +195,10 @@ burst (290 MB/s) but **falls off after 3 GB** as its SLC cache fills, from 364
 to 242 MB/s, while the SATA drive held 195-207 MB/s for 6 GB without wavering.
 For long recordings the slower drive is the steadier one.
 
+**Since 28:** recordings go to the checkout's `data/`, which on this machine
+links to `/mnt/dataspace01/rererecorder` - `/dev/sdb1`, a different SATA drive
+from the `/dev/sdc1` measured above. That drive has not been measured.
+
 ---
 
 ## 12. Open the inertial sensor separately, at its own rate
@@ -829,6 +833,29 @@ for exactly the reason 15 gave.
 copied, so that layer survives a code change, then the project itself. The
 install is editable, so the development bind mount of the checkout over `/app`
 still runs the mounted source without a rebuild.
+
+---
+
+## 28. One data root, `data/`, shared by the host and the container
+
+**Chosen:** `data/` at the repository root, git-ignored and normally a symbolic
+link to a disk with room. The recorder's default is `data/sessions`; the
+Makefile and compose mount the same `data/` as `/data`, so the host and the
+container write to one place.
+
+**Alternatives:** `var/sessions` on the host and `/mnt/dataspace02/rererecorder`
+in the container, as before; a `var/` that is itself a link.
+
+**Why:** two defaults meant that where a recording landed depended on how it was
+started, and exports and review movies went to a third and fourth place
+(`export/`, `mp4/`) at the repository root. A link makes the choice of disk a
+property of the machine rather than of the code. `data` rather than `var`
+matches the name the container already used.
+
+**Cost:** the container cannot follow the link from inside the bind-mounted
+checkout - its target is not in the container - so `/data` stays a separate
+mount, of the link, which Docker resolves on the host. The new target disk is
+unmeasured; see 11.
 
 ---
 

@@ -172,9 +172,9 @@ Nothing here needs the server, and the server records through exactly this code.
 ```
 make record SECONDS=30 SESSION=kitchen     # on the host: V4L2, loses frames
 make drecord SECONDS=30                    # in the container: RSUSB, does not
-make inspect DIR=var/sessions/kitchen      # cross-check a recording
+make inspect DIR=data/sessions/kitchen      # cross-check a recording
 make dserver                               # the page, on :8040
-make export DIR=var/sessions/kitchen       # write it out as plain files
+make export DIR=data/sessions/kitchen       # write it out as plain files
 make check                                 # 229 tests, no device needed
 ```
 
@@ -209,7 +209,7 @@ means something. Its exit status is 1 if any check disagreed.
 ```python
 from rrr.video import ArchiveSource
 
-with ArchiveSource("var/sessions/x/video.rrdb") as archive:
+with ArchiveSource("data/sessions/x/video.rrdb") as archive:
     for frames in archive.frames():
         frames.received_monotonic  # the common axis
         frames.depth               # (720, 1280) uint16, raw z16
@@ -280,8 +280,8 @@ takes to reach the array's converter against how long light takes to reach the
 camera's shutter timestamp.
 
 ```
-uv run python -m rrr.tools.calibrate var/sessions/<name>          # measure
-uv run python -m rrr.tools.calibrate var/sessions/<name> --apply  # and record it
+uv run python -m rrr.tools.calibrate data/sessions/<name>          # measure
+uv run python -m rrr.tools.calibrate data/sessions/<name> --apply  # and record it
 ```
 
 That measures *when*. **Where** is a separate question, and it is not measured
@@ -321,8 +321,8 @@ recording as plain files - PNG images, CSV tables, a WAV - so a consumer needs a
 filesystem and nothing else.
 
 ```bash
-uv run python -m rrr.tools.export var/sessions/x -o /mnt/dataspace01/rrr
-uv run python -m rrr.tools.export var/sessions/x --stride 5 --end 600
+uv run python -m rrr.tools.export data/sessions/x -o /mnt/dataspace01/rrr
+uv run python -m rrr.tools.export data/sessions/x --stride 5 --end 600
 ```
 
 ```
@@ -378,7 +378,7 @@ The raw session remains the measurement, but a colour-and-sound review copy can
 be made without exporting every stream first:
 
 ```bash
-uv run python -m rrr.tools.render_mp4 var/sessions/walk-01 -o walk-01.mp4
+uv run python -m rrr.tools.render_mp4 data/sessions/walk-01 -o walk-01.mp4
 ```
 
 The movie keeps the recorded frame timestamps, maps the WAV through

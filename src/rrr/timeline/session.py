@@ -5,7 +5,7 @@ are being recorded at once, and forcing both into one container would mean the
 audio could no longer be opened by anything that opens a WAV - which is most of
 what anyone would want to do with it.
 
-    var/sessions/2026-09-01_17-30-00/
+    data/sessions/2026-09-01_17-30-00/
         session.json        this manifest
         video.rsdb          frames, calibration, sensor options, inertial samples
         audio.wav           every channel, int16, gaps filled with silence

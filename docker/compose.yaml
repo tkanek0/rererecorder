@@ -21,9 +21,11 @@ services:
       # transfer and comes in through the bus above.
       - /dev/snd:/dev/snd
     volumes:
-      # Where recordings go. 54 MB/s with every stream on, so this wants a disk
-      # with room - 195 GB an hour.
-      - ${RRR_DATA:-/mnt/dataspace02/rererecorder}:/data
+      # Where recordings go: the checkout's data/, which is normally a symbolic
+      # link to a disk with room - 54 MB/s with every stream on, 195 GB an hour.
+      # Docker resolves the link on the host, so the container writes where the
+      # host reads.
+      - ${RRR_DATA:-../data}:/data
       # Bind the source during development so a code change does not need a
       # rebuild. The image already contains a copy; this shadows it.
       - ..:/app
@@ -34,7 +36,7 @@ services:
       RRR_COLOR: ${RRR_COLOR:-1280x800@30}
       RRR_SESSIONS_DIR: ${RRR_SESSIONS_DIR:-/data/sessions}
       RRR_AUDIO: ${RRR_AUDIO:-1}
-    # Run as the invoking user, so recordings under var/ do not come out owned
+    # Run as the invoking user, so recordings under data/ do not come out owned
     # by root. The camera stays reachable because the RealSense udev rule makes
     # its node world-writable (crw-rw-rw- root plugdev), so no group membership
     # is needed inside the container.

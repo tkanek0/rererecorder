@@ -31,10 +31,20 @@ make drecord SECONDS=30         # or just record, from the terminal
 `make help` lists the rest. Running on the host works and is fine for developing
 the page, but it will drop frames.
 
+## Where recordings go
+
+Everything recorded or derived lives under `data/` at the repository root, on
+the host and in the container alike (mounted there as `/data`). It is ignored by
+git and is normally a symbolic link to a disk with room:
+
+```bash
+ln -s /mnt/dataspace01/rererecorder data
+```
+
 ## What a session is
 
 ```
-var/sessions/2026-09-02_15-28-36/
+data/sessions/2026-09-02_15-28-36/
     session.json        clock anchors, calibration and rig state, what went wrong
     video.rrdb          SQLite: frames, motion, calibration, sensor options
     audio.wav           every channel, gaps filled with silence
@@ -48,7 +58,7 @@ plus `color_timestamp_ms` and `depth_timestamp_ms`, each sensor's own idea of
 when it happened. Check a recording with:
 
 ```bash
-make inspect DIR=var/sessions/2026-09-02_15-28-36
+make inspect DIR=data/sessions/2026-09-02_15-28-36
 ```
 
 which re-reads the files and makes them argue with each other, rather than
@@ -58,7 +68,7 @@ Make an ordinary H.264/AAC review movie directly from the colour camera and
 ReSpeaker recording with:
 
 ```bash
-uv run python -m rrr.tools.render_mp4 var/sessions/<name> -o <name>.mp4
+uv run python -m rrr.tools.render_mp4 data/sessions/<name> -o <name>.mp4
 ```
 
 Recorded clocks and calibration are applied when available; unset calibration
@@ -69,7 +79,7 @@ falls back to a simple start-together movie without claiming a correction.
 ```python
 from rrr.video import ArchiveSource
 
-with ArchiveSource("var/sessions/x/video.rrdb") as archive:
+with ArchiveSource("data/sessions/x/video.rrdb") as archive:
     for frames in archive.frames():
         frames.received_monotonic  # the common axis
         frames.depth               # (720, 1280) uint16, raw z16

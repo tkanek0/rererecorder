@@ -59,10 +59,10 @@ def _spec(name: str, default: StreamSpec | None) -> StreamSpec | None:
 #: Where session directories are created.
 #:
 #: A relative default, so a checkout works anywhere and a container needs only a
-#: mount. At the sizes recorded here - 54 MB/s, 195 GB an hour - this wants to
-#: point at a disk with room: set ``RRR_SESSIONS_DIR``, or change it from the
-#: recording page, which writes the same variable.
-SESSIONS_ROOT = os.environ.get("RRR_SESSIONS_DIR", "var/sessions")
+#: mount. At the sizes recorded here - 54 MB/s, 195 GB an hour - ``data/`` wants
+#: to be a symbolic link to a disk with room; ``RRR_SESSIONS_DIR``, or the
+#: recording page, which writes the same variable, overrides it.
+SESSIONS_ROOT = os.environ.get("RRR_SESSIONS_DIR", "data/sessions")
 
 #: Serial of the camera to open; empty means whichever the SDK finds first.
 SERIAL = os.environ.get("RRR_SERIAL", "")

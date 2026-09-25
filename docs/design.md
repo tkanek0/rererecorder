@@ -77,7 +77,7 @@ Two devices with two natural formats. Forcing both into one container would mean
 the audio could no longer be opened by anything that opens a WAV.
 
 ```
-var/sessions/2026-09-02_15-28-36/
+data/sessions/2026-09-02_15-28-36/
     session.json        the manifest: clock anchors, calibration state, errors
     video.rrdb          SQLite: frames, motion, calibration, sensor options
     audio.wav          every channel, int16, gaps filled with silence

@@ -1,8 +1,8 @@
 """Turn a session into a neutral directory that needs none of this code.
 
-    uv run python -m rrr.tools.export var/sessions/2026-09-02_15-28-36
-    uv run python -m rrr.tools.export var/sessions/x -o /mnt/dataspace01/rrr
-    uv run python -m rrr.tools.export var/sessions/x --stride 5 --end 600
+    uv run python -m rrr.tools.export data/sessions/2026-09-02_15-28-36
+    uv run python -m rrr.tools.export data/sessions/x -o /mnt/dataspace01/rrr
+    uv run python -m rrr.tools.export data/sessions/x --stride 5 --end 600
 
 ``video.rrdb`` is shaped for recording: one SQLite row per frame, colour left in
 the sensor's own YUYV, depth in raw z16. That is the right shape for writing 54

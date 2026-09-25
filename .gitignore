@@ -4,6 +4,7 @@ __pycache__/
 .venv/
 .mypy_cache/
 .pytest_cache/
+.ruff_cache
 
 # Recorded sessions, exports and review movies. No trailing slash: data is
 # usually a symbolic link to a disk with room, and git sees a link as a file.

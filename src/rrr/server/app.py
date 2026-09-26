@@ -133,6 +133,10 @@ app.add_middleware(
     allow_origins=config.ALLOW_ORIGINS,
     allow_methods=["*"],
     allow_headers=["*"],
+    # The page is served from another port, so these are cross-origin reads:
+    # without being listed, the browser hides them from the player, which then
+    # cannot say which frame it is showing or when it was captured.
+    expose_headers=["X-Frame-Index", "X-Received-Monotonic"],
 )
 
 

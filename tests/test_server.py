@@ -115,6 +115,14 @@ def test_storage_reports_free_space_and_no_rate_when_idle(client) -> None:
     assert storage["seconds_left"] is None
 
 
+def test_frame_headers_are_readable_cross_origin(client) -> None:
+    """The page is served from another port; unlisted headers stay hidden."""
+    response = client.get("/api/health", headers={"Origin": "http://localhost:5177"})
+    exposed = response.headers["access-control-expose-headers"]
+    assert "X-Frame-Index" in exposed
+    assert "X-Received-Monotonic" in exposed
+
+
 # -- settings ----------------------------------------------------------------
 
 

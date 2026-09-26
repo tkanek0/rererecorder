@@ -27,6 +27,7 @@ from typing import Any
 
 import numpy as np
 from fastapi import FastAPI, HTTPException, Request, Response
+from fastapi.concurrency import run_in_threadpool
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
@@ -864,7 +865,7 @@ def stream(kind: str, request: Request) -> StreamingResponse:
     width = int(query.get("width", config.PREVIEW_WIDTH))
 
     return StreamingResponse(
-        _frames(kind, near, far, colormap, width),
+        _frames(request, kind, near, far, colormap, width),
         media_type=preview.MJPEG_CONTENT_TYPE,
         headers={"Cache-Control": "no-store"},
     )
@@ -887,24 +888,44 @@ def _preview_max_hz() -> float:
     return config.PREVIEW_MAX_HZ_IDLE
 
 
-def _frames(kind: str, near: float, far: float, colormap: str, width: int):
+#: Seconds a live stream waits between checks while its device has failed.
+#: Nothing will arrive until someone reconnects it, so this only bounds how
+#: late the stream notices a reconnect - or its client leaving.
+_FAILED_WAIT_S = 1.0
+
+#: Longest a live stream waits for new data before checking its client again.
+_STREAM_WAIT_S = 1.0
+
+
+async def _frames(
+    request: Request, kind: str, near: float, far: float, colormap: str, width: int
+):
     """Yield MJPEG parts until the client goes away.
 
     The hub is held for the life of the generator, so the camera closes shortly
     after the last preview disconnects - unless a recording is holding it, which
     it does by its own reference.
+
+    Asynchronous, and checking for the client itself, because nothing else
+    notices it leave. The server speaks ASGI 2.4, under which Starlette does not
+    watch for a disconnect and learns of one only when a send fails - and a
+    stream with no frames to send never sends. As a synchronous generator this
+    looped forever on a camera that was not there, holding the hub open after
+    every page that had ever shown a preview.
     """
     hub = state.hub
     hub.acquire()
     try:
         after = 0
         next_at = 0.0
-        while True:
-            frames = hub.latest(timeout=5.0, after=after)
+        while not await request.is_disconnected():
+            frames = await run_in_threadpool(hub.latest, _STREAM_WAIT_S, after)
             if frames is None:
                 # Nothing arrived: the camera may be starting or gone. Keep the
                 # response open rather than ending it, so the page does not have
                 # to distinguish "no frames yet" from "stream over".
+                if hub.failed:
+                    await asyncio.sleep(_FAILED_WAIT_S)
                 continue
             after = frames.index
             now = time.monotonic()
@@ -912,23 +933,27 @@ def _frames(kind: str, near: float, far: float, colormap: str, width: int):
                 continue
             next_at = now + 1.0 / _preview_max_hz()
 
-            image = preview.render(
-                frames, kind, near_m=near, far_m=far, colormap=colormap
+            jpeg = await run_in_threadpool(
+                _preview_jpeg, frames, kind, near, far, colormap, width
             )
-            if image is None:
-                continue
-            jpeg = preview.encode_jpeg(
-                preview.downscale(image, width), config.JPEG_QUALITY
-            )
-            yield preview.mjpeg_part(jpeg)
-    except (GeneratorExit, ConnectionError):
-        pass
+            if jpeg is not None:
+                yield preview.mjpeg_part(jpeg)
     finally:
         hub.release()
 
 
+def _preview_jpeg(
+    frames, kind: str, near: float, far: float, colormap: str, width: int
+) -> bytes | None:
+    """Render one preview frame, or None if the set lacks that stream."""
+    image = preview.render(frames, kind, near_m=near, far_m=far, colormap=colormap)
+    if image is None:
+        return None
+    return preview.encode_jpeg(preview.downscale(image, width), config.JPEG_QUALITY)
+
+
 @app.get("/stream/audio-levels")
-def audio_levels() -> StreamingResponse:
+def audio_levels(request: Request) -> StreamingResponse:
     """Stream each channel's current level, for a live meter.
 
     Returns:
@@ -952,17 +977,18 @@ def audio_levels() -> StreamingResponse:
             status_code=404, detail="this server was started with audio off"
         )
     return StreamingResponse(
-        _levels(tap),
+        _levels(request, tap),
         media_type="text/event-stream",
         headers={"Cache-Control": "no-store"},
     )
 
 
-def _levels(tap: AudioTap):
+async def _levels(request: Request, tap: AudioTap):
     """Yield one SSE event per interval with each channel's level.
 
     Runs whether or not a session is being recorded - the same tap either
-    way, reference counted like the camera's hub.
+    way, reference counted like the camera's hub. Checks for its client itself,
+    for the reason given in ``_frames``.
     """
     tap.acquire()
     try:
@@ -971,13 +997,15 @@ def _levels(tap: AudioTap):
             1.0 / config.AUDIO_LEVEL_HZ if config.AUDIO_LEVEL_HZ > 0 else 0.0
         )
         next_at = 0.0
-        while True:
-            window = tap.latest(
-                seconds=config.AUDIO_LEVEL_WINDOW_S, timeout=5.0, after=after
+        while not await request.is_disconnected():
+            window = await run_in_threadpool(
+                tap.latest, config.AUDIO_LEVEL_WINDOW_S, _STREAM_WAIT_S, after
             )
             if window is None:
                 # Nothing new: the array may be starting or gone. Keep the
                 # connection open, the same as the video preview does.
+                if tap.failed:
+                    await asyncio.sleep(_FAILED_WAIT_S)
                 continue
             after = window.index
             now = time.monotonic()
@@ -994,8 +1022,6 @@ def _levels(tap: AudioTap):
                 "mic4": dbfs(float(mics[3])),
             }
             yield f"data: {json.dumps(payload)}\n\n"
-    except (GeneratorExit, ConnectionError):
-        pass
     finally:
         tap.release()
 

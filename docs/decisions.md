@@ -880,6 +880,65 @@ measured in 11 and matches the old one.
 
 ---
 
+## 29. A failed device stays failed until someone presses Reconnect
+
+**Chosen:** `FrameHub`, `AudioTap` and `DoaTap` stop when their device fails -
+on opening, or when a working stream breaks - and stay stopped. A new consumer
+does not reopen them. `reconnect()` does, and the only callers are
+`POST /api/devices/{realsense|respeaker}/reconnect` (the page's Reconnect
+button) and, for the camera, a stream-settings change. Reconnect is refused
+while recording. Around it:
+
+- `LiveSource.open` enumerates first and fails at once when no device (or none
+  with the configured serial) is attached, instead of letting
+  `pipeline.start()` wait it out.
+- The live MJPEG and audio-level streams are async generators that check
+  `request.is_disconnected()` themselves.
+- The RealSense enumeration behind `/api/status` is kept, and redone only on
+  the first status, after each hub failure and on Reconnect.
+- Reconnecting the array re-initialises PortAudio first, when its stream is
+  not open, since PortAudio's device list is taken once at initialisation.
+
+**Alternatives:** keep retrying every 2 s, with the pre-check making each try
+cheap (rejected: still a 0.1 s GIL stall every 2 s for as long as the camera is
+missing); back off to a longer interval (rejected: the stall remains, only
+rarer, and a replug is still noticed late); open the camera in a subprocess so
+its blocking calls cannot hold the server's GIL (rejected: a large change for a
+problem that disappears once nothing retries); retry once after a working
+stream breaks, to ride out a USB hiccup mid-recording (rejected by the user: one
+rule for every failure, and no automatic opens at all).
+
+**Why:** with the camera unplugged, the server stopped answering for 15 s out of
+every 17. Frame requests that take 5 ms took 14.9-15.0 s at that period, and the
+player froze its picture while the audio played on. Measured in isolation,
+`pipeline.start()` with nothing attached takes 15.12 s to fail and holds the GIL
+throughout - a second Python thread went 15.11 s without running - and the hub
+retried it 2 s after each failure. `rs.context().query_devices()` answers the
+same question in 0.10 s.
+
+What kept the loop alive with no page open was a leak. The MJPEG generator
+held the hub, and with no frames it never yielded. Uvicorn speaks ASGI 2.4, under
+which Starlette does not watch for a disconnect and learns of one only when a
+send fails, so a generator that never sends never finds out. Every page that
+had shown a preview left a hold behind: the hub read `active` with no listener
+and nobody watching. The audio-level stream had the same shape.
+
+The status poll's enumeration is the same stall in miniature. At 0.1-0.2 s per
+second it is a visible stutter in playback, and it is what told the page a
+camera was plugged in. With no automatic opens, the page learning of a replug at
+the next Reconnect is consistent rather than a loss.
+
+**Cost:** a USB drop in the middle of a recording now loses the rest of that
+device's stream rather than a two-second gap, until the session is stopped and
+the device reconnected. What a device reopened mid-session would leave in the
+files was never measured, so Reconnect waits for the recording to end. A
+replugged device is invisible to the page until someone presses the button.
+Re-initialising PortAudio uses `sounddevice`'s private `_terminate` /
+`_initialize`, and has not yet been checked against an array actually
+replugged.
+
+---
+
 ## Known limits
 
 **Nothing stops a recording when the disk fills.** At 195 GB an hour this will

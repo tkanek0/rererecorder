@@ -119,7 +119,8 @@ treated as unknown until something measures them:
 Built: the `rrr` namespace, the `rig` block, `events.jsonl` and its page
 button, the full rig calibration (infrared intrinsics and baseline, inertial
 extrinsics and the device's own correction), `RRR_EMITTER=on|off|alternating`,
-and `rrr.tools.export`.
+`rrr.tools.export`, and the page's Reconnect buttons. A failed device is never
+retried automatically - see `docs/decisions.md` 29.
 
 Not built, and deliberately so: pose. Monocular SLAM belongs to the analysis
 repository - the export carries what it needs. This repository measures and

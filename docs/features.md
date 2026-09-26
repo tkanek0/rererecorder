@@ -165,6 +165,13 @@ Playing pauses when the tab is hidden: Chrome throttles a background tab's
 timers to the point where a `setTimeout(10)` took 557 ms, so the loop would crawl
 while the button still said Pause.
 
+**A failed device stays failed.** When the camera or the array cannot be opened,
+or stops delivering, its card shows why and a **Reconnect** button. Nothing
+retries on its own: a retry loop against a missing camera stalled every request
+the server answered, for 15 s at a time (`docs/decisions.md` 29). The button
+also enumerates the device again, so a device plugged in later appears after
+Reconnect rather than by itself. It is disabled while recording.
+
 ## The command line
 
 Nothing here needs the server, and the server records through exactly this code.

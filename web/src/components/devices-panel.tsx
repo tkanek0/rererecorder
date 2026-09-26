@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 import {
   audioLevelsUrl,
@@ -255,6 +255,33 @@ const CaptureControls = ({
 };
 
 /**
+ * An `<img>` showing an MJPEG stream, which closes the stream when it goes.
+ *
+ * Measured in Chrome: removing an `<img>` whose source is a multipart stream
+ * leaves the connection open, so each time the player hid this panel two more
+ * were left behind. At six connections per host - Chrome's limit - the page's
+ * next requests to the server, the player's frames and audio among them, queued
+ * behind streams nobody was watching. Clearing `src` before removal closes it.
+ *
+ * The source is set here rather than in the markup, so that setting and
+ * clearing it are one effect's two halves and cannot run out of order.
+ */
+const LiveImage = ({ src, alt }: { src: string; alt: string }) => {
+  const image = useRef<HTMLImageElement>(null);
+
+  useEffect(() => {
+    const element = image.current;
+    if (!element) return;
+    element.src = src;
+    return () => {
+      element.src = '';
+    };
+  }, [src]);
+
+  return <img ref={image} alt={alt} />;
+};
+
+/**
  * Ask the server to try a device again.
  *
  * Shown only while the device has failed or is not detected: the server never
@@ -348,7 +375,7 @@ export const DevicesPanel = ({ devices, settings, recording, onChanged }: Props)
           <div className="visual previews">
             {(['color', 'depth'] as PreviewKind[]).map((kind) => (
               <figure key={kind}>
-                <img src={previewUrl(kind)} alt={PREVIEW_LABELS[kind]} />
+                <LiveImage src={previewUrl(kind)} alt={PREVIEW_LABELS[kind]} />
                 <figcaption>
                   <span>{PREVIEW_LABELS[kind]}</span>
                   <span>

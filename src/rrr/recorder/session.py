@@ -435,6 +435,15 @@ class SessionRecorder:
         return self._tap
 
     @property
+    def doa(self) -> DoaTap | None:
+        """The direction tap this recorder reads, or None if it reads none.
+
+        Exposed for the same reason as :attr:`tap`: so that a server can
+        reconnect the array as one device.
+        """
+        return self._doa
+
+    @property
     def recording(self) -> bool:
         """Whether a session is currently being written."""
         monitor = self._monitor

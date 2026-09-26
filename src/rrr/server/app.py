@@ -20,6 +20,7 @@ import json
 import logging
 import os
 import shutil
+import threading
 import time
 import wave
 from contextlib import asynccontextmanager
@@ -32,7 +33,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
-from rrr.audio import AudioTap, dbfs, probe as probe_audio, rms
+from rrr.audio import AudioTap, dbfs, probe as probe_audio, rescan, rms
 from rrr.recorder import RecorderBusy, SessionRecorder
 from rrr.recorder import config as recording_config
 from rrr.timeline import (
@@ -44,6 +45,7 @@ from rrr.timeline import (
 )
 from rrr.video import (
     ArchiveSource,
+    DeviceInfo,
     FrameHub,
     LiveSource,
     StreamConfig,
@@ -85,6 +87,27 @@ class State:
         #: what makes free space meaningful, and "measured while recording" is
         #: not an answer to "how long can I record".
         self.last_write_rate: float | None = None
+        #: RealSense devices as last enumerated, or None before the first time.
+        #: See _realsense_device for when that is.
+        self.realsense_found: list[DeviceInfo] | None = None
+        #: The hub failure the enumeration above already reflects, by its
+        #: error_at, so that each failure costs one enumeration and no more.
+        self.realsense_found_after = 0.0
+        self.realsense_lock = threading.Lock()
+
+    def enumerate_realsense(self) -> list[DeviceInfo]:
+        """Enumerate RealSense devices now, and keep the result."""
+        with self.realsense_lock:
+            self.realsense_found = list_devices()
+            self.realsense_found_after = self.hub.error_at
+            return self.realsense_found
+
+    def known_realsense(self) -> list[DeviceInfo]:
+        """The kept enumeration, redone only when it may have gone stale."""
+        with self.realsense_lock:
+            found = self.realsense_found
+            stale = found is None or self.hub.error_at > self.realsense_found_after
+        return self.enumerate_realsense() if stale else found
 
     @property
     def streams(self) -> StreamConfig:
@@ -183,22 +206,28 @@ def _realsense_device() -> dict[str, Any]:
     """Describe the D455 as the SDK currently sees it, streaming or not.
 
     ``list_devices()`` is a real USB enumeration - measured at 200-240 ms on
-    this machine, not a cheap read - so it is only called while the hub has
-    nobody watching it. While the hub is active (a preview or a recording
-    holds it open), its own ``device`` is used instead: re-enumerating every
-    second on top of an open stream was found to periodically stall the USB
-    bus enough to show up as silence-fills in a recording's own audio,
-    spaced almost exactly one second apart - the page's own status-poll
-    interval. Idle, the 200 ms is free: nothing time-critical is running.
+    this machine, not a cheap read - and it holds the GIL throughout, so every
+    other request waits on it. While the hub is active (a preview or a
+    recording holds it open), its own ``device`` is used instead:
+    re-enumerating every second on top of an open stream was found to
+    periodically stall the USB bus enough to show up as silence-fills in a
+    recording's own audio, spaced almost exactly one second apart - the page's
+    own status-poll interval.
+
+    Idle, it is not free either: a stall that long every second is a visible
+    stutter in a session being played back. So the enumeration is kept, and
+    redone only on the first status, after each hub failure, and when someone
+    presses Reconnect. A camera plugged in meanwhile shows up at the next of
+    those, which is the same rule the hub follows for opening it.
     """
     hub = state.hub
     if hub.active:
         device = hub.device
     else:
         try:
-            found = list_devices()
+            found = state.known_realsense()
         except Exception as error:  # noqa: BLE001 - reported to the page
-            return {"connected": False, "error": str(error)}
+            return {"connected": False, "failed": hub.failed, "error": str(error)}
         serial = recording_config.SERIAL
         device = next((d for d in found if not serial or d.serial == serial), None)
     return {
@@ -209,24 +238,76 @@ def _realsense_device() -> dict[str, Any]:
         "streams": state.streams.as_dict(),
         "streaming": hub.active,
         "fps": round(hub.fps, 2),
+        "failed": hub.failed,
         "error": hub.error,
     }
 
 
 def _respeaker_device() -> dict[str, Any]:
-    """Describe the array as PortAudio currently sees it, recording or not."""
+    """Describe the array as PortAudio currently sees it, recording or not.
+
+    ``failed`` covers both halves of the array - the audio stream and the
+    direction readings - since one Reconnect restarts both.
+    """
     found = probe_audio()
     tap = state.recorder.tap
+    doa = state.recorder.doa
+    failures = [t.error for t in (tap, doa) if t is not None and t.failed]
     return {
         "connected": found.connected,
         "name": found.name,
         "host_api": found.host_api,
         "channels": found.channels,
         "rate": found.rate,
-        "error": found.error,
+        "failed": bool(failures),
+        "error": failures[0] if failures else found.error,
         "recording": tap.active if tap else False,
         "overruns": tap.overruns if tap else 0,
     }
+
+
+@app.post("/api/devices/{name}/reconnect")
+def reconnect_device(name: str) -> dict[str, Any]:
+    """Try a device again after it failed, or after it was plugged in.
+
+    Args:
+        name: ``realsense`` or ``respeaker``.
+
+    Returns:
+        The devices, as ``/api/status`` reports them.
+
+    Raises:
+        HTTPException: 404 for an unknown device; 409 while recording.
+
+    The only way a failed device is opened again: nothing retries on its own
+    (docs/decisions.md 29). Refused while recording, because what a reopened
+    device mid-session leaves in the files has not been measured.
+    """
+    if name not in ("realsense", "respeaker"):
+        raise HTTPException(status_code=404, detail=f"no device {name!r}")
+    if state.recorder.recording:
+        raise HTTPException(
+            status_code=409, detail="stop the recording before reconnecting"
+        )
+
+    if name == "realsense":
+        try:
+            state.enumerate_realsense()
+        except Exception as error:  # noqa: BLE001 - the hub reports it too
+            logger.warning("could not enumerate RealSense devices: %s", error)
+        state.hub.reconnect()
+    else:
+        tap = state.recorder.tap
+        doa = state.recorder.doa
+        # PortAudio only sees an array plugged in since it was initialised
+        # after initialising again, which would pull an open stream out from
+        # under its reader - so only with the tap stopped.
+        if tap is None or not tap.active:
+            rescan()
+        for device in (tap, doa):
+            if device is not None:
+                device.reconnect()
+    return _devices()
 
 
 def _camera() -> dict[str, Any]:

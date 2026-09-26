@@ -118,6 +118,9 @@ export type RealsenseDeviceStatus = {
   streams: StreamConfig;
   streaming: boolean;
   fps: number;
+  /** Whether opening it failed. Nothing retries on its own; see
+   * `reconnectDevice`. */
+  failed: boolean;
   error: string | null;
 };
 
@@ -131,10 +134,16 @@ export type RespeakerDeviceStatus = {
   host_api: string | null;
   channels: number | null;
   rate: number | null;
+  /** Whether the audio stream or the direction readings failed. Nothing
+   * retries on its own; see `reconnectDevice`. */
+  failed: boolean;
   error: string | null;
   recording: boolean;
   overruns: number;
 };
+
+/** A device the page can ask the server to reconnect. */
+export type DeviceName = 'realsense' | 'respeaker';
 
 /** Whether each device is plugged in right now. */
 export type Devices = {
@@ -318,6 +327,17 @@ export const setStreams = (
     method: 'PUT',
     body: JSON.stringify({ streams }),
   });
+
+/**
+ * Try a device again, after it failed or once it has been plugged in.
+ *
+ * @param name Which device.
+ *
+ * The only way a failed device is opened again - the server does not retry on
+ * its own. Refused while recording.
+ */
+export const reconnectDevice = (name: DeviceName): Promise<Devices> =>
+  request<Devices>(`/api/devices/${name}/reconnect`, { method: 'POST' });
 
 /**
  * Change how each stream's archive is encoded.

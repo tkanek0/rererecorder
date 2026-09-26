@@ -41,6 +41,7 @@ class FakeRecorder:
         # No audio tap: this stand-in never records, so there is nothing for
         # the devices panel to say is "being recorded" either.
         self.tap = None
+        self.doa = None
 
     def state(self) -> dict[str, object]:
         return {
@@ -121,6 +122,61 @@ def test_frame_headers_are_readable_cross_origin(client) -> None:
     exposed = response.headers["access-control-expose-headers"]
     assert "X-Frame-Index" in exposed
     assert "X-Received-Monotonic" in exposed
+
+
+# -- devices -----------------------------------------------------------------
+
+
+@pytest.fixture
+def enumerations(monkeypatch) -> list[int]:
+    """Count RealSense enumerations, starting from nothing enumerated yet."""
+    calls: list[int] = []
+    monkeypatch.setattr(server_app, "list_devices", lambda: calls.append(1) or [])
+    monkeypatch.setattr(server_app.state, "realsense_found", None)
+    monkeypatch.setattr(server_app.state, "realsense_found_after", 0.0)
+    return calls
+
+
+def test_the_realsense_enumeration_is_kept_between_polls(
+    client, enumerations
+) -> None:
+    """Each one holds the GIL for 0.1-0.2 s, so not one per poll."""
+    for _ in range(3):
+        client.get("/api/status")
+    assert len(enumerations) == 1
+
+
+def test_reconnect_enumerates_again_and_reconnects_the_hub(
+    client, enumerations, monkeypatch
+) -> None:
+    reconnects: list[int] = []
+    monkeypatch.setattr(
+        server_app.state.hub, "reconnect", lambda: reconnects.append(1)
+    )
+    client.get("/api/status")
+    response = client.post("/api/devices/realsense/reconnect")
+    assert response.status_code == 200
+    assert "realsense" in response.json()
+    assert len(enumerations) == 2
+    assert reconnects == [1]
+
+
+def test_reconnecting_the_array_rescans_portaudio(client, monkeypatch) -> None:
+    rescans: list[int] = []
+    monkeypatch.setattr(server_app, "rescan", lambda: rescans.append(1))
+    response = client.post("/api/devices/respeaker/reconnect")
+    assert response.status_code == 200
+    assert rescans == [1]
+
+
+def test_reconnect_is_refused_while_recording(client) -> None:
+    server_app.state.recorder.recording = True
+    response = client.post("/api/devices/realsense/reconnect")
+    assert response.status_code == 409
+
+
+def test_an_unknown_device_cannot_be_reconnected(client) -> None:
+    assert client.post("/api/devices/nope/reconnect").status_code == 404
 
 
 # -- settings ----------------------------------------------------------------

@@ -3,11 +3,13 @@ import { useEffect, useState } from 'react';
 import {
   audioLevelsUrl,
   previewUrl,
+  reconnectDevice,
   setCodecs,
   setStreams,
   type AudioLevels,
   type CodecChoice,
   type CaptureName,
+  type DeviceName,
   type Devices,
   type PreviewKind,
   type Settings,
@@ -253,6 +255,50 @@ const CaptureControls = ({
 };
 
 /**
+ * Ask the server to try a device again.
+ *
+ * Shown only while the device has failed or is not detected: the server never
+ * retries on its own, because a retry loop against a missing camera stalled
+ * every request it served (docs/decisions.md 29). The status poll picks up
+ * the result, so this only reports a refusal.
+ */
+const ReconnectButton = ({
+  name,
+  recording,
+}: {
+  name: DeviceName;
+  recording: boolean;
+}) => {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const reconnect = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      await reconnectDevice(name);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="reconnect">
+      <button
+        onClick={reconnect}
+        disabled={busy || recording}
+        title={recording ? 'stop the recording first' : 'try the device again'}
+      >
+        {busy ? 'Reconnecting…' : 'Reconnect'}
+      </button>
+      {error ? <p className="error">{error}</p> : null}
+    </div>
+  );
+};
+
+/**
  * The camera and the array, each as its own device: connection state,
  * identity, what it is set to capture, and a live view of what it is
  * actually sensing right now.
@@ -293,6 +339,9 @@ export const DevicesPanel = ({ devices, settings, recording, onChanged }: Props)
             {realsense.error ? <p className="error">{realsense.error}</p> : null}
             {realsense.connected && !realsense.streaming && !realsense.error ? (
               <p className="note">Opens as soon as something watches it.</p>
+            ) : null}
+            {realsense.failed || !realsense.connected ? (
+              <ReconnectButton name="realsense" recording={recording} />
             ) : null}
           </div>
 
@@ -343,6 +392,12 @@ export const DevicesPanel = ({ devices, settings, recording, onChanged }: Props)
                 (respeaker.error ?? 'not detected')
               )}
             </div>
+            {respeaker.connected && respeaker.failed && respeaker.error ? (
+              <p className="error">{respeaker.error}</p>
+            ) : null}
+            {respeaker.failed || !respeaker.connected ? (
+              <ReconnectButton name="respeaker" recording={recording} />
+            ) : null}
             {respeaker.recording ? (
               <p className="note">
                 Being recorded.{respeaker.overruns ? ` ${respeaker.overruns} overruns.` : ''}

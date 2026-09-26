@@ -77,9 +77,6 @@ WINDOW_S = float(os.environ.get("RRR_AUDIO_WINDOW_S", "10"))
 #: first block after an open is tens of milliseconds away.
 IDLE_SHUTDOWN_S = 10.0
 
-#: Seconds to wait before reopening after the device disappears or errors.
-RECONNECT_DELAY_S = 2.0
-
 # -- direction of arrival ----------------------------------------------------
 
 #: How often the chip is asked for its current angle.

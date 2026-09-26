@@ -45,9 +45,6 @@ SHUTDOWN_TIMEOUT_S = int(os.environ.get("RRR_SHUTDOWN_TIMEOUT_S", "5"))
 #: its own reference, so this cannot end one.
 IDLE_SHUTDOWN_S = float(os.environ.get("RRR_IDLE_SHUTDOWN_S", "20"))
 
-#: Seconds to wait before reopening the camera after a failure.
-RECONNECT_DELAY_S = float(os.environ.get("RRR_RECONNECT_DELAY_S", "2"))
-
 # -- the preview -------------------------------------------------------------
 
 #: Width the preview is scaled to before encoding.

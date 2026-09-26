@@ -68,7 +68,6 @@ class State:
         self.hub = FrameHub(
             self._open_camera,
             idle_shutdown_s=config.IDLE_SHUTDOWN_S,
-            reconnect_delay_s=config.RECONNECT_DELAY_S,
         )
         self.recorder = SessionRecorder(
             self.sessions_root,

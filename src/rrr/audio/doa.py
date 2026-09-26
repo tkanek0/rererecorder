@@ -24,12 +24,6 @@ from .tuning import AccessDenied, DeviceNotFound, Tuning, find
 
 logger = logging.getLogger(__name__)
 
-#: Longer than the ordinary reconnect delay. A refused device node or an
-#: unplugged array will not fix itself in two seconds, and hammering the bus
-#: while it is broken only fills the log.
-_FATAL_RETRY_S = 5.0
-
-
 @dataclass(frozen=True)
 class Reading:
     """One sample of what the chip believes about the sound field.
@@ -57,7 +51,8 @@ class DoaTap:
     A missing device or a refused device node is reported through
     :attr:`error` rather than raised. The array is a thing that gets unplugged,
     and a viewer that keeps working with the angle greyed out beats one that
-    dies.
+    dies. It is not retried: the tap stops and stays stopped until someone
+    calls :meth:`reconnect` (docs/decisions.md 29).
     """
 
     def __init__(
@@ -83,19 +78,43 @@ class DoaTap:
         self._released_at = 0.0
         self._latest: Reading | None = None
         self._index = 0
+        #: Set when the device fails, and kept until reconnect().
+        self._failed = False
+        #: Why the device last failed, cleared along with _failed.
         self._error: str | None = None
 
     # -- lifecycle ---------------------------------------------------------
 
     def acquire(self) -> None:
-        """Register a consumer, starting the poller if it is not running."""
+        """Register a consumer, starting the poller unless it runs or failed."""
         with self._lock:
             self._users += 1
-            if self._thread is None or not self._thread.is_alive():
-                self._thread = threading.Thread(
-                    target=self._run, name="doa-tap", daemon=True
-                )
-                self._thread.start()
+            self._ensure_thread()
+
+    def reconnect(self) -> None:
+        """Clear a failure and, if anyone is waiting, poll the device again.
+
+        Nothing calls this automatically; see :meth:`AudioTap.reconnect`.
+        """
+        with self._lock:
+            self._failed = False
+            self._error = None
+            if self._users > 0:
+                self._ensure_thread()
+
+    def _ensure_thread(self) -> None:
+        """Start the poller thread unless it is running or has failed.
+
+        Holds _lock.
+        """
+        if self._failed:
+            return
+        if self._thread is not None and self._thread.is_alive():
+            return
+        self._thread = threading.Thread(
+            target=self._run, name="doa-tap", daemon=True
+        )
+        self._thread.start()
 
     def release(self) -> None:
         """Deregister a consumer; polling stops after an idle period."""
@@ -110,8 +129,14 @@ class DoaTap:
             return self._thread is not None and self._thread.is_alive()
 
     @property
+    def failed(self) -> bool:
+        """Whether the device failed and is waiting for :meth:`reconnect`."""
+        with self._lock:
+            return self._failed
+
+    @property
     def error(self) -> str | None:
-        """The most recent device error, if any."""
+        """Why the device failed, while :attr:`failed` is set; else None."""
         with self._lock:
             return self._error
 
@@ -153,11 +178,14 @@ class DoaTap:
                 the index you last handled to avoid seeing it twice.
 
         Returns:
-            The reading, or None if none arrived within the timeout.
+            The reading, or None if none arrived within the timeout - at once,
+            without waiting, while the tap has failed.
         """
         deadline = time.monotonic() + timeout
         with self._updated:
             while self._index <= after:
+                if self._failed:
+                    return None
                 remaining = deadline - time.monotonic()
                 if remaining <= 0:
                     return None
@@ -204,53 +232,51 @@ class DoaTap:
 
     def _run(self) -> None:
         logger.info("doa tap starting")
-        while not self._should_stop():
-            device: Tuning | None = None
-            try:
-                device = find()
-                with self._lock:
-                    self._error = None
-                next_at = time.monotonic()
-                while not self._should_stop():
-                    # Two transfers per poll, read together so the angle and
-                    # the voice flag describe the same instant. They are not
-                    # cheap - see the measurement in config.DOA_POLL_HZ.
-                    angle = device.direction
-                    voice = device.voice_activity
-                    self._publish(angle, voice)
+        failure: str | None = None
+        device: Tuning | None = None
+        try:
+            device = find()
+            next_at = time.monotonic()
+            while not self._should_stop():
+                # Two transfers per poll, read together so the angle and
+                # the voice flag describe the same instant. They are not
+                # cheap - see the measurement in config.DOA_POLL_HZ.
+                angle = device.direction
+                voice = device.voice_activity
+                self._publish(angle, voice)
 
-                    # Sleep to the next scheduled instant rather than for a
-                    # fixed interval: the transfers take a good fraction of the
-                    # period, and adding the interval on top of them would make
-                    # the real rate roughly half the configured one.
-                    next_at += self._interval
-                    delay = next_at - time.monotonic()
-                    if delay > 0:
-                        time.sleep(delay)
-                    else:
-                        # Fell behind. Resync rather than accumulating a debt
-                        # that would later come out as a burst of transfers.
-                        next_at = time.monotonic()
-            except (DeviceNotFound, AccessDenied) as error:
-                # Neither resolves on its own; say so once and back off.
-                logger.warning("doa unavailable: %s", str(error).splitlines()[0])
-                self._fail(str(error), _FATAL_RETRY_S)
-            except Exception as error:  # noqa: BLE001 - any USB failure retries
-                logger.warning("doa read failed: %s", error)
-                self._fail(str(error), config.RECONNECT_DELAY_S)
-            finally:
-                if device is not None:
-                    device.close()
+                # Sleep to the next scheduled instant rather than for a
+                # fixed interval: the transfers take a good fraction of the
+                # period, and adding the interval on top of them would make
+                # the real rate roughly half the configured one.
+                next_at += self._interval
+                delay = next_at - time.monotonic()
+                if delay > 0:
+                    time.sleep(delay)
+                else:
+                    # Fell behind. Resync rather than accumulating a debt
+                    # that would later come out as a burst of transfers.
+                    next_at = time.monotonic()
+        except (DeviceNotFound, AccessDenied) as error:
+            logger.warning(
+                "doa unavailable, not retrying: %s", str(error).splitlines()[0]
+            )
+            failure = str(error)
+        except Exception as error:  # noqa: BLE001 - reported, not raised
+            logger.warning("doa read failed, not retrying: %s", error)
+            failure = str(error)
+        finally:
+            if device is not None:
+                device.close()
 
         logger.info("doa tap stopped")
         with self._updated:
             self._latest = None
+            if failure is not None:
+                self._failed = True
+                self._error = failure
+                # Detached as this thread's last act, so that a reconnect
+                # arriving while it is still returning starts a fresh poller.
+                if self._thread is threading.current_thread():
+                    self._thread = None
             self._updated.notify_all()
-
-    def _fail(self, message: str, delay: float) -> None:
-        """Record an error and wait, unless the tap is shutting down."""
-        with self._lock:
-            self._error = message
-        deadline = time.monotonic() + delay
-        while time.monotonic() < deadline and not self._should_stop():
-            time.sleep(min(0.25, deadline - time.monotonic()))

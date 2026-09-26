@@ -145,6 +145,9 @@ class AudioTap:
     closed shortly after the last one leaves, so an idle process does not hold
     a device that only one process may have.
 
+    A failure is not retried: the tap stops and stays stopped until someone
+    calls :meth:`reconnect`, as the camera's hub does (docs/decisions.md 29).
+
     The published arrays are owned by nobody and read by everyone; consumers
     must not modify them in place.
     """
@@ -179,6 +182,10 @@ class AudioTap:
         self._thread: threading.Thread | None = None
         self._users = 0
         self._released_at = 0.0
+        #: Set when capture fails, and kept until reconnect(): while it is set,
+        #: nothing opens the device again on its own.
+        self._failed = False
+        #: Why capture last failed, cleared along with _failed.
         self._error: str | None = None
         self._overruns = 0
 
@@ -221,14 +228,38 @@ class AudioTap:
     # -- lifecycle ---------------------------------------------------------
 
     def acquire(self) -> None:
-        """Register a consumer, opening the device if it is not open."""
+        """Register a consumer, opening the device unless it is open or failed."""
         with self._lock:
             self._users += 1
-            if self._thread is None or not self._thread.is_alive():
-                self._thread = threading.Thread(
-                    target=self._run, name="audio-tap", daemon=True
-                )
-                self._thread.start()
+            self._ensure_thread()
+
+    def reconnect(self) -> None:
+        """Clear a failure and, if anyone is waiting, open the device again.
+
+        Nothing calls this automatically: it stands for a person deciding the
+        array is worth trying again, typically after plugging it back in. A
+        device plugged in since PortAudio was initialised is only visible
+        after :func:`rescan`.
+        """
+        with self._lock:
+            self._failed = False
+            self._error = None
+            if self._users > 0:
+                self._ensure_thread()
+
+    def _ensure_thread(self) -> None:
+        """Start the reader thread unless it is running or has failed.
+
+        Holds _lock.
+        """
+        if self._failed:
+            return
+        if self._thread is not None and self._thread.is_alive():
+            return
+        self._thread = threading.Thread(
+            target=self._run, name="audio-tap", daemon=True
+        )
+        self._thread.start()
 
     def release(self) -> None:
         """Deregister a consumer; the device closes after an idle period."""
@@ -243,8 +274,14 @@ class AudioTap:
             return self._thread is not None and self._thread.is_alive()
 
     @property
+    def failed(self) -> bool:
+        """Whether capture failed and is waiting for :meth:`reconnect`."""
+        with self._lock:
+            return self._failed
+
+    @property
     def error(self) -> str | None:
-        """The most recent capture error, if any."""
+        """Why capture failed, while :attr:`failed` is set; else None."""
         with self._lock:
             return self._error
 
@@ -318,7 +355,8 @@ class AudioTap:
                 twice.
 
         Returns:
-            The window, or None if no new audio arrived within the timeout.
+            The window, or None if no new audio arrived within the timeout -
+            at once, without waiting, while the tap has failed.
         """
         with self._updated:
             if not self._wait_for(lambda: self._index > after, timeout):
@@ -345,7 +383,8 @@ class AudioTap:
             timeout: Seconds to wait for samples beyond ``cursor``.
 
         Returns:
-            The chunk, or None if nothing new arrived within the timeout. A
+            The chunk, or None if nothing new arrived within the timeout, or
+            at once while the tap has failed. A
             chunk's ``dropped`` says how many samples were overwritten before
             this reader reached them, and its ``stamps`` say when each block it
             spans was captured.
@@ -381,10 +420,13 @@ class AudioTap:
     def _wait_for(self, ready, timeout: float) -> bool:
         """Wait on the condition variable until ``ready()`` or the timeout.
 
-        The caller must hold ``self._updated``.
+        The caller must hold ``self._updated``. Gives up at once while the tap
+        has failed: nothing will arrive until someone reconnects it.
         """
         deadline = time.monotonic() + timeout
         while not ready():
+            if self._failed:
+                return False
             remaining = deadline - time.monotonic()
             if remaining <= 0:
                 return False
@@ -563,12 +605,12 @@ class AudioTap:
         # Once for the thread's whole lifetime, not once per reconnect: it is
         # the thread that needs an apartment, not any one stream on it.
         com_ready = _com_initialize()
+        failure: str | None = None
         try:
-            while not self._should_stop():
+            if not self._should_stop():
                 try:
                     index = _resolve_device(self._device, self._channels, self._rate)
                     with self._lock:
-                        self._error = None
                         self._overruns = 0
                     # int16 rather than float32: the array's endpoint is 16 bit, so
                     # this is the format on the wire and the conversion is ours to
@@ -586,19 +628,22 @@ class AudioTap:
                         )
                         while not self._should_stop():
                             time.sleep(0.1)
-                except Exception as error:  # noqa: BLE001 - any device failure retries
-                    logger.warning("capture failed: %s", error)
-                    with self._lock:
-                        self._error = str(error)
-                    if self._should_stop():
-                        break
-                    time.sleep(config.RECONNECT_DELAY_S)
+                except Exception as error:  # noqa: BLE001 - reported, not raised
+                    logger.warning("capture failed, not retrying: %s", error)
+                    failure = str(error)
         finally:
             if com_ready:
                 _com_uninitialize()
 
         logger.info("audio tap stopped")
         with self._updated:
+            if failure is not None:
+                self._failed = True
+                self._error = failure
+                # Detached as this thread's last act, so that a reconnect
+                # arriving while it is still returning starts a fresh reader.
+                if self._thread is threading.current_thread():
+                    self._thread = None
             self._updated.notify_all()
 
 
@@ -753,6 +798,24 @@ def probe(
         channels=int(device["max_input_channels"]),
         rate=float(device["default_samplerate"]),
     )
+
+
+def rescan() -> None:
+    """Make PortAudio enumerate devices again.
+
+    PortAudio takes its device list once, when it is initialised, so an array
+    plugged in after that is invisible to :func:`probe` and to an open until
+    it is initialised again. Doing so while a stream is open would pull the
+    stream out from under its reader, so call this only with every tap
+    stopped.
+
+    ``sounddevice`` exposes no public call for this. ``_terminate`` and
+    ``_initialize`` are private, but they are what ``import sounddevice`` and
+    its exit handler themselves call, and each is a thin wrapper around
+    ``Pa_Terminate`` / ``Pa_Initialize``.
+    """
+    sd._terminate()
+    sd._initialize()
 
 
 def devices() -> list[dict[str, object]]:

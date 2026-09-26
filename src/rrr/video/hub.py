@@ -19,6 +19,10 @@ Two decisions shape it, both borrowed from what the THETA playground learned:
   closes shortly after the last one leaves, so an idle server does not hold the
   camera - which matters more here than it did there, because holding it stops
   anything else on the machine from opening it at all.
+
+A failure is not retried. The hub stops and stays stopped until someone calls
+:meth:`FrameHub.reconnect` - see docs/decisions.md 29 for what a retry loop
+cost.
 """
 
 from __future__ import annotations
@@ -33,9 +37,6 @@ from .source import FrameSource, StreamError
 from .types import Calibration, DeviceInfo, FrameSet
 
 logger = logging.getLogger(__name__)
-
-#: Seconds to wait before reopening the source after it failed.
-RECONNECT_DELAY_S = 2.0
 
 #: How long the source stays open after the last consumer leaves.
 #:
@@ -53,20 +54,17 @@ class FrameHub:
         self,
         open_source: Callable[[], FrameSource],
         idle_shutdown_s: float = IDLE_SHUTDOWN_S,
-        reconnect_delay_s: float = RECONNECT_DELAY_S,
     ) -> None:
         """Prepare the hub without opening anything.
 
         Args:
             open_source: Called on the hub's thread to create and open a
-                source. It is called again after a failure or a restart, so it
-                must be repeatable rather than hand back the same object.
+                source. It is called again after a reconnect or a restart, so
+                it must be repeatable rather than hand back the same object.
             idle_shutdown_s: Seconds the source stays open with no consumers.
-            reconnect_delay_s: Seconds to wait after a failure before retrying.
         """
         self._open_source = open_source
         self._idle_shutdown_s = idle_shutdown_s
-        self._reconnect_delay_s = reconnect_delay_s
 
         self._lock = threading.Lock()
         self._updated = threading.Condition(self._lock)
@@ -87,11 +85,11 @@ class FrameHub:
         #: keeps increasing across a restart. A consumer polling with `after`
         #: would otherwise be handed frames it thinks it has already seen.
         self._index = 0
-        #: Sticky: not cleared when frames resume. A USB drop that the hub
-        #: recovers from in two seconds is invisible to anything polling at 1 Hz
-        #: if the error disappears with the next frame, and "it broke a moment
-        #: ago and came back" is exactly what someone debugging wants to know.
-        #: Callers decide when it is stale, using _error_at.
+        #: Set when the source fails, and kept until reconnect() or restart():
+        #: while it is set, nothing opens the source again on its own.
+        self._failed = False
+        #: Why the source last failed. Cleared along with _failed, so it always
+        #: describes the failure the hub is currently stopped by, if any.
         self._error: str | None = None
         self._error_at = 0.0
         self._device: DeviceInfo | None = None
@@ -166,12 +164,25 @@ class FrameHub:
         with self._listener_lock:
             return len(self._listeners)
 
+    def reconnect(self) -> None:
+        """Clear a failure and, if anyone is waiting, open the source again.
+
+        The only way out of a failure besides :meth:`restart`. Nothing calls
+        it automatically: it stands for a person deciding the device is worth
+        trying again, typically after plugging it back in.
+        """
+        with self._lock:
+            self._clear_failure()
+            if self._users > 0:
+                self._ensure_thread()
+
     def restart(self) -> None:
         """Close the current source and open a fresh one.
 
         Used when the requested stream configuration changed: the SDK settles
         resolution and frame rate at pipeline start, so there is no way to
-        change them in place.
+        change them in place. Being asked for explicitly, it also clears a
+        failure, as :meth:`reconnect` does.
 
         With no consumers this only records the intent. Starting the reader
         would spawn a thread that immediately decides it should not be running -
@@ -181,6 +192,7 @@ class FrameHub:
         with self._lock:
             self._wanted_generation += 1
             self._floor = self._index
+            self._clear_failure()
             if self._users > 0:
                 self._ensure_thread()
 
@@ -194,8 +206,19 @@ class FrameHub:
         if thread is not None:
             thread.join(timeout=5.0)
 
+    def _clear_failure(self) -> None:
+        """Forget the last failure. Holds _lock."""
+        self._failed = False
+        self._error = None
+        self._error_at = 0.0
+
     def _ensure_thread(self) -> None:
-        """Start the reader thread if it is not already running. Holds _lock."""
+        """Start the reader thread unless it is running or has failed.
+
+        Holds _lock.
+        """
+        if self._failed:
+            return
         if self._thread is not None and self._thread.is_alive():
             return
         self._thread = threading.Thread(
@@ -212,12 +235,14 @@ class FrameHub:
             return self._thread is not None and self._thread.is_alive()
 
     @property
-    def error(self) -> str | None:
-        """The most recent source failure, whether or not it has recovered.
+    def failed(self) -> bool:
+        """Whether the source failed and is waiting for :meth:`reconnect`."""
+        with self._lock:
+            return self._failed
 
-        Compare ``error_at`` against the current time to tell a live problem
-        from one the hub has already worked around.
-        """
+    @property
+    def error(self) -> str | None:
+        """Why the source failed, while :attr:`failed` is set; else None."""
         with self._lock:
             return self._error
 
@@ -272,11 +297,15 @@ class FrameHub:
 
         Returns:
             The frame set, or None if nothing new arrived within the timeout.
+            None at once, without waiting, while the hub has failed: nothing
+            will arrive until someone reconnects it.
         """
         deadline = time.monotonic() + timeout
         with self._updated:
             after = max(after, self._floor)
             while self._index <= after:
+                if self._failed:
+                    return None
                 remaining = deadline - time.monotonic()
                 if remaining <= 0:
                     return None
@@ -298,12 +327,6 @@ class FrameHub:
         """Whether a restart was requested since this source opened."""
         with self._lock:
             return self._generation != self._wanted_generation
-
-    def _record_error(self, message: str) -> None:
-        """Store a failure and when it happened."""
-        with self._lock:
-            self._error = message
-            self._error_at = time.monotonic()
 
     def _publish(self, frame_set: FrameSet) -> None:
         """Store a frame set and wake everyone waiting for one."""
@@ -336,8 +359,13 @@ class FrameHub:
                 logger.exception("a frame listener failed")
 
     def _run(self) -> None:
-        """Open the source, publish its frames, reopen it when it breaks."""
+        """Open the source and publish its frames until told to stop.
+
+        Loops only to follow a restart. A failure - opening, or a stream that
+        stops delivering - ends the thread rather than retrying.
+        """
         logger.info("frame hub starting")
+        failure: str | None = None
         while not self._should_stop():
             with self._lock:
                 self._generation = self._wanted_generation
@@ -351,20 +379,16 @@ class FrameHub:
                             break
                         self._publish(frame_set)
             except StreamError as exc:
-                logger.warning("source failed: %s", exc)
-                self._record_error(str(exc))
-            except Exception as exc:  # noqa: BLE001 - any SDK failure retries
-                logger.exception("unexpected source failure")
-                self._record_error(str(exc))
+                logger.warning("source failed, not retrying: %s", exc)
+                failure = str(exc)
+                break
+            except Exception as exc:  # noqa: BLE001 - reported, not raised
+                logger.exception("unexpected source failure, not retrying")
+                failure = str(exc)
+                break
             finally:
                 with self._lock:
                     self._source = None
-
-            if self._should_stop():
-                break
-            if not self._superseded():
-                # A restart should take effect now; a failure should back off.
-                time.sleep(self._reconnect_delay_s)
 
         logger.info("frame hub stopped")
         with self._updated:
@@ -372,6 +396,15 @@ class FrameHub:
             self._latest = None
             self._last_at = 0.0
             self._interval = 0.0
+            if failure is not None:
+                self._failed = True
+                self._error = failure
+                self._error_at = time.monotonic()
+                # Detached as this thread's last act, so that a reconnect
+                # arriving while it is still returning starts a fresh reader
+                # instead of finding this one alive and leaving it at that.
+                if self._thread is threading.current_thread():
+                    self._thread = None
             self._updated.notify_all()
 
 

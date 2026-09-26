@@ -512,3 +512,81 @@ def test_no_name_match_is_reported_plainly(monkeypatch) -> None:
     _patch_devices(monkeypatch, [], [])
     with pytest.raises(DeviceNotFound, match="no capture device"):
         _resolve_device("ReSpeaker", 6, RATE)
+
+
+# -- failure handling ---------------------------------------------------------
+#
+# A failed open stops the tap until someone reconnects it; nothing retries on
+# its own. See docs/decisions.md 29.
+
+
+def _wait_until(ready, timeout: float = 2.0) -> bool:
+    """Poll ``ready`` until it holds or the timeout passes."""
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if ready():
+            return True
+        time.sleep(0.01)
+    return ready()
+
+
+class _FakeInputStream:
+    """Stands in for ``sd.InputStream``: opens nothing, delivers nothing."""
+
+    def __init__(self, **_: object) -> None:
+        pass
+
+    def __enter__(self) -> _FakeInputStream:
+        return self
+
+    def __exit__(self, *exc: object) -> None:
+        pass
+
+
+@pytest.fixture
+def failing_tap(monkeypatch):
+    """A tap whose device cannot be found, and a count of the attempts."""
+    attempts = []
+
+    def resolve(*_: object) -> int:
+        attempts.append(time.monotonic())
+        raise DeviceNotFound("no capture device whose name contains 'ReSpeaker'")
+
+    monkeypatch.setattr("rrr.audio.capture._resolve_device", resolve)
+    monkeypatch.setattr("rrr.audio.capture.sd.InputStream", _FakeInputStream)
+    made = _fresh_tap()
+    yield made, attempts
+    made.shutdown()
+
+
+def test_a_failed_open_is_not_retried(failing_tap) -> None:
+    tap, attempts = failing_tap
+    tap.acquire()
+    assert _wait_until(lambda: tap.failed)
+    tap.acquire()
+    time.sleep(0.2)
+    assert len(attempts) == 1
+    assert not tap.active
+    assert "no capture device" in (tap.error or "")
+
+
+def test_reads_do_not_wait_while_failed(failing_tap) -> None:
+    tap, _ = failing_tap
+    tap.acquire()
+    assert _wait_until(lambda: tap.failed)
+    began = time.monotonic()
+    assert tap.stream(0, timeout=5.0) is None
+    assert tap.latest(timeout=5.0) is None
+    assert time.monotonic() - began < 0.5
+
+
+def test_reconnect_opens_again(failing_tap, monkeypatch) -> None:
+    tap, _ = failing_tap
+    tap.acquire()
+    assert _wait_until(lambda: tap.failed)
+
+    monkeypatch.setattr("rrr.audio.capture._resolve_device", lambda *_: 0)
+    tap.reconnect()
+    assert not tap.failed
+    assert tap.error is None
+    assert _wait_until(lambda: tap.active)

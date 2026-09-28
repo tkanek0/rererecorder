@@ -1,4 +1,4 @@
-# rererecorder
+# ReReRecorder
 
 Recording an Intel RealSense D455 - and, next, a ReSpeaker USB Mic Array beside
 it - so that the two can be lined up afterwards, exactly, from the files.

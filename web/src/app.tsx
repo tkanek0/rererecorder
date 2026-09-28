@@ -79,7 +79,7 @@ export const App = () => {
   return (
     <div className="app">
       <header>
-        <h1>rererecorder</h1>
+        <h1>ReReRecorder</h1>
         <span className="sub">
           {device
             ? `${device.name} · ${device.serial} · FW ${device.firmware} · USB ${device.usb_type}`

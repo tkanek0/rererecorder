@@ -412,6 +412,23 @@ tool falls back independently to a simple start-together audio/video movie.
 Use `--no-doa` for a clean picture, `--force` to replace an existing movie, and
 `-o` to write it somewhere other than `review.mp4` inside the session.
 
+A GIF is the same presentation copy in a form that goes into a slide or a
+message:
+
+```bash
+uv run python -m rrr.tools.render_gif data/sessions/walk-01                       # ./video.gif
+uv run python -m rrr.tools.render_gif data/sessions/walk-01 --volume --waveform -o walk-01.gif
+```
+
+Every `--stride`-th colour frame (default 15) is kept, scaled to `--width`, and
+given its own palette. `--volume` adds the whole recording's loudness (linear
+RMS, scaled to its loudest column) with a playhead; `--waveform` adds the
+`--window-s` seconds ending at each frame on one amplitude scale. Both place the
+WAV on the video clock exactly as the MP4 does, and both default to the mix of
+the physical microphones rather than the processed channel, which the array has
+already beamformed and gain-controlled for speech recognition. Asking for either
+without a WAV is an error, not a silent omission.
+
 ## Not yet
 
 - **A Raspberry Pi.** The image is built to be portable but has not run on one.

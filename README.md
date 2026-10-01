@@ -77,6 +77,13 @@ uv run python -m rrr.tools.render_mp4 data/sessions/<name>   # writes <name>/rev
 Recorded clocks and calibration are applied when available; unset calibration
 falls back to a simple start-together movie without claiming a correction.
 
+A short GIF of the same colour stream, optionally with the sound's loudness and
+waveform drawn beneath each frame:
+
+```bash
+uv run python -m rrr.tools.render_gif data/sessions/<name> --volume   # writes ./video.gif
+```
+
 ## Reading one back
 
 ```python

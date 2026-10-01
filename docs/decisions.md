@@ -183,9 +183,9 @@ costs nothing a recording can lose.
 
 **Why:** MJPEG cannot seek and cannot say which frame is on screen. Measured,
 the cost of a request is 24 ms server-side and 24 ms end-to-end in the browser,
-so 30 fps has room. Each response carries `X-Capture-Monotonic`, so the clock
-shown is the recording's own - frames are not evenly spaced, because a mispaired
-set leaves a gap.
+so 30 fps has room. Each response carries `X-Received-Monotonic` and
+`X-Frame-Index`, so the clock shown is the recording's own - frames are not
+evenly spaced.
 
 **Cost:** a request per frame. The archive is opened per request too: measured at
 1.3 ms, against 16 ms of decoding, so caching one open archive would save

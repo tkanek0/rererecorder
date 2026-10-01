@@ -85,7 +85,7 @@ data/sessions/2026-09-02_15-28-36/
     session.json        the manifest: clock anchors, calibration state, errors
     video.rrdb          SQLite: frames, motion, calibration, sensor options
     audio.wav          every channel, int16, gaps filled with silence
-    audio.clock.jsonl   measured capture time per block
+    audio.clock.jsonl   measured capture time, once a second and at every gap
     doa.jsonl           the array's direction estimate
     events.jsonl        marks made by whoever was recording
     export/             derived: rrr.tools.export's neutral copy

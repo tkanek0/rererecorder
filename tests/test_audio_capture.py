@@ -277,9 +277,10 @@ def test_an_incoherent_clock_falls_back_for_the_rest_of_the_recording(caplog) ->
     See docs/decisions.md 20 and 26.
     """
     fresh = _fresh_tap()
-    # Only the spread matters, not this exact pattern.
+    # Only the spread matters. Negative, so the reported time stays positive (a
+    # valid reading) however recently the host booted.
     offsets = [
-        3.9 if n % 2 == 0 else 400_000.0 for n in range(_DOMAIN_CALIBRATION_BLOCKS)
+        -3.9 if n % 2 == 0 else -9.9 for n in range(_DOMAIN_CALIBRATION_BLOCKS)
     ]
     _feed_domain(fresh, offsets)
 

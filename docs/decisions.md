@@ -270,6 +270,13 @@ follow into a container, and the uid there is not the one it names. Without
 which looks like an unplugged array. That failure mode is why the Makefile
 derives the id with `getent group audio` rather than hard-coding 29.
 
+**Why the whole bus:** the camera's device number changes every time it is
+re-enumerated, and a reset re-enumerates it, so passing one node would lose it.
+
+**Why the invoking user:** so recordings under `data/` are not owned by root.
+The camera stays reachable without any group, because the RealSense udev rule
+makes its node world-writable.
+
 **What was checked:** the three transfer paths do not interfere. The camera goes
 through libusb (RSUSB), the array's audio through ALSA, and its direction
 readout through a USB control transfer. Measured on a 15 second session with all

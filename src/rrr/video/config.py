@@ -1,9 +1,4 @@
-"""What to ask the camera for.
-
-Kept separate from the source that applies it so that the same description can
-be written by a CLI flag, an HTTP request or a test, and compared for equality
-to decide whether a running pipeline has to be restarted.
-"""
+"""What to ask the camera for, kept apart from the source that applies it."""
 
 from __future__ import annotations
 
@@ -13,55 +8,18 @@ from dataclasses import dataclass, replace
 #: Width, height and frame rate of one video stream.
 StreamSpec = tuple[int, int, int]
 
-#: The largest depth the D455 produces. Its stereo sensors are 1280x800 each,
-#: but the depth processor tops out at 720 lines - measured: 1280x720 depth has
-#: the same fx (653.36) as the raw 1280x800 infrared, with ppy 40 lower, so the
-#: depth output is the sensor with 80 lines cropped rather than anything scaled.
-#:
-#: Every smaller size is a scale of this one. 848x480 is *not* a native mode,
-#: whatever realsense-playground's notes say: its fx is 432.85 = 653.36 x 0.6625,
-#: which is exactly 848/1280.
+#: The largest depth the D455 produces: the infrared sensor, cropped. See
+#: docs/frame-loss.md, "What the sensors actually are".
 DEFAULT_DEPTH: StreamSpec = (1280, 720, 30)
 
-#: The colour sensor's own resolution, and its maximum frame rate.
-#:
-#: Not matched to depth on purpose. Matching mattered when recordings were
-#: aligned, because alignment would otherwise resample; recordings here are not
-#: aligned, so each stream keeps its own geometry and alignment is applied later
-#: from the extrinsics.
+#: The colour sensor's own resolution, not matched to depth: docs/decisions.md 2.
 DEFAULT_COLOR: StreamSpec = (1280, 800, 30)
 
-#: Pixel format to ask the colour sensor for.
-#:
-#: YUYV is what the sensor emits. Asking for rgb8 makes the SDK convert, which
-#: costs CPU and 50% more bytes without adding anything - the chroma has already
-#: been subsampled by then. Recording what the sensor produced means the
-#: conversion stays a decision for whoever reads the file.
+#: What the colour sensor emits. See docs/decisions.md 4.
 DEFAULT_COLOR_FORMAT = "yuyv"
 
-#: What the depth projector does while recording.
-#:
-#: The projector throws a dot pattern onto the scene. Depth needs it on
-#: anything without texture of its own - a painted wall gives a stereo matcher
-#: nothing to match - and it is why a D455 works indoors at all. The same
-#: pattern lands in the infrared images, where it is stuck to the scene rather
-#: than to the imagers, so a feature tracker run on them follows the dots
-#: instead of the room.
-#:
-#: Which of those matters depends on what the infrared pair is being recorded
-#: for, so it is a choice rather than a default:
-#:
-#:   on           the projector is always on. Best depth, infrared unusable
-#:                for tracking.
-#:   off          always off. Infrared is clean; depth degrades on untextured
-#:                surfaces.
-#:   alternating  the firmware toggles it frame by frame, so half the frames
-#:                have good depth and the other half have clean infrared.
-#:                Halves the effective rate of both.
-#:
-#: Whichever is asked for, the projector's state is recorded per frame in the
-#: frame metadata's laser power, so which frames were which is recoverable
-#: rather than assumed.
+#: What the depth projector does while recording. See docs/features.md,
+#: "The projector".
 EMITTER_MODES = ("on", "off", "alternating")
 DEFAULT_EMITTER = os.environ.get("RRR_EMITTER", "on")
 
@@ -76,32 +34,16 @@ class StreamConfig:
         color_format: Pixel format for the colour stream, ``"yuyv"`` or
             ``"rgb8"``. See DEFAULT_COLOR_FORMAT.
         infrared: Record the two raw infrared images the depth is computed
-            from. They can only be opened at the depth stream's own resolution
-            and rate, so there is nothing to configure beyond on or off.
-
-            Worth the bytes when the point is to keep everything: the depth in
-            a recording is one particular stereo match made by the camera's
-            ASIC, and the infrared pair is what it was made from. Costs 55 MB/s
-            raw on top of depth and colour, 27 MB/s compressed.
-        align_to_color: Resample depth into the color camera's viewpoint, so
-            that ``depth[y, x]`` describes ``color[y, x]``.
-
-            **Off by default here**, unlike in realsense-playground. Alignment
-            resamples, and resampling cannot be undone: it would put the depth
-            on the colour camera's 1280x800 grid, destroy its correspondence
-            with the infrared pair, and bake one particular choice into a file
-            meant to outlast it. Every consumer can align on the way out using
-            ``calibration.depth_to_color``; none of them can un-align.
+            from, at the depth stream's own resolution and rate. See
+            docs/decisions.md 3.
+        align_to_color: Resample depth into the color camera's viewpoint.
+            Off by default; see docs/decisions.md 2.
         emitter: What the depth projector does - ``"on"``, ``"off"`` or
             ``"alternating"``. See EMITTER_MODES.
         motion: Enable the accelerometer and gyroscope.
-        record_path: rosbag file to write every frame to, or None. Must end in
-            ``.db3``: librealsense 2.56 moved from rosbag1 to rosbag2 and
-            rejects the ``.bag`` that older examples use.
-
-            The SDK fixes this at pipeline start, so switching to a different
-            file means restarting the pipeline. Pausing and resuming an open
-            recording does not - see ``LiveSource.set_recording``.
+        record_path: rosbag2 file to write every frame to, or None. Must end
+            in ``.db3``; librealsense 2.56 rejects ``.bag``. Fixed at pipeline
+            start.
     """
 
     color: StreamSpec | None = DEFAULT_COLOR

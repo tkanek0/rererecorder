@@ -31,13 +31,13 @@ import numpy as np
 
 from rrr.timeline import (
     REVIEW_NAME,
-    AudioClockPoint,
     AudioTimeline,
     Rig,
     SessionError,
     SessionPaths,
     read_manifest,
 )
+from rrr.tools.review import audio_timeline, bgr, describe_audio
 from rrr.video import ArchiveSource, StreamError
 
 VIDEO_TIME_BASE = Fraction(1, 90_000)
@@ -171,10 +171,10 @@ def render(
                 enabled=draw_doa and manifest.doa_file is not None,
             )
 
-            audio = _audio_description(paths.audio, audio_channel, manifest.rig)
+            audio = describe_audio(paths.audio, audio_channel, manifest.rig)
             timeline = None
             if audio is not None:
-                timeline, used_clock = _audio_timeline(
+                timeline, used_clock = audio_timeline(
                     paths.audio_clock,
                     audio["rate"],
                     manifest.audio.first_monotonic if manifest.audio else None,
@@ -224,66 +224,6 @@ def _frame_rate(times: list[tuple[int, float]], recorded: float | None) -> float
     return float(1.0 / np.median(positive)) if len(positive) else 30.0
 
 
-def _audio_description(path: str, requested: str, rig: Rig) -> dict[str, Any] | None:
-    """Check the WAV and resolve the channel selection."""
-    try:
-        with wave.open(path, "rb") as handle:
-            if handle.getsampwidth() != 2:
-                raise ValueError("only 16-bit PCM ReSpeaker WAV files are supported")
-            channels = handle.getnchannels()
-            rate = handle.getframerate()
-            samples = handle.getnframes()
-    except (FileNotFoundError, wave.Error):
-        return None
-
-    if requested == "processed":
-        selected = (0,)
-        label = "processed channel 0"
-    elif requested == "mix":
-        if rig.channels:
-            selected = tuple(rig.channels)
-            label = "physical microphone mix from rig"
-        elif channels >= 5:
-            selected = tuple(range(1, 5))
-            label = "nominal ReSpeaker microphone mix (channels 1-4)"
-        else:
-            selected = tuple(range(channels))
-            label = "all-channel mix"
-    else:
-        try:
-            selected = (int(requested),)
-        except ValueError as error:
-            raise ValueError(
-                "--audio-channel must be processed, mix, or a channel number"
-            ) from error
-        label = f"channel {selected[0]}"
-    if not selected or any(channel < 0 or channel >= channels for channel in selected):
-        raise ValueError(f"audio channel selection {selected} is outside {channels}-ch WAV")
-    return {
-        "path": path,
-        "rate": rate,
-        "samples": samples,
-        "channels": channels,
-        "selected": selected,
-        "label": label,
-    }
-
-
-def _audio_timeline(
-    clock_path: str,
-    rate: int,
-    first_monotonic: float | None,
-    *,
-    fallback_start: float,
-) -> tuple[AudioTimeline, bool]:
-    """Use the measured sidecar, or an honest nominal fallback."""
-    try:
-        return AudioTimeline.read(clock_path, rate), True
-    except (OSError, ValueError):
-        start = first_monotonic if first_monotonic is not None else fallback_start
-        return AudioTimeline([AudioClockPoint(sample=0, monotonic=start)], rate), False
-
-
 def _encode(
     output: Path,
     archive: ArchiveSource,
@@ -303,7 +243,7 @@ def _encode(
     first = archive.frame_at(times[0][0], only="color")
     if first is None or first.color is None:
         raise ValueError("the archive has no colour frames")
-    first_image = _bgr(first)
+    first_image = bgr(first)
     height, width = first_image.shape[:2]
     if width % 2 or height % 2:
         raise ValueError("H.264 requires an even colour frame width and height")
@@ -336,7 +276,7 @@ def _encode(
             frames = first if position == 0 else archive.frame_at(index, only="color")
             if frames is None or frames.color is None:
                 raise ValueError(f"frame {index} has no colour image")
-            image = _bgr(frames)
+            image = bgr(frames)
             _draw_direction(image, stamp, directions, doa_mode)
             frame = av.VideoFrame.from_ndarray(image, format="bgr24")
             pts = max(previous_pts + 1, round((stamp - start) / float(VIDEO_TIME_BASE)))
@@ -358,15 +298,6 @@ def _encode(
                     container.mux(packet)
             for packet in audio_stream.encode():
                 container.mux(packet)
-
-
-def _bgr(frames: Any) -> np.ndarray:
-    """Convert either recorded colour representation into encoder-ready BGR."""
-    if frames.color_format == "yuyv":
-        height, width = frames.color.shape
-        packed = frames.color.view(np.uint8).reshape(height, width, 2)
-        return cv2.cvtColor(packed, cv2.COLOR_YUV2BGR_YUY2)
-    return cv2.cvtColor(frames.color, cv2.COLOR_RGB2BGR)
 
 
 def _audio_frames(

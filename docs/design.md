@@ -1,8 +1,5 @@
 # Design
 
-Recording an Intel RealSense D455 - and, next, a ReSpeaker USB Mic Array beside
-it - so that the result can be lined up afterwards, exactly, from the files.
-
 ## The one idea
 
 Two devices with two clocks are useless together unless every measurement
@@ -125,10 +122,8 @@ nominal CAD positions for their own microphones - but they are not the same
 claim, and which one a session was processed with has to survive in the file.
 
 Alignment of depth to colour is refused in the same spirit: recordings are
-**unaligned**, because resampling depth onto the colour grid cannot be undone,
-destroys its correspondence with the infrared pair, and bakes one choice into a
-file meant to outlast it. `depth_to_color` is recorded so any consumer can align
-on the way out.
+**unaligned**, and `depth_to_color` is recorded so any consumer can align on the
+way out (decision 2).
 
 ## Leaving
 

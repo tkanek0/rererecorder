@@ -54,8 +54,8 @@ depth->gyro       t=(-0.03022, 0.0074, 0.01602)  } which is now checked rather t
 ```
 
 The infrared pair's intrinsics come back identical to depth's - `fx` 653.36,
-`ppx` 640.09 - which is the same thing config.py records about the depth output
-being the infrared sensor cropped rather than scaled.
+`ppx` 640.09 - because the depth output is the infrared sensor cropped rather
+than scaled ([frame-loss.md](frame-loss.md#what-the-sensors-actually-are)).
 
 The inertial half matters for a moving rig and is not recoverable afterwards:
 samples with no transform to the camera are numbers in an unnamed frame. **This
@@ -107,9 +107,7 @@ themselves":
 | `received_monotonic` | `time.monotonic()` when the set was assembled |
 
 Neither of the first two is discarded, or a set with them, if they disagree
-(decision 21): depth and infrared are validation data for a SLAM pipeline that
-runs on colour, so a consumer reconciles the two after the fact rather than
-have this repository guess at capture time which pairing to keep.
+(decision 21).
 
 `session.json` holds a `(monotonic, realtime)` pair per second, so wall-clock
 time is recoverable and an NTP step during the recording is visible rather than
@@ -172,27 +170,24 @@ Playing pauses when the tab is hidden: Chrome throttles a background tab's
 timers to the point where a `setTimeout(10)` took 557 ms, so the loop would crawl
 while the button still said Pause.
 
-**A failed device stays failed.** When the camera or the array cannot be opened,
-or stops delivering, its card shows why and a **Reconnect** button. Nothing
-retries on its own: a retry loop against a missing camera stalled every request
-the server answered, for 15 s at a time (`docs/decisions.md` 29). The button
-also enumerates the device again, so a device plugged in later appears after
-Reconnect rather than by itself. It is disabled while recording.
+**A failed device stays failed** (decision 29). When the camera or the array
+cannot be opened, or stops delivering, its card shows why and a **Reconnect**
+button, which also enumerates the device again. It is disabled while recording.
 
 ## The command line
 
 Nothing here needs the server, and the server records through exactly this code.
 
 ```
-uv run python -m rrr.tools.record --seconds 30 --session kitchen   # on Linux natively: V4L2, loses frames
+uv run python -m rrr.tools.record --seconds 30 --session kitchen   # record
 uv run python -m rrr.tools.inspect data/sessions/kitchen          # cross-check a recording
 uv run python -m rrr.tools.export data/sessions/kitchen           # write it out as plain files
+uv run python -m rrr.tools.render_mp4 data/sessions/kitchen       # a review movie
 uv run pytest                                                      # no device needed
 ```
 
-On Linux, record in the container instead - RSUSB, which does not lose frames.
-It is the same command through compose; the Makefile's `COMPOSE` line shows
-the variables it needs:
+On Linux, record through the container instead (decision 30); the Makefile's
+`COMPOSE` line shows the variables it needs:
 
 ```
 docker compose run --rm api python -m rrr.tools.record --seconds 30
@@ -274,17 +269,9 @@ recorder, saying what was being done.
  "label": "speaker 45deg 2m", "data": {"azimuth_deg": 45, "distance_m": 2.0}}
 ```
 
-It exists because a recording of an experiment is unusable without knowing which
-part of it was which condition, and "speaker at 45 degrees, two metres" is not
-recoverable from the audio. `data` is free-form and this repository does not
-interpret it: what belongs in it depends on the experiment, and fixing a schema
-now would fix the wrong one.
-
-**A mark is accurate to a person's reaction time, not to a sample.** Somebody
-presses the button after they notice something, which is a few hundred
-milliseconds late and varies. So a mark says what a *stretch* of a recording
-was; when an instant has to be exact it comes from the signal - an onset in the
-audio - and the mark only says what that onset was.
+`data` is free-form and this repository does not interpret it. **A mark is
+accurate to a person's reaction time, not to a sample**: it says what a stretch
+of a recording was, never when something happened (decision 16).
 
 Marked from the page while recording (Enter in the field, or the button), and
 the label stays after marking because a run is marked over and over with the
@@ -330,15 +317,12 @@ malformed field costs that field rather than the session.
 Clap a few times in front of the camera, close to the array. The tool finds the
 impulse in the audio (sub-millisecond) and the peak frame-to-frame difference in
 the video (one frame), so **the frame rate bounds the answer**: ±16.7 ms for one
-clap, ±16.7/√N for N. Until it has run, `calibration.offset_s` is null and the
-page says "unmeasured" rather than showing zero.
+clap, ±16.7/√N for N. Until it has run, `calibration.offset_s` is null.
 
 ## Exporting
 
-`video.rrdb` is shaped for writing 54 MB/s without dropping anything, which is
-the wrong shape for anything else to read. `rrr.tools.export` writes the same
-recording as plain files - PNG images, CSV tables, a WAV - so a consumer needs a
-filesystem and nothing else.
+`rrr.tools.export` writes a recording as plain files - PNG images, CSV tables, a
+WAV - so a consumer needs a filesystem and nothing else (decision 17).
 
 ```bash
 uv run python -m rrr.tools.export data/sessions/x                  # into data/sessions/x/export
@@ -367,31 +351,16 @@ data/sessions/x/export/
     derived/          empty: where whatever is computed from this goes
 ```
 
-Times are integer nanoseconds on `CLOCK_MONOTONIC`. Image indexes also retain
-each sensor's own timestamp and its timestamp domain. Files are named with a
-zero-padded sample id rather than a time: host clock values can repeat when two
-frames arrive back-to-back, and a repeated time must not overwrite an image.
-`frame_metadata/index.jsonl` keeps exposure, gain, laser power and other
-variable firmware fields keyed by frame-set id. Streams are named for their role
-rather than numbered, so removing a camera from the rig does not renumber the
-others. Anything variable-length - eight microphones instead of four - is a
-longer array in `calibration.json` rather than a change of layout.
-
-One conversion happens, and the manifest names it: colour is written as RGB,
-because nothing outside the SDK reads a packed YUYV image. The packed original
-stays in the archive. Depth keeps its raw z16 and carries its scale, and the two
-inertial streams stay apart rather than being resampled onto shared timestamps.
-
-**The measured device offset is written down and not applied.** Applying it
-would bake one alignment into files meant to outlast the decision. Where
-something is unknown - an unset rig, an unmeasured offset - the export says so
-in `notes` rather than substituting an identity.
+Times are integer nanoseconds on `CLOCK_MONOTONIC`; image indexes also keep
+each sensor's own timestamp and its domain. Images are named by a zero-padded
+sample id. `frame_metadata/index.jsonl` keeps the variable firmware fields keyed
+by frame-set id. Colour is written as RGB, depth as raw z16 with its scale. The
+measured device offset is written down and not applied, and anything unknown is
+named in `notes`.
 
 `--start` and `--end` choose image-frame positions. Their half-open host-clock
 interval is applied to audio, IMU, DOA and marks too; `--stride` only decimates
-images. An export is written to a temporary directory, checked, and renamed into
-place, so an interrupted conversion does not look complete. Check one again
-without the source recording with:
+images. Check an export again without the source recording with:
 
 ```bash
 uv run python -m rrr.tools.validate_export data/sessions/<session>/export
@@ -438,4 +407,10 @@ without a WAV is an error, not a silent omission.
 
 ## Not yet
 
-- **A Raspberry Pi.** The image is built to be portable but has not run on one.
+- **The offset between the two devices is unmeasured** until `rrr.tools.calibrate`
+  runs on a session (see [Aligning the two devices](#aligning-the-two-devices)).
+- **A Raspberry Pi.** The image is built to be portable but has not run on one,
+  and lossless at 54 MB/s will not fit there.
+- **Windows drops frames** with more than colour alone, and Media Foundation
+  stamps colour and depth independently. What is lost is recorded in the
+  session like anywhere else ([windows-native.md](windows-native.md)).

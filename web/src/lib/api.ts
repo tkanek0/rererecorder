@@ -1,23 +1,16 @@
 /**
  * Client for the Python control plane.
  *
- * Field names are the server's own, snake_case and all, rather than converted
- * to camelCase. A translation layer would only be a place for the two to drift
- * apart, and every name here appears in `session.json` too - so what the page
- * shows and what the recording says are the same words.
+ * Field names stay snake_case, matching the server and `session.json`.
  */
 
 const DEFAULT_PORT = 8040;
 
 /**
- * Base HTTP URL of the control plane.
+ * Base HTTP URL of the control plane: this page's host, on `VITE_CONTROL_PORT`,
+ * unless `VITE_CONTROL_URL` overrides it. See docs/features.md "The page".
  *
- * The host comes from the page's own location rather than from a build-time
- * value: a recorder on another machine is opened by its address, and a pinned
- * `localhost` there would send the page at its own viewer. Only the port needs
- * telling, through `VITE_CONTROL_PORT`, because the two halves are served
- * separately in development. `VITE_CONTROL_URL` still overrides the whole thing
- * for the case where the control plane is somewhere else entirely.
+ * @returns The URL, with no trailing slash.
  */
 export const controlBase = (): string =>
   import.meta.env.VITE_CONTROL_URL ??
@@ -124,13 +117,11 @@ export type StorageStatus = {
 export type RealsenseDeviceStatus = {
   connected: boolean;
   device: DeviceInfo | null;
-  /** What is being asked for right now - shown here rather than elsewhere,
-   * since it describes this device rather than the page in general. */
+  /** What is being asked for right now. */
   streams: StreamConfig;
   streaming: boolean;
   fps: number;
-  /** Whether opening it failed. Nothing retries on its own; see
-   * `reconnectDevice`. */
+  /** Whether opening it failed. See `reconnectDevice`. */
   failed: boolean;
   error: string | null;
 };
@@ -145,8 +136,8 @@ export type RespeakerDeviceStatus = {
   host_api: string | null;
   channels: number | null;
   rate: number | null;
-  /** Whether the audio stream or the direction readings failed. Nothing
-   * retries on its own; see `reconnectDevice`. */
+  /** Whether the audio stream or the direction readings failed. See
+   * `reconnectDevice`. */
   failed: boolean;
   error: string | null;
   recording: boolean;
@@ -257,24 +248,35 @@ const request = async <T>(path: string, init?: RequestInit): Promise<T> => {
     ...init,
   });
   if (!response.ok) {
-    // The server puts its explanation in `detail`; surfacing the status alone
-    // would turn "stop the recording first" into "409".
+    // The server's explanation is in `detail`.
     const body = await response.json().catch(() => null);
     throw new Error(body?.detail ?? `${response.status} ${response.statusText}`);
   }
   return (await response.json()) as T;
 };
 
-/** Fetch the camera, recording and storage status in one round trip. */
+/**
+ * Fetch the camera, recording, storage and device status in one round trip.
+ *
+ * @returns The status.
+ */
 export const fetchStatus = (): Promise<Status> => request<Status>('/api/status');
 
-/** Fetch the sessions on disk, newest first. */
+/**
+ * Fetch the sessions on disk, newest first.
+ *
+ * @returns The sessions directory and its sessions.
+ */
 export const fetchSessions = (): Promise<{
   sessions_dir: string;
   sessions: SessionSummary[];
 }> => request('/api/sessions');
 
-/** Fetch what the page may change. */
+/**
+ * Fetch what the page may change.
+ *
+ * @returns The current settings.
+ */
 export const fetchSettings = (): Promise<Settings> =>
   request<Settings>('/api/settings');
 
@@ -294,11 +296,7 @@ export const setRecording = (
   });
 
 /**
- * Mark the running recording.
- *
- * The stamp is taken when the request reaches the recorder, so it is a
- * person's reaction time late. It says what a stretch of a recording was; it
- * does not align anything against a frame.
+ * Mark the running recording. See docs/decisions.md 16.
  *
  * @param label What the mark means. Refused if empty.
  * @param data Anything else worth keeping with it.
@@ -325,11 +323,10 @@ export const setSessionsDir = (sessionsDir: string): Promise<Settings> =>
   });
 
 /**
- * Change which streams the camera is asked for.
+ * Change which streams the camera is asked for, from its next opening.
  *
- * @param streams Any of color/depth/infrared/motion to turn on or off; a key
- *   left out keeps its current value. Takes effect the next time the camera
- *   opens - refused with 409 while a recording is running.
+ * @param streams Streams to turn on or off; a key left out is unchanged.
+ *   Refused while recording.
  */
 export const setStreams = (
   streams: Partial<Record<CaptureName, boolean>>,
@@ -341,21 +338,17 @@ export const setStreams = (
 
 /**
  * Try a device again, after it failed or once it has been plugged in.
+ * Refused while recording. See docs/decisions.md 29.
  *
  * @param name Which device.
- *
- * The only way a failed device is opened again - the server does not retry on
- * its own. Refused while recording.
  */
 export const reconnectDevice = (name: DeviceName): Promise<Devices> =>
   request<Devices>(`/api/devices/${name}/reconnect`, { method: 'POST' });
 
 /**
- * Change how each stream's archive is encoded.
+ * Change how each stream's archive is encoded, from the next recording.
  *
- * @param codecs Any of color/depth/infrared mapped to a choice; a key left out
- *   keeps its current codec. Applies to the next recording - nothing about
- *   the camera restarts for this.
+ * @param codecs Streams mapped to a choice; a key left out is unchanged.
  */
 export const setCodecs = (
   codecs: Partial<Record<StreamName, CodecChoice>>,
@@ -412,13 +405,10 @@ export const audioUrl = (sessionId: string, channel = 0): string =>
   `?channel=${channel}`;
 
 /**
- * Fetch every frame's index and capture time.
+ * Fetch every frame's index and capture time, for audio-led playback.
  *
  * @param sessionId Directory name.
- *
- * What turns "the audio is 4.2 seconds in" into "show frame 1234". Fetched
- * rather than interpolated because frames are not evenly spaced - a set the
- * camera mispaired leaves a gap.
+ * @returns `[index, received_monotonic]` pairs, in time order.
  */
 export const fetchFrameTimes = async (
   sessionId: string,
@@ -438,15 +428,13 @@ export type FrameMeta = {
 
 /**
  * Load one recorded frame, with the capture time the server reports for it.
+ * The headers read here must be in the server's CORS `expose_headers`.
  *
  * @param sessionId Directory name.
  * @param index The archive's own frame index.
  * @param kind Which stream to render.
  * @param width Width to scale to before encoding.
- *
- * Returns an object URL the caller must revoke. The capture time comes from a
- * response header rather than being computed from the index, because frames are
- * not evenly spaced - a set the camera mispaired leaves a gap.
+ * @returns An object URL the caller must revoke, and the frame's metadata.
  */
 export const loadFrame = async (
   sessionId: string,

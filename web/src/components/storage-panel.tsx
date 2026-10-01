@@ -12,11 +12,7 @@ type Props = {
 
 /**
  * Where recordings go, how much room is left, and how long that lasts.
- *
- * The remaining time is the number that matters. A session writes about 54 MB/s
- * with every stream enabled, so "200 GB free" reads as plenty and is an hour.
- * It is computed from the rate this recording is actually achieving rather than
- * from a constant, because how well the frames compress depends on the scene.
+ * See docs/features.md "The page".
  */
 export const StoragePanel = ({
   storage,
@@ -28,8 +24,7 @@ export const StoragePanel = ({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Follow the server when it changes underneath, but never while the field is
-  // being edited - overwriting a half-typed path is infuriating.
+  // Follow the server's value, except while a change is being applied.
   useEffect(() => {
     if (!busy) setDraft(storage.sessions_dir);
   }, [storage.sessions_dir, busy]);

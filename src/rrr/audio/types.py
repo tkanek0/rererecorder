@@ -1,20 +1,8 @@
 """The shapes audio travels in, and the conventions that go with them.
 
-Kept apart from :mod:`respeaker.capture` so that analysis and offline work
-import neither PortAudio nor a device: a ``Window`` built from a WAV file is
-the same thing a live one is, and every processor takes both without knowing
-which it got.
-
-Samples are float32 in [-1, 1] throughout, laid out ``(n, channels)`` with the
-oldest sample first.
-
-Every time in here is ``CLOCK_MONOTONIC``, and comes from PortAudio's
-``inputBufferAdcTime`` rather than from ``time.monotonic()`` at the moment the
-callback ran. The two differ by a whole block - measured at 64.0 ms for 1024
-samples at 16 kHz, with 0.35 ms of jitter - and the difference is the whole
-reason a recording can be lined up against video at all. The upstream
-respeaker-playground stamps the callback instead, which is 64 ms late and says
-nothing about where inside the block a sample sits.
+Kept apart from :mod:`rrr.audio.capture` so offline work imports neither
+PortAudio nor a device. Samples are float32 in [-1, 1], ``(n, channels)``,
+oldest first. Times are ``CLOCK_MONOTONIC``, from ``inputBufferAdcTime``.
 """
 
 from __future__ import annotations
@@ -26,9 +14,8 @@ import numpy as np
 
 from . import config
 
-#: Below this a signal is called silence rather than assigned a level. It sits
-#: well under the array's own noise floor, which measures around -45 dBFS on the
-#: raw microphones in a quiet room.
+#: Below this a signal is silence rather than a level; well under the raw
+#: microphones' noise floor (about -45 dBFS in a quiet room).
 SILENCE = 1e-7
 
 
@@ -36,20 +23,15 @@ SILENCE = 1e-7
 class BlockStamp:
     """When one capture block's first sample entered the converter.
 
-    One of these per PortAudio callback. They are what turns a position in a
-    file into a time: the recorder writes them out beside the audio, and
-    anything reading the recording fits a line through them rather than trusting
-    the nominal sample rate.
+    One per PortAudio callback; a reader fits a line through them rather than
+    trusting the nominal rate.
 
     Attributes:
-        sample: Absolute count of samples the tap had captured before this
-            block. Continuous while capture is; a jump means the ring buffer
-            overwrote audio before a reader reached it.
-        monotonic: ``inputBufferAdcTime`` of the block's first sample. A jump
-            relative to the previous block's end means the driver dropped input
-            - the callback simply is not called for what was lost, so the sample
-            count stays continuous while time does not. Both failures have to be
-            detectable, which is why both fields are here.
+        sample: Absolute count of samples captured before this block. A jump
+            means the ring buffer overwrote audio before a reader reached it.
+        monotonic: ADC time of the block's first sample. A jump past the
+            previous block's end means the driver dropped input, which leaves
+            the sample count continuous.
         frames: Samples in the block.
     """
 
@@ -69,9 +51,7 @@ class BlockStamp:
             rate: Sample rate in Hz.
 
         Returns:
-            The expected ADC time of the next block's first sample. Comparing
-            this with the next block's actual ``monotonic`` is how dropped input
-            is found.
+            The expected ADC time of the next block's first sample.
         """
         return self.monotonic + self.frames / rate
 
@@ -149,13 +129,10 @@ class Chunk:
         rate: Sample rate in Hz.
         cursor: Total samples captured once this chunk is consumed. Pass it back
             to continue from here.
-        dropped: Samples overwritten before this reader reached them. Non-zero
-            means the reader is not keeping up.
+        dropped: Samples overwritten before this reader reached them.
         captured_at: ADC time of the chunk's newest sample.
-        stamps: One entry per capture block this chunk spans, oldest first.
-            Empty only for a chunk built by hand in a test. A recorder needs
-            these rather than ``captured_at``: a chunk can span many blocks, and
-            a single time for all of them cannot describe a gap in the middle.
+        stamps: One entry per capture block this chunk spans, oldest first;
+            empty only for a chunk built by hand in a test.
     """
 
     samples: np.ndarray
@@ -178,9 +155,7 @@ def dbfs(amplitude: float) -> float | None:
         amplitude: Linear amplitude, where 1.0 is full scale.
 
     Returns:
-        The level in dBFS, or None for silence - JSON has no way to spell
-        negative infinity, and a meter needs to know the difference between
-        "very quiet" and "nothing at all".
+        The level in dBFS, or None for silence (JSON has no -inf).
     """
     if amplitude <= SILENCE:
         return None

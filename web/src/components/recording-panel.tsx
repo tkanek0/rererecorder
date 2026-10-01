@@ -27,10 +27,7 @@ const Row = ({
 
 /**
  * Start and stop recording, and show what the running session has captured.
- *
- * The dropped and filled counts are shown even when they are zero. They are how
- * anyone learns that a recording has holes in it, and a panel that hid them
- * until they went wrong would let a bad session look fine.
+ * Loss counts are shown even at zero, so a clean session is visibly clean.
  */
 export const RecordingPanel = ({ recording, writeRate, onChanged }: Props) => {
   const [busy, setBusy] = useState(false);
@@ -52,9 +49,7 @@ export const RecordingPanel = ({ recording, writeRate, onChanged }: Props) => {
     }
   };
 
-  // The label is deliberately left in the field after marking. A run of an
-  // experiment is marked over and over with the same condition, and clearing it
-  // would mean retyping it while carrying the rig.
+  // The label stays after marking. See docs/features.md "Marks".
   const mark = async () => {
     const text = label.trim();
     if (!text) return;
@@ -153,16 +148,13 @@ export const RecordingPanel = ({ recording, writeRate, onChanged }: Props) => {
               value={String(video.skipped)}
               tone={video.skipped > 0 ? 'warn' : 'good'}
             />
-            {/* Normal, and every recording has a few - shown so that nobody
-                wonders where three frames went. */}
+            {/* Normal, not a loss. See docs/features.md "Honesty about losses". */}
             <Row label="skipped at startup" value={String(video.skipped_warmup)} />
             <Row
               label="timestamps"
               value={video.timestamp_domain}
               tone={video.timestamp_domain === 'global_time' ? 'good' : 'bad'}
             />
-            {/* Roughly 800 Hz means the sensor is recorded at its own rate;
-                roughly 60 would mean one sample of each per video frame. */}
             <Row
               label="inertial"
               value={

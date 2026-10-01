@@ -1,14 +1,8 @@
 """Whether a recorded WAV's sample positions still mean capture times.
 
-Audio goes missing in two opposite ways, and the writer has to repair both
-without repairing either twice. Each case here is built by hand, written to a
-real WAV and a real sidecar, and then read back through
-``timeline.AudioTimeline`` - the same path a consumer of the recording takes. A
-test that inspected the writer's own counters instead would agree with itself
-whatever reached the disk.
-
-No device is involved: the tap is replaced by one that hands over prepared
-chunks.
+Each case is written to a real WAV and sidecar and read back through
+``AudioTimeline``, as a consumer would, rather than trusting the writer's own
+counters. The tap is faked with prepared chunks.
 """
 
 from __future__ import annotations
@@ -50,10 +44,7 @@ class FakeBlock:
 
 
 class FakeTap:
-    """An AudioTap-shaped source of prepared chunks.
-
-    Only what :class:`~recorder.audio_writer.AudioWriter` uses is implemented.
-    """
+    """An AudioTap-shaped source of prepared chunks, as far as AudioWriter uses one."""
 
     def __init__(self) -> None:
         self.rate = RATE
@@ -197,10 +188,7 @@ def test_the_tap_is_held_only_while_recording(tmp_path) -> None:
 
 
 def test_a_driver_gap_is_filled_with_exactly_what_was_lost(tmp_path) -> None:
-    """The callback is not called for lost audio: time jumps, samples do not.
-
-    Unfilled, every sample after the hole would sit 128 ms early in the file.
-    """
+    """Driver loss: time jumps, samples do not; unfilled, the rest sits 128 ms early."""
     lost_blocks = 8  # 128 ms
     tap = FakeTap()
     blocks = []
@@ -271,11 +259,7 @@ def test_jitter_is_not_mistaken_for_a_gap(tmp_path) -> None:
 
 
 def test_overwritten_audio_is_filled_by_its_sample_count(tmp_path) -> None:
-    """The ring overwrote it: samples jump, capture time was continuous.
-
-    The count is exact here - the tap knows how many samples it captured - so
-    the fill must come from the sample numbers and not from the clock.
-    """
+    """Ring overwrite: the fill comes from the exact sample count, not the clock."""
     tap = FakeTap()
     blocks = [FakeBlock(n * BLOCK, START + n * BLOCK_S, n + 1) for n in range(20)]
     tap.queue(_chunk(blocks[:5]))
@@ -297,22 +281,15 @@ def test_overwritten_audio_is_filled_by_its_sample_count(tmp_path) -> None:
 
 
 def test_the_two_losses_are_not_filled_twice(tmp_path) -> None:
-    """The case the arithmetic exists for.
+    """Overwritten samples also cost elapsed time; counting both would double-fill.
 
-    A reader that lost 5 blocks also lost the 80 ms they occupied. Counting the
-    missing samples *and* the elapsed time would insert 10 blocks of silence for
-    5 blocks of loss - and the recording would then be longer than the time it
-    covers, which is just as wrong as being shorter.
-
-    Here 5 blocks are overwritten and, separately, the driver dropped 3 more.
-    The correct fill is 8 blocks, not 11 and not 16.
+    5 blocks overwritten plus 3 dropped by the driver must fill 8, not 11 or 16.
     """
     overwritten, undelivered = 5, 3
     tap = FakeTap()
     blocks = []
     for n in range(20):
-        # The driver's loss lands after block 14, moving capture time on for
-        # everything from block 15.
+        # The driver's loss lands after block 14.
         skipped = undelivered if n >= 15 else 0
         blocks.append(FakeBlock(n * BLOCK, START + (n + skipped) * BLOCK_S, n + 1))
 
@@ -331,13 +308,7 @@ def test_the_two_losses_are_not_filled_twice(tmp_path) -> None:
 
 
 def test_an_unrepaired_recording_would_have_failed_these_checks() -> None:
-    """A control: the same scenario without the repair must not pass.
-
-    Without this, a writer that filled nothing could pass the tests above if
-    they were only checking self-consistency. Here the file position of every
-    block after the hole is what an unfilled writer would produce, and the
-    residual is asked to notice.
-    """
+    """A control: positions as an unfilled writer would write them must fail."""
     lost = 8 * BLOCK
     points = []
     position = 0

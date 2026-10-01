@@ -1,12 +1,7 @@
 """Whether a known offset can be measured back out of a synthetic session.
 
-A real handclap is the point of the tool, but it cannot be tested: the answer
-would be whatever the hardware happens to do. So a session is built here with an
-offset put into it deliberately - an audio impulse at one instant, a burst of
-movement in the video at another - and the tool is asked to name the difference.
-
-The accuracy that can be expected is one frame interval, because that is all the
-video says. The assertions allow that and no more.
+An audio impulse and a video movement are planted a known interval apart; the
+assertions allow one frame interval, which is all the video can resolve.
 """
 
 from __future__ import annotations
@@ -68,11 +63,7 @@ def calibration() -> Calibration:
 
 @pytest.fixture
 def session(tmp_path: Path, calibration: Calibration) -> SessionPaths:
-    """A session with a clap planted in it, video and audio.
-
-    The video is 150 frames of a static scene with one frame that differs; the
-    audio is silence with one impulse, placed PLANTED_OFFSET_S later.
-    """
+    """150 still frames but one, and an impulse PLANTED_OFFSET_S later."""
     from rrr.video import FrameSet
 
     paths = SessionPaths.create(str(tmp_path), "planted")
@@ -193,8 +184,7 @@ def test_a_still_recording_yields_no_movement(session: SessionPaths) -> None:
             archive, archive.frame_times(), MONO + 1.0, "ir1"
         )
 
-    # A peak is always found - some frame differs most - so the caller is told
-    # how distinct it was rather than being handed a bare answer.
+    # Some frame always differs most; its sharpness says it is noise.
     assert found is not None
     assert found[2] < 2.0, "and it is indistinguishable from the noise"
 
@@ -208,7 +198,7 @@ def test_the_planted_offset_is_measured_back(session: SessionPaths, capsys) -> N
 
     printed = capsys.readouterr().out
     assert "impulses        1 found" in printed
-    # One frame interval is the tolerance the tool itself claims.
+    # The printed offset is the planted one.
     assert f"{PLANTED_OFFSET_S * 1000:+.1f} ms" in printed or "+80" in printed
 
 
@@ -261,12 +251,7 @@ def test_a_session_without_a_clap_is_refused(session: SessionPaths) -> None:
 
 
 def test_the_measured_value_is_reported_for_the_record(session, capsys) -> None:
-    """Prints what it measured, so the number appears in the test log.
-
-    Not an assertion about formatting - the assertions above cover the value.
-    This exists because "within one frame" is a wide tolerance and it is worth
-    being able to see how wide the error actually was.
-    """
+    """Prints the measurement into the test log, to see the error within a frame."""
     root = str(Path(session.directory).parent)
     calibrate.main([f"{root}/planted"])
     out = capsys.readouterr().out

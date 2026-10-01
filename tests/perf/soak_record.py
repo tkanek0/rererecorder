@@ -1,27 +1,17 @@
 """Record for a fixed duration with a chosen configuration, then say whether it held.
 
-A reusable version of the ad hoc checks behind decisions 21, 22 and 23: does a
-given combination of streams and codecs hold close to the requested fps with
-nothing dropped, for as long as it is asked to run? This is the same question
-every one of those investigations answered by hand - this script just makes it
-repeatable on a different machine, after a driver update, or after a future
-change to `FrameHub`/`VideoWriter`.
+Checks that a stream/codec combination holds the requested fps with nothing
+dropped (the check behind docs/decisions.md 21-23). Every `rrr.tools.record`
+flag is forwarded verbatim:
 
-Every flag `rrr.tools.record` accepts works here too - it is forwarded
-verbatim, so this never drifts out of sync with what the CLI actually
-supports:
-
-    # the combination decision 23 settled on for this Windows machine
     uv run python tests/perf/soak_record.py --session soak-color-raw \\
         --seconds 600 --no-depth --no-infrared --color-codec raw
 
-    # the full six-image set, compressed - decision 22's worst case
+    # the full six-image set, compressed - the worst case
     uv run python tests/perf/soak_record.py --session soak-full-compressed \\
         --seconds 60
 
-Needs a live device. Not part of `pytest`, which runs with none attached -
-run this by hand, or wire it into a separate device-equipped CI runner if one
-ever exists.
+Needs a live device. Not part of `pytest`.
 """
 
 from __future__ import annotations
@@ -44,8 +34,7 @@ def main(argv: list[str] | None = None) -> int:
             :func:`rrr.tools.record.main` unchanged.
 
     Returns:
-        0 if the recording held within the given tolerances, 1 otherwise -
-        scriptable the same way `rrr.tools.record` itself is.
+        0 if the recording held within the given tolerances, 1 otherwise.
     """
     parser = argparse.ArgumentParser(
         description=__doc__.splitlines()[0],

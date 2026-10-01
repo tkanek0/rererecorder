@@ -1,10 +1,7 @@
 """Synthetic frames and audio, so that nothing here needs a device attached.
 
-The numbers are the ones measured on the real hardware rather than round
-figures: a D455 at its native depth resolution, frame timestamps in epoch
-milliseconds because that is what ``global_time`` reports, and a frame arriving
-8 ms after the instant it claims to describe because that is what
-``wait_for_frames`` was observed doing.
+Values are measured on the real D455, not round figures: epoch-ms timestamps as
+``global_time`` reports them, and frames arriving 8 ms after their timestamp.
 """
 
 from __future__ import annotations
@@ -21,9 +18,8 @@ WIDTH, HEIGHT = 848, 480
 FX, FY = 426.6, 426.2
 DEPTH_SCALE = 0.001
 
-#: A plausible pair of host clocks, from a real reading on this machine. The
-#: offset between them is large, which is what makes a forgotten conversion
-#: obvious instead of subtle.
+#: A real pair of host clock readings. Their large offset makes a forgotten
+#: conversion obvious.
 MONO = 1_322_228.023434
 REAL = 1_788_250_182.059000
 OFFSET = REAL - MONO
@@ -87,12 +83,9 @@ def make_frames(calibration: Calibration) -> Callable[..., FrameSet]:
             infrared: The left and right raw images, or None.
 
         Returns:
-            The frame set. Its ``received_monotonic`` works out to
-            ``MONO + index / FPS + ARRIVAL_LAG_S`` exactly, which is what
-            assertions can lean on. ``color_timestamp_ms`` and
-            ``depth_timestamp_ms`` both carry the same synthetic SDK-reported
-            instant, since nothing in these fixtures exercises a skew between
-            the two.
+            The frame set, with ``received_monotonic`` exactly
+            ``MONO + index / FPS + ARRIVAL_LAG_S`` and the same colour and
+            depth timestamp (no skew).
         """
         capture = index / FPS
         sdk_timestamp_ms = (REAL + capture) * 1000.0

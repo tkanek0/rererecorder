@@ -1,12 +1,7 @@
 """The tap's time stamping, driven by fake PortAudio callbacks.
 
-No device is opened. The callback is what PortAudio would call, so calling it
-directly exercises the whole stamping path - which is the part this repository
-changed and the part a recording's time axis depends on.
-
-Importing this does load PortAudio itself, because :mod:`audio.capture` does. A
-missing libportaudio2 is an environment problem and says so at import; a missing
-array is not, and nothing here needs one.
+Calling the callback directly exercises the whole stamping path with no device.
+Importing still loads PortAudio, so a missing libportaudio2 fails at import.
 """
 
 from __future__ import annotations
@@ -45,20 +40,13 @@ class FakeStatus:
 
 
 def _fresh_tap() -> AudioTap:
-    """A tap that has never opened a device, or calibrated its clock domain.
-
-    Only the "clock domain" tests below use this directly - everything else
-    uses the ``tap`` fixture, which skips calibration so that a test about a
-    stamp's own arithmetic is not also, incidentally, a test of calibration.
-    """
+    """A tap that has never opened a device, or calibrated its clock domain."""
     return AudioTap(rate=RATE, channels=CHANNELS, block_size=BLOCK, window_s=1.0)
 
 
 @pytest.fixture
 def tap() -> AudioTap:
-    """A tap whose clock domain is already decided as "agrees" - see
-    :func:`_fresh_tap` for one that has not.
-    """
+    """A tap whose clock domain is already decided as "agrees"."""
     instance = _fresh_tap()
     instance._domain_calibrated = True
     return instance
@@ -80,18 +68,13 @@ def _feed(
         tap: The tap to feed.
         blocks: How many blocks to deliver.
         first_block: Block number the ADC times start counting from.
-        adc_start: ADC time of block zero. None - the default - takes a fresh
-            ``time.monotonic()`` reading, so a tap whose domain check has not
-            been skipped would still calibrate to "agrees" as it would live.
-            A fixed constant would only pass that check on whatever machine
-            and uptime it was chosen to match. The ``tap`` fixture skips
-            calibration outright, so this only matters for tests that build
-            their own :class:`AudioTap` - see :func:`_fresh_tap`.
+        adc_start: ADC time of block zero. None takes ``time.monotonic()``,
+            so an uncalibrated tap still calibrates to "agrees"; a constant
+            would only agree on one machine's uptime.
         gap_after: Deliver a gap after this many blocks, or None for none.
-        gap_blocks: How many blocks' worth of audio the gap swallows. The
-            callback is simply not called for them - which is what a driver
-            overflow looks like - so the sample count stays continuous while the
-            ADC time jumps.
+        gap_blocks: Blocks the gap swallows. The callback is not called for
+            them, as in a driver overflow: samples stay continuous, ADC time
+            jumps.
         value: Constant sample value, or None for a per-block ramp that makes
             the blocks distinguishable.
     """
@@ -127,12 +110,7 @@ def test_a_chunk_carries_a_stamp_per_block(tap: AudioTap) -> None:
 
 
 def test_stamps_hold_the_adc_time_not_the_callback_time(tap: AudioTap) -> None:
-    """The whole change: a block is timed by when its audio was converted.
-
-    The callback runs one block late in reality, and by whatever the scheduler
-    adds on top. Using ``time.monotonic()`` here - as respeaker-playground does -
-    would report start + a real elapsed time, not start.
-    """
+    """A block is timed by when its audio was converted, not when the callback ran."""
     start = time.monotonic()
     _feed(tap, 3, adc_start=start)
     chunk = tap.stream(0, timeout=0.0)
@@ -178,13 +156,7 @@ def test_a_stamp_predicts_where_the_next_block_starts(tap: AudioTap) -> None:
 def test_a_driver_gap_shows_as_a_jump_in_time_and_not_in_samples(
     tap: AudioTap,
 ) -> None:
-    """An input overflow: the callback is not called for what was lost.
-
-    So the sample count stays continuous - the tap never saw those samples - and
-    only the ADC time reveals the hole. A recorder that watched sample counts
-    alone would write a file 128 ms shorter than the time it covers, with no
-    trace of why.
-    """
+    """An input overflow: samples stay continuous, only the ADC time shows the hole."""
     _feed(tap, 6, gap_after=3, gap_blocks=8)  # 8 blocks = 128 ms
     chunk = tap.stream(0, timeout=0.0)
 
@@ -198,12 +170,7 @@ def test_a_driver_gap_shows_as_a_jump_in_time_and_not_in_samples(
 
 
 def test_a_slow_reader_shows_as_a_jump_in_samples(tap: AudioTap) -> None:
-    """Overwritten audio: the tap captured it, the reader never collected it.
-
-    Reported as ``dropped`` and visible as a gap between the cursor asked for
-    and the first sample delivered - a different failure from the one above, and
-    it has to stay a different one.
-    """
+    """Overwritten audio is reported as ``dropped``, distinct from a driver gap."""
     _feed(tap, 8)  # a 1 s window at 16 kHz holds 62.5 blocks, so nothing is lost
     tap._capacity = 4 * BLOCK  # shrink the window instead of feeding 60 blocks
     tap._ring = np.zeros((tap._capacity, CHANNELS), dtype=np.float32)
@@ -216,11 +183,7 @@ def test_a_slow_reader_shows_as_a_jump_in_samples(tap: AudioTap) -> None:
 
 
 def test_stamps_cover_the_samples_a_chunk_actually_holds(tap: AudioTap) -> None:
-    """Every sample delivered must have a stamp that covers it.
-
-    Otherwise a recorder cannot time the start of the chunk, which is exactly
-    the case that appears when the ring has wrapped.
-    """
+    """Every sample delivered has a stamp covering it, even after the ring wraps."""
     _feed(tap, 100)  # more than the 62.5 blocks a 1 s window holds
     chunk = tap.stream(0, timeout=0.0)
 
@@ -235,11 +198,7 @@ def test_stamps_cover_the_samples_a_chunk_actually_holds(tap: AudioTap) -> None:
 def test_a_missing_adc_time_falls_back_to_the_callback_clock(
     tap: AudioTap, caplog
 ) -> None:
-    """Some host APIs report zero. The recording should degrade, not lie.
-
-    Checked before calibration ever comes into it - a missing reading is
-    missing regardless of what the domain has or has not decided.
-    """
+    """Some host APIs report zero; that falls back to the callback clock."""
     before = time.monotonic()
     tap._callback(
         np.zeros((BLOCK, CHANNELS), dtype=np.int16),
@@ -258,18 +217,12 @@ def test_a_missing_adc_time_falls_back_to_the_callback_clock(
 
 # -- the clock domain: agrees, a fixed offset, or not one clock at all -------
 #
-# A single reading cannot tell "a fixed offset" from "one value out of an
-# incoherent series", so calibration collects _DOMAIN_CALIBRATION_BLOCKS of
-# them first - these tests use _fresh_tap() rather than the `tap` fixture,
-# which skips calibration precisely so the other tests do not have to care
-# about it.
+# These use _fresh_tap(), since the `tap` fixture skips calibration.
+# See docs/decisions.md 20 and 26.
 
 
 def _feed_domain(tap: AudioTap, offsets: list[float]) -> None:
-    """Feed one block per entry of ``offsets``, each measuring out to
-    ``now - reported == offsets[n]`` regardless of how fast the test itself
-    runs between calls.
-    """
+    """Feed one block per offset, each reported at ``now - offsets[n]``."""
     for offset in offsets:
         now = time.monotonic()
         tap._callback(
@@ -292,26 +245,21 @@ def test_an_agreeing_clock_is_accepted_quietly(caplog) -> None:
 
 
 def test_a_stable_wrong_origin_is_corrected_for(caplog) -> None:
-    """A real clock on a different epoch - measured on this array's WASAPI
-    endpoint on Windows (docs/windows-native.md 7: offset by a constant
-    ~3.9 s, stable to 5.3 ms over five minutes) - keeps its own precision
-    instead of being discarded wholesale the way a truly incoherent one is.
+    """A stable clock on another epoch is corrected, not discarded.
+
+    Modelled on WASAPI's ~3.9 s offset; see docs/decisions.md 26.
     """
     fresh = _fresh_tap()
     offset = 3.9  # seconds - the same order as the real measurement
     _feed_domain(fresh, [offset] * _DOMAIN_CALIBRATION_BLOCKS)
 
     assert not fresh._adc_bad_domain
-    # Loose tolerance: each calibration block's `now` is read a moment after
-    # the one `_feed_domain` used to build its (fake) reported time, and that
-    # real Python-level gap is what this is really allowing for, not sensor
-    # jitter.
+    # Loose tolerance: allows for the Python-level delay between `_feed_domain`
+    # reading `now` and the tap reading it, not sensor jitter.
     assert fresh._adc_offset == pytest.approx(offset - BLOCK / RATE, abs=2e-3)
     assert "correcting for the fixed offset" in caplog.text
 
-    # And it is actually applied: a block reported `offset` seconds behind
-    # `now` lands close to where an agreeing clock's own block would, not
-    # `offset` seconds away from it.
+    # And it is applied: the block lands where an agreeing clock's would.
     now = time.monotonic()
     fresh._callback(
         np.zeros((BLOCK, CHANNELS), dtype=np.int16),
@@ -324,16 +272,12 @@ def test_a_stable_wrong_origin_is_corrected_for(caplog) -> None:
 
 
 def test_an_incoherent_clock_falls_back_for_the_rest_of_the_recording(caplog) -> None:
-    """Not just offset but inconsistent - measured on this array's MME
-    endpoint on Windows: half of all blocks missing, the rest 5-6 **seconds**
-    apart from each other, not just from ``time.monotonic()``
-    (docs/windows-native.md 7). Nothing here is usable, so every block times
-    from the callback clock instead, for the rest of the recording.
+    """An incoherent clock (as MME's was) yields to the callback clock for good.
+
+    See docs/decisions.md 20 and 26.
     """
     fresh = _fresh_tap()
-    # Alternates wildly rather than sitting at one fixed offset - what
-    # calibration needs to see is that the spread is too wide to trust as one
-    # clock, not this exact pattern.
+    # Only the spread matters, not this exact pattern.
     offsets = [
         3.9 if n % 2 == 0 else 400_000.0 for n in range(_DOMAIN_CALIBRATION_BLOCKS)
     ]
@@ -357,10 +301,7 @@ def test_an_incoherent_clock_falls_back_for_the_rest_of_the_recording(caplog) ->
 
 
 def test_the_domain_decision_is_made_once(caplog) -> None:
-    """Re-deciding every block would re-fit or re-warn constantly on a
-    recording that is fine. Once, after enough blocks to tell a fixed offset
-    from noise, is enough.
-    """
+    """Calibration stops after its window rather than re-fitting every block."""
     fresh = _fresh_tap()
     _feed_domain(fresh, [BLOCK / RATE] * (_DOMAIN_CALIBRATION_BLOCKS + 30))
 
@@ -398,10 +339,8 @@ def test_samples_come_back_scaled_and_in_order(tap: AudioTap) -> None:
 
 # -- device resolution ---------------------------------------------------------
 #
-# Windows exposes the same physical ReSpeaker once per host API - see
-# docs/windows-native.md 7 and _resolve_device's own docstring for what was
-# measured. These fakes reproduce that shape rather than a single device, so
-# the ranking is exercised the way it actually comes up.
+# Windows exposes the same ReSpeaker once per host API; these fakes reproduce
+# that shape. See docs/decisions.md 24.
 
 
 def _device(name: str, hostapi: int, rate: float, channels: int = 6) -> dict:
@@ -420,9 +359,8 @@ _WINDOWS_HOSTAPIS = [
     {"name": "Windows WDM-KS"},
 ]
 
-# MME and DirectSound come first in PortAudio's own enumeration order here,
-# the same as measured on the real array - so a test that picked WASAPI only
-# because it happened to be first would not be testing the ranking at all.
+# MME and DirectSound come first, as on the real array, so picking WASAPI
+# tests the ranking rather than the order.
 _WINDOWS_DEVICES = [
     _device("ReSpeaker 4 Mic Array (UAC1.0)", hostapi=0, rate=44100.0),
     _device("ReSpeaker 4 Mic Array (UAC1.0) (DS)", hostapi=1, rate=44100.0),
@@ -437,23 +375,14 @@ def _patch_devices(monkeypatch, devices: list[dict], hostapis: list[dict]) -> No
 
 
 def test_wasapi_is_preferred_when_it_reports_the_right_rate(monkeypatch) -> None:
-    """Among several host-API entries for one device, WASAPI-at-the-right-rate wins.
-
-    Even though MME is first in enumeration order - matching the real array,
-    where this ranking is the whole point rather than incidental.
-    """
+    """Among several host-API entries for one device, WASAPI-at-the-right-rate wins."""
     _patch_devices(monkeypatch, _WINDOWS_DEVICES, _WINDOWS_HOSTAPIS)
     index = _resolve_device("ReSpeaker", 6, RATE)
     assert index == 2
 
 
 def test_a_matching_rate_wins_without_wasapi_present(monkeypatch) -> None:
-    """Linux's shape: one match, one host API, no "Windows WASAPI" to prefer.
-
-    The array's own rate is what ALSA reports, so tier 2 - not tier 1 or the
-    plain-first-match fallback - is what actually picks it, and this is the
-    non-regression check that tier 2 alone is enough.
-    """
+    """Linux's shape: one match, no WASAPI; the rate tier alone picks it."""
     _patch_devices(
         monkeypatch,
         [_device("ReSpeaker 4 Mic Array (UAC1.0)", hostapi=0, rate=float(RATE))],
@@ -463,11 +392,7 @@ def test_a_matching_rate_wins_without_wasapi_present(monkeypatch) -> None:
 
 
 def test_the_first_match_wins_when_nothing_reports_the_requested_rate(monkeypatch) -> None:
-    """Neither ranked tier applies; the previous "first match" behaviour holds.
-
-    Kept as a last resort so an unrecognised platform or host API still
-    resolves to a device rather than raising.
-    """
+    """With no ranked tier applying, the first match is used rather than raising."""
     _patch_devices(
         monkeypatch,
         [
@@ -482,11 +407,7 @@ def test_the_first_match_wins_when_nothing_reports_the_requested_rate(monkeypatc
 def test_a_later_match_with_enough_channels_is_used_over_an_earlier_one_without(
     monkeypatch,
 ) -> None:
-    """A name match that cannot supply the channel count does not end the search.
-
-    The 1-channel-firmware error is for when *no* match can supply them, not
-    for whichever match happens to come first.
-    """
+    """A name match short on channels does not end the search."""
     _patch_devices(
         monkeypatch,
         [
@@ -516,8 +437,7 @@ def test_no_name_match_is_reported_plainly(monkeypatch) -> None:
 
 # -- failure handling ---------------------------------------------------------
 #
-# A failed open stops the tap until someone reconnects it; nothing retries on
-# its own. See docs/decisions.md 29.
+# A failed open is never retried automatically. See docs/decisions.md 29.
 
 
 def _wait_until(ready, timeout: float = 2.0) -> bool:

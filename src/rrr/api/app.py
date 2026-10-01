@@ -1,15 +1,8 @@
 """The control plane: preview out, recording commands in.
 
-Transport only. Every decision about what a recording contains lives in
-:mod:`recorder` and :mod:`video`, and this module knows none of it - which is
-what lets the CLI record without a server running and lets the server record
-through exactly the same code rather than a copy of it.
-
-The camera is opened once, by one hub, and shared. A recording registers as a
-listener on that hub - so it receives every frame, in order, with none dropped -
-while the preview polls for the newest. Starting a recording therefore does not
-restart the pipeline: the preview keeps running, and auto-exposure does not have
-to settle again in the middle of what is being recorded.
+Transport only; what a recording contains is decided in :mod:`rrr.recorder`
+and :mod:`rrr.video`. One hub owns the camera and is shared by the preview and
+the recording - see docs/design.md "The camera is shared".
 """
 
 from __future__ import annotations
@@ -60,9 +53,8 @@ logger = logging.getLogger(__name__)
 class State:
     """Everything the server owns, for the life of the process.
 
-    One hub, one recorder. The recorder is long-lived rather than made per
-    session because it holds the audio taps, and the array is left in a state
-    where the next open fails if a capture stream is not closed properly.
+    One hub, one recorder. The recorder is long-lived because it holds the
+    audio taps, which must be closed properly (see ``SessionRecorder.close``).
     """
 
     def __init__(self) -> None:
@@ -81,13 +73,10 @@ class State:
             codecs=dict(recording_config.CODECS),
             hub=self.hub,
         )
-        #: Bytes per second the last recording achieved. Kept so that the
-        #: remaining-time estimate survives the recording ending: the number is
-        #: what makes free space meaningful, and "measured while recording" is
-        #: not an answer to "how long can I record".
+        #: Bytes per second the last recording achieved, so the remaining-time
+        #: estimate survives the recording ending.
         self.last_write_rate: float | None = None
         #: RealSense devices as last enumerated, or None before the first time.
-        #: See _realsense_device for when that is.
         self.realsense_found: list[DeviceInfo] | None = None
         #: The hub failure the enumeration above already reflects, by its
         #: error_at, so that each failure costs one enumeration and no more.
@@ -110,19 +99,12 @@ class State:
 
     @property
     def streams(self) -> StreamConfig:
-        """What the camera is asked for.
-
-        The recorder is the source of truth - reading through it here rather
-        than keeping a second copy is what keeps this and the archive's own
-        metadata from being able to disagree.
-        """
+        """What the camera is asked for, read through the recorder."""
         return self.recorder.streams
 
     @property
     def codecs(self) -> dict[str, str]:
-        """How each stream's archive is encoded. See ``streams`` for why this
-        reads through the recorder rather than keeping its own copy.
-        """
+        """How each stream's archive is encoded, read through the recorder."""
         return self.recorder.codecs or {}
 
     def _open_camera(self) -> LiveSource:
@@ -155,9 +137,7 @@ app.add_middleware(
     allow_origins=config.ALLOW_ORIGINS,
     allow_methods=["*"],
     allow_headers=["*"],
-    # The page is served from another port, so these are cross-origin reads:
-    # without being listed, the browser hides them from the player, which then
-    # cannot say which frame it is showing or when it was captured.
+    # The page is cross-origin; unlisted headers are hidden from the player.
     expose_headers=["X-Frame-Index", "X-Received-Monotonic"],
 )
 
@@ -187,14 +167,7 @@ def status() -> dict[str, Any]:
 
 
 def _devices() -> dict[str, Any]:
-    """Whether each device is plugged in, independent of whether it is in use.
-
-    ``_camera()`` and the recorder's own state only know a device once
-    something has opened it - a preview, or a recording. This asks each SDK
-    directly instead, the same way ``rrr.video.list_devices`` and
-    ``rrr.audio.capture.probe`` do, so a devices panel can show a camera or
-    array is present before anything has started using it.
-    """
+    """Whether each device is plugged in, independent of whether it is in use."""
     return {
         "realsense": _realsense_device(),
         "respeaker": _respeaker_device(),
@@ -204,20 +177,9 @@ def _devices() -> dict[str, Any]:
 def _realsense_device() -> dict[str, Any]:
     """Describe the D455 as the SDK currently sees it, streaming or not.
 
-    ``list_devices()`` is a real USB enumeration - measured at 200-240 ms on
-    this machine, not a cheap read - and it holds the GIL throughout, so every
-    other request waits on it. While the hub is active (a preview or a
-    recording holds it open), its own ``device`` is used instead:
-    re-enumerating every second on top of an open stream was found to
-    periodically stall the USB bus enough to show up as silence-fills in a
-    recording's own audio, spaced almost exactly one second apart - the page's
-    own status-poll interval.
-
-    Idle, it is not free either: a stall that long every second is a visible
-    stutter in a session being played back. So the enumeration is kept, and
-    redone only on the first status, after each hub failure, and when someone
-    presses Reconnect. A camera plugged in meanwhile shows up at the next of
-    those, which is the same rule the hub follows for opening it.
+    Enumeration is a slow USB stall, so it is skipped while the hub is active
+    and otherwise cached until the next hub failure or Reconnect - see
+    docs/decisions.md 29.
     """
     hub = state.hub
     if hub.active:
@@ -245,8 +207,7 @@ def _realsense_device() -> dict[str, Any]:
 def _respeaker_device() -> dict[str, Any]:
     """Describe the array as PortAudio currently sees it, recording or not.
 
-    ``failed`` covers both halves of the array - the audio stream and the
-    direction readings - since one Reconnect restarts both.
+    ``failed`` covers both the audio and the direction taps.
     """
     found = probe_audio()
     tap = state.recorder.tap
@@ -278,9 +239,7 @@ def reconnect_device(name: str) -> dict[str, Any]:
     Raises:
         HTTPException: 404 for an unknown device; 409 while recording.
 
-    The only way a failed device is opened again: nothing retries on its own
-    (docs/decisions.md 29). Refused while recording, because what a reopened
-    device mid-session leaves in the files has not been measured.
+    See docs/decisions.md 29.
     """
     if name not in ("realsense", "respeaker"):
         raise HTTPException(status_code=404, detail=f"no device {name!r}")
@@ -298,9 +257,8 @@ def reconnect_device(name: str) -> dict[str, Any]:
     else:
         tap = state.recorder.tap
         doa = state.recorder.doa
-        # PortAudio only sees an array plugged in since it was initialised
-        # after initialising again, which would pull an open stream out from
-        # under its reader - so only with the tap stopped.
+        # Re-initialising PortAudio (to see a newly plugged array) would pull
+        # an open stream from under its reader, so only with the tap stopped.
         if tap is None or not tap.active:
             rescan()
         for device in (tap, doa):
@@ -331,10 +289,6 @@ def _storage() -> dict[str, Any]:
     Returns:
         The directory, its free and total bytes, and how long that lasts at the
         rate this recording is actually writing.
-
-    The remaining time is the number worth showing. Free bytes alone do not say
-    much when a session costs 195 GB an hour: 200 GB free reads as plenty and is
-    an hour.
     """
     root = state.sessions_root
     probe = root if os.path.isdir(root) else os.path.dirname(os.path.abspath(root))
@@ -347,9 +301,7 @@ def _storage() -> dict[str, Any]:
     live = _write_rate()
     if live:
         state.last_write_rate = live
-    # Falls back to what the last recording achieved. Still measured, just not
-    # right now - and said so, because an estimate from a different scene is
-    # worth less than one from this one.
+    # Falls back to the last recording's rate, flagged as not live.
     basis = live or state.last_write_rate
     return {
         "sessions_dir": root,
@@ -365,9 +317,8 @@ def _write_rate() -> float | None:
     """How fast the current recording is growing, in bytes per second.
 
     Returns:
-        The measured rate, or None when nothing is being recorded. Measured
-        rather than assumed, because it depends on the scene: a featureless
-        wall compresses far better than a cluttered room.
+        The measured rate, or None when nothing is being recorded. Measured,
+        because compression depends on the scene.
     """
     recording = state.recorder.state()
     seconds = recording.get("seconds") or 0.0
@@ -395,9 +346,8 @@ async def set_recording(request: Request) -> dict[str, Any]:
         HTTPException: 400 for an unusable session name or a busy recorder,
             503 if the camera could not be started.
 
-    Runs in a thread: starting waits for the camera's first frame and stopping
-    drains the encoder queue, both of which take long enough to block the event
-    loop and with it the preview.
+    Runs in a thread: starting and stopping both block long enough to stall
+    the event loop and the preview.
     """
     body = await request.json()
     wanted = bool(body.get("recording"))
@@ -435,8 +385,8 @@ async def add_event(request: Request) -> dict[str, Any]:
         HTTPException: 400 for an empty label, a ``data`` that is not an
             object, or when nothing is recording.
 
-    Not run in a thread: appending one line and flushing it is microseconds,
-    and a mark is worth stamping as close to the request as possible.
+    Not run in a thread, so the mark is stamped as close to the request as
+    possible.
     """
     body = await request.json()
     label = str(body.get("label") or "").strip()
@@ -474,8 +424,8 @@ def _resolve(session_id: str) -> SessionPaths:
 
     Raises:
         HTTPException: 404 if it is not a session id or no such session exists.
-            ``SessionPaths.resolve`` is the only thing between a path parameter
-            and the filesystem, and it rejects rather than sanitises.
+            ``SessionPaths.resolve`` is the only guard between a path parameter
+            and the filesystem.
     """
     try:
         return SessionPaths.resolve(state.sessions_root, session_id)
@@ -492,8 +442,7 @@ def session_detail(session_id: str) -> dict[str, Any]:
 
     Returns:
         The manifest, plus the archive's frame range and which streams it
-        holds - a player needs the range to seek within, and the stream list to
-        know what it can show.
+        holds.
 
     Raises:
         HTTPException: 404 if the session or its manifest cannot be read.
@@ -507,8 +456,7 @@ def session_detail(session_id: str) -> dict[str, Any]:
     detail = manifest.as_dict()
     detail["size_bytes"] = paths.size_bytes()
     detail["archive"] = _archive_detail(paths.video)
-    # Read rather than counted from the manifest: the file is what a session
-    # actually holds, and a session recorded before marks existed has none.
+    # Read from the file, which is what the session actually holds.
     try:
         detail["events"] = [event.as_dict() for event in read_events(paths.events)]
     except ValueError as error:
@@ -524,9 +472,8 @@ def _archive_detail(path: str) -> dict[str, Any]:
         path: The archive to open.
 
     Returns:
-        Its frame range, count and available streams, or an ``error``. A
-        session whose archive is unreadable still has a manifest worth showing,
-        so this reports rather than raises.
+        Its frame range, count and available streams, or an ``error`` rather
+        than raising, so the manifest can still be shown.
     """
     if not os.path.isfile(path):
         return {"error": "no archive in this session"}
@@ -548,9 +495,7 @@ def _archive_detail(path: str) -> dict[str, Any]:
                 "aligned": archive.calibration.aligned,
                 "codecs": archive.meta.get("codecs"),
                 "color_format": archive.meta.get("color_format"),
-                # Measured from the stored timestamps, not read from the
-                # configuration: a recording that kept one sample per frame
-                # reports 30 Hz here, which is how it gives itself away.
+                # Measured from stored timestamps, not the configuration.
                 "motion_rate": archive.motion_rate(),
             }
     except StreamError as error:
@@ -568,18 +513,13 @@ def session_frame(session_id: str, index: int, request: Request) -> Response:
             ``colormap``.
 
     Returns:
-        The JPEG, with the frame's own capture time in ``X-Capture-Monotonic``.
-        A player reads that rather than assuming frames are evenly spaced: they
-        are not, because a set the camera mispaired leaves a gap.
+        The JPEG, with its index in ``X-Frame-Index`` and its capture time in
+        ``X-Received-Monotonic``, since frames are not evenly spaced.
 
     Raises:
         HTTPException: 404 for an unknown session, stream or frame.
 
-    The archive is opened per request. Measured: opening, reading one colour
-    frame and closing costs 15.7 ms against 16.3 ms with the archive already
-    open - the open is 1.3 ms and the operating system's page cache absorbs the
-    rest. Keeping one open would save nothing measurable and would need a lock,
-    because a synchronous endpoint runs on whichever thread is free.
+    The archive is opened per request; see docs/decisions.md 10.
     """
     kind = request.query_params.get("kind", "color")
     if kind not in ("color", "depth", "ir1", "ir2"):
@@ -617,8 +557,7 @@ def session_frame(session_id: str, index: int, request: Request) -> Response:
         headers={
             "X-Frame-Index": str(frames.index),
             "X-Received-Monotonic": repr(frames.received_monotonic),
-            # A recorded frame never changes, so the browser may keep it. This
-            # is what makes seeking backwards and looping feel immediate.
+            # A recorded frame never changes, so the browser may cache it.
             "Cache-Control": "public, max-age=3600",
         },
     )
@@ -637,10 +576,8 @@ def session_frames(session_id: str) -> dict[str, Any]:
     Raises:
         HTTPException: 404 if the session or its archive cannot be read.
 
-    What a player needs to turn "the audio is 4.2 seconds in" into "show frame
-    1234". Interpolating from the first and last would be close but not exact,
-    because a set the camera mispaired leaves a gap. About 30 KB for a 30 second
-    recording, 3 MB for an hour, fetched once.
+    Lets a player map an audio time to a frame exactly, since frames are not
+    evenly spaced.
     """
     paths = _resolve(session_id)
     try:
@@ -660,16 +597,12 @@ def session_audio(session_id: str, request: Request) -> Response:
             to 4 the raw microphones, 5 the playback loopback.
 
     Returns:
-        A single-channel WAV. Not the recorded file: that has six channels, and
-        a browser would fold them together into something nobody recorded. One
-        channel at a time is what a person listening actually wants.
+        A single-channel WAV, so a browser does not downmix the six.
 
     Raises:
         HTTPException: 404 if there is no audio or no such channel.
 
-    The whole file is built in memory and returned at once. At 16 kHz mono that
-    is 1.9 MB a minute, so this is fine for the sessions this records and would
-    need range requests for something much longer.
+    Built whole in memory (about 1.9 MB a minute); no range requests.
     """
     paths = _resolve(session_id)
     channel = int(request.query_params.get("channel", 0))
@@ -716,10 +649,7 @@ async def delete_session(session_id: str) -> dict[str, Any]:
         HTTPException: 404 if there is no such session, 409 if it is the one
             being recorded.
 
-    Deleting is offered because a session costs 1.7 GB for 34 seconds: without
-    it, the only way to reclaim space is a shell. It removes the directory and
-    its contents and nothing else - the id cannot name anything outside the
-    recordings root, which ``SessionPaths.resolve`` enforces.
+    ``SessionPaths.resolve`` keeps the id inside the recordings root.
     """
     paths = _resolve(session_id)
     running = state.recorder.state()
@@ -743,10 +673,8 @@ def get_settings() -> dict[str, Any]:
     return {
         "sessions_dir": state.sessions_root,
         "writable": config.ALLOW_SETTINGS_WRITE,
-        # Resolution and frame rate are settled when the pipeline starts and
-        # stay read-only here; which streams are asked for at all, and how
-        # each is encoded, can both be changed - see _apply_streams and
-        # _apply_codecs.
+        # Resolution and frame rate are read-only here; stream toggles and
+        # codecs are not (docs/decisions.md 23).
         "streams": state.streams.as_dict(),
         "codecs": state.codecs,
     }
@@ -760,9 +688,7 @@ async def put_settings(request: Request) -> dict[str, Any]:
         request: JSON body with any of:
             ``sessions_dir``: a directory path.
             ``streams``: an object with any of ``color``, ``depth``,
-                ``infrared``, ``motion`` as booleans - whether to ask the
-                camera for that stream at all. Resolution and frame rate stay
-                as the environment set them.
+                ``infrared``, ``motion`` as booleans.
             ``codecs``: an object with any of ``color``, ``depth``,
                 ``infrared`` mapped to ``"compressed"`` or ``"raw"``. See
                 ``rrr.recorder.config.codec_for``.
@@ -772,8 +698,7 @@ async def put_settings(request: Request) -> dict[str, Any]:
 
     Raises:
         HTTPException: 403 if changing settings is disabled, 409 while a
-            recording is running - a session cannot describe two
-            configurations at once - and 400 if a value cannot be applied.
+            recording is running, and 400 if a value cannot be applied.
     """
     if not config.ALLOW_SETTINGS_WRITE:
         raise HTTPException(status_code=403, detail="settings are read-only")
@@ -815,8 +740,7 @@ async def _apply_sessions_dir(raw: Any) -> None:
         raise HTTPException(status_code=400, detail=str(error)) from error
 
     state.sessions_root = wanted
-    # The recorder is long-lived - it holds the audio taps, which must be closed
-    # properly - so the root moves rather than the recorder being replaced.
+    # The recorder is long-lived (see State), so its root moves instead.
     state.recorder.root = wanted
     logger.info("recordings now go to %s", wanted)
 
@@ -833,15 +757,11 @@ def _apply_streams(raw: Any) -> None:
             boolean. A key left out keeps its current value.
 
     Raises:
-        HTTPException: 400 for a key this does not recognise, or a
-            combination :class:`~rrr.video.StreamConfig` refuses - most
-            commonly infrared left on with depth turned off, since infrared is
-            the depth sensor's own pair.
+        HTTPException: 400 for an unknown key, or a combination
+            :class:`~rrr.video.StreamConfig` refuses (e.g. infrared without
+            depth).
 
-    Takes effect the next time the camera opens: the SDK settles resolution
-    and frame rate at pipeline start, so a hub already running - because a
-    preview or a recording holds it open - is restarted, exactly as a
-    resolution change would need.
+    Restarts the hub, since streams are settled at pipeline start.
     """
     if not isinstance(raw, dict):
         raise HTTPException(status_code=400, detail="streams must be an object")
@@ -884,9 +804,7 @@ def _apply_codecs(raw: Any) -> None:
     Raises:
         HTTPException: 400 for an unknown stream name or codec choice.
 
-    Nothing about the camera restarts for this: the archive is created fresh
-    at the start of each recording, so this only has to be set before the
-    next one begins.
+    No restart needed: it applies to the next archive created.
     """
     if not isinstance(raw, dict):
         raise HTTPException(status_code=400, detail="codecs must be an object")
@@ -909,9 +827,8 @@ def _check_writable(path: str) -> None:
         path: The directory to check, created if absent.
 
     Raises:
-        OSError: If it cannot be created or written. Checked by writing rather
-            than by reading permissions: a mount can be read-only, full, or
-            owned by somebody else, and only an actual write finds all three.
+        OSError: If it cannot be created or written. Checked by an actual
+            write, which catches read-only, full and foreign-owned mounts.
     """
     os.makedirs(path, exist_ok=True)
     probe = os.path.join(path, ".rererecorder-write-test")
@@ -933,8 +850,7 @@ def stream(kind: str, request: Request) -> StreamingResponse:
             ``width`` query parameters.
 
     Returns:
-        A ``multipart/x-mixed-replace`` response, which an ``<img>`` renders as
-        live video with no JavaScript at all.
+        A ``multipart/x-mixed-replace`` response.
 
     Raises:
         HTTPException: 404 for an unknown stream.
@@ -956,25 +872,17 @@ def stream(kind: str, request: Request) -> StreamingResponse:
 
 
 def _preview_max_hz() -> float:
-    """The preview's current rate cap.
+    """The preview's current rate cap: lower while recording, capped even idle.
 
-    Lower while recording, to leave the CPU to the encoders that are keeping
-    the recording whole - a dropped frame there cannot be gotten back, so this
-    is not something a page control gets to relax in the moment. Still capped
-    rather than "whatever the camera delivers" even with nothing recording:
-    measured on this machine (docs/windows-native.md), two MJPEG previews
-    encoding at the camera's full ~30 fps is by itself enough load to stall the
-    frame hub once depth and infrared are also being captured - which reads as
-    the preview freezing, the opposite of what an uncapped rate was for.
+    See docs/windows-native.md "A devices panel".
     """
     if state.recorder.recording:
         return config.PREVIEW_MAX_HZ_RECORDING
     return config.PREVIEW_MAX_HZ_IDLE
 
 
-#: Seconds a live stream waits between checks while its device has failed.
-#: Nothing will arrive until someone reconnects it, so this only bounds how
-#: late the stream notices a reconnect - or its client leaving.
+#: Seconds a live stream waits between checks while its device has failed;
+#: bounds how late it notices a reconnect or its client leaving.
 _FAILED_WAIT_S = 1.0
 
 #: Longest a live stream waits for new data before checking its client again.
@@ -986,16 +894,8 @@ async def _frames(
 ):
     """Yield MJPEG parts until the client goes away.
 
-    The hub is held for the life of the generator, so the camera closes shortly
-    after the last preview disconnects - unless a recording is holding it, which
-    it does by its own reference.
-
-    Asynchronous, and checking for the client itself, because nothing else
-    notices it leave. The server speaks ASGI 2.4, under which Starlette does not
-    watch for a disconnect and learns of one only when a send fails - and a
-    stream with no frames to send never sends. As a synchronous generator this
-    looped forever on a camera that was not there, holding the hub open after
-    every page that had ever shown a preview.
+    Holds the hub for its own life. Must check for disconnect itself, or a
+    stream with no frames holds the hub forever - see docs/decisions.md 29.
     """
     hub = state.hub
     hub.acquire()
@@ -1005,9 +905,7 @@ async def _frames(
         while not await request.is_disconnected():
             frames = await run_in_threadpool(hub.latest, _STREAM_WAIT_S, after)
             if frames is None:
-                # Nothing arrived: the camera may be starting or gone. Keep the
-                # response open rather than ending it, so the page does not have
-                # to distinguish "no frames yet" from "stream over".
+                # Camera starting or gone: keep the response open regardless.
                 if hub.failed:
                     await asyncio.sleep(_FAILED_WAIT_S)
                 continue
@@ -1046,14 +944,9 @@ def audio_levels(request: Request) -> StreamingResponse:
         each in dBFS or ``null`` for silence.
 
     Raises:
-        HTTPException: 404 if this server was started with audio recording
-            disabled entirely, so there is no tap to read.
+        HTTPException: 404 if this server was started with audio off.
 
-    Server-sent events rather than MJPEG: there is nothing to decode, just a
-    handful of numbers a few times a second, so plain JSON needs no binary
-    framing. Opens the array for as long as the connection lasts, the same
-    way the video preview holds the camera - see ``_frames`` above - sharing
-    the one tap a recording would also use.
+    Holds the recorder's tap for as long as the connection lasts.
     """
     tap = state.recorder.tap
     if tap is None:
@@ -1070,9 +963,7 @@ def audio_levels(request: Request) -> StreamingResponse:
 async def _levels(request: Request, tap: AudioTap):
     """Yield one SSE event per interval with each channel's level.
 
-    Runs whether or not a session is being recorded - the same tap either
-    way, reference counted like the camera's hub. Checks for its client itself,
-    for the reason given in ``_frames``.
+    Checks for its client itself, for the reason given in ``_frames``.
     """
     tap.acquire()
     try:
@@ -1086,8 +977,7 @@ async def _levels(request: Request, tap: AudioTap):
                 tap.latest, config.AUDIO_LEVEL_WINDOW_S, _STREAM_WAIT_S, after
             )
             if window is None:
-                # Nothing new: the array may be starting or gone. Keep the
-                # connection open, the same as the video preview does.
+                # Array starting or gone: keep the connection open.
                 if tap.failed:
                     await asyncio.sleep(_FAILED_WAIT_S)
                 continue

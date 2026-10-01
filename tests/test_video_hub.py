@@ -1,8 +1,6 @@
 """The frame hub's failure handling, driven by a source that fails on demand.
 
-No camera. What matters here is what the hub does once a source fails: it
-stops, stays stopped however many consumers arrive, and opens again only when
-someone asks - see docs/decisions.md 29.
+A failed hub stays stopped until someone reconnects it. See docs/decisions.md 29.
 """
 
 from __future__ import annotations

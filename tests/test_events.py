@@ -1,9 +1,7 @@
 """The one sidecar a person writes.
 
-What matters here is not the format - it is one JSON object per line, like the
-others - but that a mark survives. A recording of an experiment is unusable if
-the note saying which condition it was got lost, and unlike a dropped frame,
-nothing downstream can detect that it is missing.
+A lost mark is undetectable downstream, unlike a dropped frame, so these test
+that marks survive.
 """
 
 from __future__ import annotations

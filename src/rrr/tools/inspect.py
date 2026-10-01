@@ -2,21 +2,8 @@
 
     uv run python -m rrr.tools.inspect data/sessions/2026-09-01_17-30-00
 
-Everything here is a cross-check rather than a summary. The manifest already
-says what the recorder believed; this reads the files themselves and asks
-whether they agree - with each other, and with the arithmetic. The interesting
-answers are the disagreements:
-
-* the WAV's own length against what the measured clock points predict,
-* the archive's frame timestamps against their stored monotonic times,
-* each track's span against the other's, which is the only part of a session
-  where audio and video can be compared at all,
-* the direction sidecar's times against the audio's.
-
-A recording that passes all of these is one where a sample can be placed against
-a frame. A recording that fails one of them is still worth having - the
-measurements are real - but it is not synchronised, and this is where that gets
-found out rather than three months later.
+Cross-checks the files against each other rather than summarising the
+manifest; see docs/features.md "The command line".
 """
 
 from __future__ import annotations
@@ -38,32 +25,21 @@ from rrr.timeline import (
 )
 from rrr.video import ArchiveSource, StreamError
 
-#: How far the two independent estimates of the audio's length may differ before
-#: it is called a disagreement, in milliseconds.
-#:
-#: One block at 16 kHz is 16 ms, and the two estimates are built from the same
-#: samples through different arithmetic - the header's nominal rate against the
-#: fitted one - so anything past a block means the sidecar and the file describe
-#: different recordings.
+#: How far the header's and the clock points' audio lengths may differ, in
+#: milliseconds. One 16 ms block; past that they describe different recordings.
 LENGTH_TOLERANCE_MS = 16.0
 
 #: Rate error past which a recording will visibly drift against the video.
-#:
-#: 100 ppm is 0.36 s an hour. Below about 50 ppm nothing shorter than an hour is
-#: affected; above a few hundred, something is wrong beyond a crystal.
+#: 100 ppm is 0.36 s an hour.
 RATE_WARN_PPM = 100.0
 
 #: Residual past which the audio time axis is not a straight line, in
-#: milliseconds. Measured jitter is 0.03 ms rms on a real recording, so 1 ms is
-#: thirty times the noise and well below one block.
+#: milliseconds. Measured jitter is 0.03 ms rms on Linux, so 1 ms is 30x that.
 RESIDUAL_WARN_MS = 1.0
 
 #: Shortest recording whose fitted sample rate is worth reporting, in seconds.
-#:
-#: Measured on four real recordings: 4 second sessions fitted +51, +11 and +15
-#: ppm, while a 10 second one fitted -14 ppm. The scatter is the fit's, not the
-#: crystal's - a short span gives the slope nothing to lean on - so a rate from
-#: a few seconds of audio says less than it appears to.
+#: Measured: 4 s sessions fitted +51, +11 and +15 ppm and a 10 s one -14 ppm -
+#: scatter from the short fit, not the crystal.
 MIN_RATE_SPAN_S = 30.0
 
 
@@ -180,10 +156,7 @@ def _check_audio(
 
     report = timeline.report()
 
-    # Two independent estimates of how long the audio is. The header's is
-    # frames / nominal rate; the sidecar's is the time between the first and
-    # last measured points, extended to the ends of the file. They are built
-    # from different numbers and must agree.
+    # Two independent lengths: frames / nominal rate, and the fitted clock.
     by_header = frames / rate
     by_clock = timeline.monotonic_at(frames) - timeline.monotonic_at(0)
     disagreement_ms = abs(by_header - by_clock) * 1000.0
@@ -246,9 +219,7 @@ def _check_video(
     Returns:
         What was measured, or None if there is no video.
 
-    Read with plain SQL rather than through ``ArchiveSource``: the question is
-    about the file's timing, and decoding 300 PNG pairs to answer it would cost
-    seconds and prove nothing extra.
+    Plain SQL rather than ``ArchiveSource``, so no image is decoded.
     """
     if manifest.video is None:
         return None
@@ -257,9 +228,7 @@ def _check_video(
             columns = {
                 row[1] for row in connection.execute("PRAGMA table_info(frames)")
             }
-            # Whichever of received_monotonic (v4+), capture_monotonic (v2-v3,
-            # nullable) or received_at (v1+, never null) this file has - see
-            # ArchiveSource._timestamp_columns, which the same detection mirrors.
+            # Mirrors ArchiveSource._timestamp_columns across format versions.
             if "received_monotonic" in columns:
                 monotonic_sql = "received_monotonic"
             elif "capture_monotonic" in columns and "received_at" in columns:
@@ -291,11 +260,8 @@ def _check_video(
 
     domain = manifest.video.timestamp_domain
     if domain != "global_time":
-        # Not a failure: colour and depth are stamped independently rather
-        # than through one drift-corrected clock, which is coarser but usable
-        # - see docs/windows-native.md. What that costs is left in the data
-        # (color_timestamp_ms, depth_timestamp_ms) for whoever reads it,
-        # rather than decided here.
+        # Not a failure: coarser but usable, and the per-stream timestamps
+        # stay in the data. See docs/windows-native.md #3.
         check.note(
             f"frame timestamps are in domain {domain!r}, not global_time: "
             f"colour and depth were stamped independently"
@@ -328,20 +294,12 @@ def _check_video(
 
 # -- the inertial sensor ------------------------------------------------------
 
-#: Sample rate below which the recording clearly holds one sample per video
-#: frame rather than the sensor's own output.
-#:
-#: A D455 runs its accelerometer at 482 Hz and its gyroscope at 478. Anything
-#: near 30 is the old per-frame behaviour, which is a fourteenth of the data.
+#: Sample rate below which the recording holds one sample per video frame
+#: rather than the sensor's own output (482/478 Hz); see docs/decisions.md 12.
 MIN_IMU_HZ = 100.0
 
 #: How far the magnitude of a still accelerometer may sit from gravity, in
-#: m/s^2, before it is worth remarking on.
-#:
-#: A stationary accelerometer measures specific force, which is 9.81 upwards.
-#: This is the one check on the inertial data that comes from physics rather
-#: than from the file agreeing with itself - so it is worth making, even though
-#: a camera that was moving will fail it legitimately.
+#: m/s^2, before it is worth remarking on. A moving camera fails it legitimately.
 GRAVITY_TOLERANCE = 0.5
 
 
@@ -396,9 +354,7 @@ def _check_imu(
                 f"recording holds a fraction of what the IMU measured"
             )
 
-    # The samples have to lie on the same axis as the frames, or they cannot be
-    # used with them. This is the check that would catch a timestamp domain
-    # mismatch, which would otherwise look perfectly self-consistent.
+    # Catches a timestamp domain mismatch, which is otherwise self-consistent.
     placed = [
         s.capture_monotonic for s in samples if s.capture_monotonic is not None
     ]
@@ -431,10 +387,8 @@ def _check_imu(
                 f"not"
             )
 
-    # Gaps are looked for only inside the video's own span. The inertial sensor
-    # starts up to 0.7 s before the first frame and settles during that time -
-    # measured, four gaps of 12 to 70 ms, all of them before the video began and
-    # none after. Counting those would report every healthy recording as lossy.
+    # Only inside the video's span: the sensor's start-up gaps (12-70 ms,
+    # measured) all fall before the first frame. See docs/decisions.md 12.
     window = (
         (video["first_monotonic"], video["last_monotonic"])
         if video is not None and "first_monotonic" in video
@@ -459,8 +413,7 @@ def _check_imu(
     result["largest_gap_ms"] = gaps
     for stream, gap in gaps.items():
         expected = 1000.0 / max(rates.get(stream, 1.0), 1.0)
-        # Ten intervals: a real drop shows up as a multiple, and the odd
-        # scheduling hiccup does not.
+        # Ten intervals: past the odd scheduling hiccup.
         if gap > expected * 10:
             check.fail(
                 f"the {stream} stream has a {gap:.0f} ms gap inside the "
@@ -542,8 +495,7 @@ def _check_doa(
         ),
     }
     if audio is not None and "first_monotonic" in audio:
-        # A bearing outside the audio cannot be lined up against anything, which
-        # would mean the two are on different clocks after all.
+        # Outside the audio would mean the two are on different clocks.
         slack = 1.0
         if (
             times[0] < audio["first_monotonic"] - slack
@@ -572,10 +524,6 @@ def _check_events(
 
     Returns:
         What was measured, or None if nobody marked anything.
-
-    A mark outside both tracks means the sidecar belongs to a different session
-    or the clocks disagree, and either way it cannot be used to say what a
-    stretch of the recording was.
     """
     try:
         events = read_events(paths.events)
@@ -697,9 +645,7 @@ def _print(manifest, audio, video, imu, overlap, doa, marks, check: Check) -> No
             )
 
     if marks:
-        # Distinct labels, and only a few of them: a session of an experiment
-        # can carry one mark per run, and a line listing forty of them buries
-        # the checks around it.
+        # A few distinct labels, so a mark per run does not bury the checks.
         distinct = list(dict.fromkeys(marks["labels"]))
         shown = ", ".join(distinct[:5])
         if len(distinct) > 5:

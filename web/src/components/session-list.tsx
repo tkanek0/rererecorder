@@ -12,16 +12,8 @@ type Props = {
 };
 
 /**
- * The sessions on disk, newest first, with playback and deletion.
- *
- * Shows the loss counts rather than only the length: "34 s recorded" is not the
- * same claim as "34 s recorded with nothing missing", and the difference is what
- * the counters are for.
- *
- * Deletion is offered because a session costs 1.7 GB for 34 seconds - without
- * it the only way to reclaim space is a shell. It takes two clicks rather than a
- * `confirm()` dialog: a browser modal blocks everything until dismissed, which
- * makes the page untestable and is heavier than the decision warrants.
+ * The sessions on disk, newest first, with their losses, playback and deletion.
+ * Deletion takes two clicks rather than a `confirm()`, which would block the page.
  */
 export const SessionList = ({
   sessions,
@@ -90,9 +82,7 @@ export const SessionList = ({
                   <td className={lost > 0 ? 'value bad' : 'value good'}>{lost}</td>
                   <td>{session.audio ? duration(session.audio.seconds) : '-'}</td>
                   <td>
-                    {/* Null until tools.calibrate has measured it. Saying
-                        "unmeasured" is honest; showing 0 would claim the two
-                        devices are aligned. */}
+                    {/* Null until tools.calibrate measures it; never shown as 0. */}
                     {session.calibration.offset_s === null
                       ? 'unmeasured'
                       : `${(session.calibration.offset_s * 1000).toFixed(1)} ms`}

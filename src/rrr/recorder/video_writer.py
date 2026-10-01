@@ -1,20 +1,7 @@
 """Writing the camera to an archive, and saying what it cost.
 
-The writer is a *listener* on the frame hub, not a poller. That distinction is
-the whole design: ``FrameHub.latest`` returns the newest set, so anything
-reading it that falls a frame behind loses one and cannot tell - fine for a
-preview, useless for a recorder. A listener is called for every set, in order,
-on the hub's own thread.
-
-The price is that this code runs inside the hub's read loop, so it has to be
-quick: ``ArchiveWriter.append`` is a bounded queue put, tens of microseconds,
-and the encoding happens on the archive's own pool. If the queue is full the
-frame is counted as dropped rather than waited for, because blocking here would
-stall the camera for the preview as well.
-
-Reading the source directly - which an earlier version did - would also work
-and lose nothing, but then recording from the CLI and recording from the server
-would be two different code paths, and only one of them would be exercised.
+The writer is a listener on the frame hub, so it runs on the hub's read loop
+and must never block - see docs/design.md "The camera is shared".
 """
 
 from __future__ import annotations
@@ -34,26 +21,20 @@ class VideoStats:
 
     Attributes:
         frames: Frame sets written.
-        dropped: Sets the encoder queue could not accept. Non-zero means the
-            disk or the CPU fell behind, and the recording has holes.
-        motion: Inertial samples written. About 960 a second on a D455 - both
-            streams at 480 Hz - against 30 video frames, which is why they are
-            recorded separately rather than one per frame.
+        dropped: Sets the encoder queue could not accept; non-zero means the
+            recording has holes.
+        motion: Inertial samples written.
         motion_overrun: Samples the source discarded because this writer did
-            not drain them in time. Should be zero: draining happens once per
-            frame and the buffer holds eight seconds.
-        skipped_warmup: Sets the source discarded before delivering its first,
-            while the SDK's syncer settled. Measured on a D455: three, every
-            time, within the same millisecond as ``pipeline.start``. Not a
-            loss, and reported apart from the rest for that reason.
+            not drain them in time. Should be zero.
+        skipped_warmup: Sets the source discarded while the SDK's syncer
+            settled, before the first. Not a loss (docs/frame-loss.md).
         skipped_duplicate: Sets discarded mid-stream because every frame in
             them had already been delivered.
         bytes_written: Size of the archive at the last commit.
         first_monotonic: Capture time of the first set written, or None.
         last_monotonic: Capture time of the last set written.
-        timestamp_domain: What the camera's timestamps mean. Anything other
-            than ``global_time`` means the frames cannot be placed against the
-            audio, and the session says so rather than pretending.
+        timestamp_domain: What the camera's timestamps mean. Anything but
+            ``global_time`` cannot be placed against the audio.
         error: What went wrong, if anything.
     """
 
@@ -88,9 +69,7 @@ class VideoStats:
         Returns:
             The rate, or None with fewer than two frames.
 
-        Intervals over span, not the mean of ``1 / dt``: jitter biases the
-        latter high, a trap documented in realsense-playground after it made a
-        struggling recorder look healthy.
+        Intervals over span, not the mean of ``1 / dt``, which jitter biases high.
         """
         span = self.span_s
         if span is None or span <= 0 or self.frames < 2:
@@ -112,10 +91,8 @@ class VideoWriter:
         """Bind a writer to the hub and its output file.
 
         Args:
-            hub: Where frames come from. Held open for as long as the archive
-                is - a recording is a consumer of the camera in its own right,
-                and putting it on the preview's reference count would stop a
-                recording the moment the last browser tab closed.
+            hub: Where frames come from. Acquired for as long as the archive
+                is open, independently of the preview's viewers.
             path: Archive to write.
             config: Stream configuration to record alongside the frames.
             codecs: Overrides for the archive's default codecs.
@@ -136,20 +113,14 @@ class VideoWriter:
         """Open the archive and begin writing every frame the hub delivers.
 
         Args:
-            timeout: Seconds to wait for the camera's first frame. Generous:
-                opening a RealSense pipeline costs about a second, and
-                auto-exposure takes longer than that to settle.
+            timeout: Seconds to wait for the camera's first frame.
 
         Raises:
             RuntimeError: If this writer is already running, or the camera did
-                not produce a frame. Raised rather than reported, because the
-                caller is deciding whether a session can begin at all - and a
-                session that silently records no video is worse than one that
-                refuses to start.
+                not produce a frame.
 
-        The first frame is waited for rather than assumed: its calibration is
-        what the archive stores, and an archive without one is not worth having
-        because its depth values would have no scale.
+        The first frame is waited for because its calibration is what the
+        archive stores; without it depth has no scale.
         """
         with self._lock:
             if self._running:
@@ -195,16 +166,13 @@ class VideoWriter:
         self._hub.remove_listener(self._on_frame)
         writer = self._writer
         if writer is not None:
-            # Whatever arrived since the last frame. Without this the tail of
-            # every recording is missing up to a frame of inertial data.
+            # Inertial samples since the last frame, or the tail is lost.
             self._drain_motion(writer)
             if not writer.drain(timeout=timeout):
                 logger.warning("the encoder queue did not drain within %.0fs", timeout)
             writer.close()
-            # Copy the counters out before letting go of the writer: they live
-            # in the archive, and `stats` reads them from there. Dropping the
-            # reference first loses every frame written since the last time
-            # anything asked - measured at 30 of 240 on a real recording.
+            # Copy the counters out before dropping the writer: `stats` reads
+            # them from it, and frames written since the last read would be lost.
             with self._lock:
                 final = writer.stats
                 self._stats.frames = final.frames
@@ -257,9 +225,8 @@ class VideoWriter:
         writer = self._writer
         if writer is None or not self._running:
             return
-        # Not waiting for room: a full queue means the disk or the encoders
-        # cannot keep up, and blocking here would stall the camera for the
-        # preview too. The drop is counted instead.
+        # Never waits for room: blocking would stall the hub and the preview.
+        # A full queue is counted as a drop instead.
         writer.append(frames)
         self._drain_motion(writer)
         with self._lock:
@@ -274,10 +241,8 @@ class VideoWriter:
         Args:
             writer: The open archive.
 
-        Drained from the frame listener rather than on a timer of its own: this
-        runs 30 times a second, so about 32 samples accumulate against a buffer
-        that holds 4096. One drainer only - the preview peeks at the newest
-        sample instead, because whoever drains owns every sample it takes.
+        This must be the only drainer: draining takes ownership of the samples,
+        so the preview only peeks at the newest one.
         """
         source = self._hub.source
         drain = getattr(source, "drain_motion", None) if source is not None else None
@@ -291,9 +256,7 @@ class VideoWriter:
         """Read the camera's sensor options, if the source can report them.
 
         Returns:
-            Every option and its value, or an empty mapping. A failure is
-            logged and swallowed: the options make a recording interpretable,
-            but they are not the measurements.
+            Every option and its value, or an empty mapping on failure.
         """
         source = self._hub.source
         reader = getattr(source, "options", None) if source is not None else None

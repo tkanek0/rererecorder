@@ -1,9 +1,7 @@
 """The video writer, driven by a hub that hands over prepared frames.
 
-No camera. The hub is replaced by one that publishes on demand, which is enough
-to exercise the part that matters: every set the hub delivers must reach the
-archive, and the counters must survive being asked for after the recording has
-stopped.
+Every set the hub delivers must reach the archive, and the counters must
+survive stop(). The hub is faked; no camera.
 """
 
 from __future__ import annotations
@@ -19,16 +17,12 @@ from rrr.video import ArchiveSource, Calibration, FrameSet, StreamConfig
 
 from .conftest import HEIGHT, WIDTH
 
-# The frames are full size, matching the conftest calibration. They have to be:
-# a zlib depth blob carries no dimensions, so the reader takes the shape from
-# the recording's calibration and a smaller array would not read back.
+# Frames are full size: zlib depth takes its shape from the calibration, so a
+# smaller array would not read back.
 
 
 class FakeHub:
-    """A FrameHub-shaped source of frames published by the test.
-
-    Only what :class:`VideoWriter` uses is implemented.
-    """
+    """A FrameHub-shaped source of frames published by the test."""
 
     def __init__(self, calibration: Calibration) -> None:
         self.calibration = calibration
@@ -113,12 +107,9 @@ def test_every_published_set_is_written(tmp_path, hub, sets) -> None:
 
 
 def test_the_frame_count_survives_being_asked_after_stop(tmp_path, hub, sets) -> None:
-    """The counters live in the archive, which stop() closes.
+    """The counters live in the archive, which stop() closes, and must be copied first.
 
-    An earlier version dropped its reference to the writer before copying them
-    out, so anything reading the statistics afterwards - which is exactly what
-    the manifest does - saw whatever the last poll happened to have caught.
-    Measured 210 of 240 frames on a real recording.
+    A regression once left the manifest with 210 of 240 frames.
     """
     path = str(tmp_path / "video.rrdb")
     writer = VideoWriter(hub, path, config=StreamConfig())
@@ -134,11 +125,7 @@ def test_the_frame_count_survives_being_asked_after_stop(tmp_path, hub, sets) ->
 
 
 def test_stats_track_the_recording_while_it_runs(tmp_path, hub, sets) -> None:
-    """Counted asynchronously: append queues, and the archive's thread writes.
-
-    So this waits for the queue rather than reading straight after publishing -
-    which is also how the manifest sees it, one second at a time.
-    """
+    """Counted asynchronously, so this waits for the archive's queue to drain."""
     path = str(tmp_path / "video.rrdb")
     writer = VideoWriter(hub, path, config=StreamConfig())
     writer.start(timeout=1.0)
@@ -177,11 +164,7 @@ def test_the_span_and_rate_come_from_received_monotonic(tmp_path, hub, sets) -> 
 
 
 def test_the_hub_is_held_for_exactly_as_long_as_the_archive(tmp_path, hub, sets) -> None:
-    """A recording is a consumer of the camera in its own right.
-
-    On the preview's reference count instead, closing the last browser tab
-    would stop a recording.
-    """
+    """A recording holds the camera, so closing the last preview cannot stop it."""
     path = str(tmp_path / "video.rrdb")
     writer = VideoWriter(hub, path, config=StreamConfig())
     assert hub.acquired == 0

@@ -1,14 +1,8 @@
 """Polled access to the direction the array currently hears.
 
-The XVF-3000 does not stream its direction estimate; it holds a current value
-that has to be asked for. :class:`DoaTap` does the asking on a background
-thread and keeps both the newest reading and a short trail of previous ones,
-so a consumer that wakes up at its own rate always has something to show.
-
-Timestamps come from ``time.monotonic()``, the same clock
-:mod:`respeaker.capture` stamps audio with. That is what makes it possible to
-line an angle up against the waveform it came from; converting to wall-clock
-time is the delivery layer's job, and it happens once, at the edge.
+The XVF-3000 holds a current value rather than streaming it, so
+:class:`DoaTap` polls it on a background thread and keeps a short trail.
+Timestamps are ``time.monotonic()``, the axis audio is on.
 """
 
 from __future__ import annotations
@@ -44,15 +38,9 @@ class Reading:
 class DoaTap:
     """Poll the array's direction estimate, and keep a short trail of it.
 
-    Reference counted like :class:`respeaker.capture.AudioTap`: polling starts
-    when the first consumer arrives and stops shortly after the last one
-    leaves, so an idle process does not keep the USB bus busy.
-
-    A missing device or a refused device node is reported through
-    :attr:`error` rather than raised. The array is a thing that gets unplugged,
-    and a viewer that keeps working with the angle greyed out beats one that
-    dies. It is not retried: the tap stops and stays stopped until someone
-    calls :meth:`reconnect` (docs/decisions.md 29).
+    Reference counted like :class:`rrr.audio.capture.AudioTap`. A missing or
+    refused device is reported through :attr:`error`, not raised, and not
+    retried until :meth:`reconnect` (docs/decisions.md 29).
     """
 
     def __init__(
@@ -143,9 +131,8 @@ class DoaTap:
     def shutdown(self, timeout: float = 2.0) -> None:
         """Stop polling now, without waiting out the idle period.
 
-        The reader runs on a daemon thread, so a process that exits while it
-        is still open never closes its USB handle. Long-running consumers can rely on
-        the idle timeout; anything that is about to exit should call this.
+        Call before exiting: the daemon poller would otherwise never close its
+        USB handle.
 
         Args:
             timeout: Seconds to wait for the thread to finish.
@@ -174,8 +161,7 @@ class DoaTap:
 
         Args:
             timeout: Seconds to wait for a reading newer than ``after``.
-            after: Only return a reading whose index exceeds this value. Pass
-                the index you last handled to avoid seeing it twice.
+            after: Only return a reading whose index exceeds this value.
 
         Returns:
             The reading, or None if none arrived within the timeout - at once,
@@ -238,24 +224,20 @@ class DoaTap:
             device = find()
             next_at = time.monotonic()
             while not self._should_stop():
-                # Two transfers per poll, read together so the angle and
-                # the voice flag describe the same instant. They are not
-                # cheap - see the measurement in config.DOA_POLL_HZ.
+                # Read together so both describe the same instant; see
+                # config.DOA_POLL_HZ for their cost.
                 angle = device.direction
                 voice = device.voice_activity
                 self._publish(angle, voice)
 
-                # Sleep to the next scheduled instant rather than for a
-                # fixed interval: the transfers take a good fraction of the
-                # period, and adding the interval on top of them would make
-                # the real rate roughly half the configured one.
+                # Sleep to a schedule, not a fixed interval, or the transfer
+                # time would roughly halve the real rate.
                 next_at += self._interval
                 delay = next_at - time.monotonic()
                 if delay > 0:
                     time.sleep(delay)
                 else:
-                    # Fell behind. Resync rather than accumulating a debt
-                    # that would later come out as a burst of transfers.
+                    # Fell behind: resync rather than burst to catch up.
                     next_at = time.monotonic()
         except (DeviceNotFound, AccessDenied) as error:
             logger.warning(
@@ -275,8 +257,7 @@ class DoaTap:
             if failure is not None:
                 self._failed = True
                 self._error = failure
-                # Detached as this thread's last act, so that a reconnect
-                # arriving while it is still returning starts a fresh poller.
+                # Detach so a reconnect during return starts a fresh poller.
                 if self._thread is threading.current_thread():
                     self._thread = None
             self._updated.notify_all()

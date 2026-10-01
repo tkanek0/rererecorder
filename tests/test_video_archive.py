@@ -1,11 +1,7 @@
 """The archive: what goes in must come out, including when it was taken.
 
-The lossless round trip is inherited from realsense-playground and re-checked
-here because this repository changed the writer. What is new is the time axis:
-a frame's ``received_monotonic`` has to survive the file, because that is the
-only thing that can be compared with an audio sample - and, since decision 21,
-so must ``color_timestamp_ms`` / ``depth_timestamp_ms``, which a consumer
-uses to judge how far apart the two sensors' own frames were.
+Besides the lossless round trip, ``received_monotonic`` (what audio is compared
+against) and each stream's own timestamp must survive the file.
 """
 
 from __future__ import annotations
@@ -44,9 +40,8 @@ def written(
         originals = [
             make_frames(
                 index=i + 1,
-                # Deliberately awkward: the full 16-bit range, an unmeasured
-                # band, and colour noise that will not compress. A codec that
-                # is quietly lossy fails here rather than on a real scene.
+                # Full 16-bit range, an unmeasured band and incompressible
+                # colour, so a quietly lossy codec fails here.
                 depth=np.concatenate(
                     [
                         np.zeros((40, WIDTH), np.uint16),
@@ -99,11 +94,7 @@ def test_capture_time_survives_the_file(written) -> None:
 
 
 def test_each_streams_own_timestamp_survives(written) -> None:
-    """Independently: frame n's colour and depth were both taken at MONO + n/30.
-
-    Checked against the arithmetic rather than against the object it came
-    from, so that a writer storing the wrong column cannot pass.
-    """
+    """Checked against MONO + n/30, so a writer storing the wrong column fails."""
     path, _ = written(count=5)
 
     with ArchiveSource(path) as archive:
@@ -152,9 +143,8 @@ def test_a_hardware_clock_recording_says_so(
     with ArchiveSource(path) as archive:
         assert archive.timestamp_domain == "hardware_clock"
         restored = next(archive.frames())
-        # received_monotonic is stored as-is regardless of domain; the domain
-        # itself is what tells a consumer color_timestamp_ms/depth_timestamp_ms
-        # are not to be trusted against anything but each other.
+        # Stored as-is whatever the domain; the domain says the SDK timestamps
+        # compare only with each other.
         assert restored.received_monotonic == pytest.approx(
             MONO + 1 / FPS + ARRIVAL_LAG_S, abs=1e-9
         )
@@ -189,13 +179,7 @@ def test_metadata_survives(written) -> None:
 
 
 def test_a_frames_own_motion_is_not_stored(written) -> None:
-    """FrameSet.motion is a convenience, not the inertial data.
-
-    It holds whichever samples were newest when the frame was assembled - one
-    per frame against the sensor's 480 Hz. Storing it would put a fourteenth of
-    the data in the file twice; the samples themselves go to `imu`, and
-    ``motion_samples`` is what reads them.
-    """
+    """FrameSet.motion is a per-frame convenience; inertial data goes to `imu`."""
     path, _ = written()
 
     with ArchiveSource(path) as archive:
@@ -215,18 +199,10 @@ def test_calibration_and_device_survive(written, calibration) -> None:
 
 
 def test_an_upstream_archive_without_the_new_columns_still_reads(written) -> None:
-    """A file from realsense-playground (or this repo's own v1-v3) has none of
-    ``color_timestamp_ms`` / ``depth_timestamp_ms`` / ``received_monotonic``.
-
-    Its frames are identical - the pixels, the calibration, the inertial samples -
-    and only the newer, finer-grained timing is missing. Refusing to open it
-    would be worse than saying so, because there is a lot in such a file that
-    is still correct.
-    """
+    """An upstream or v1-v3 file lacks the newer timing columns but still opens."""
     path, originals = written(count=3)
 
-    # Rebuild the file as the upstream writer would have left it: v1, the old
-    # column set, PNG16 depth, and no record of a codec choice.
+    # Rebuild as the upstream writer left it: v1, old columns, no codec record.
     with sqlite3.connect(path) as connection:
         connection.executescript(
             """
@@ -242,8 +218,7 @@ def test_an_upstream_archive_without_the_new_columns_still_reads(written) -> Non
         connection.execute("DELETE FROM meta WHERE key = 'codecs'")
 
     with ArchiveSource(path) as archive:
-        # received_at alone is still enough to place a frame against audio -
-        # just without color_timestamp_ms/depth_timestamp_ms's finer detail.
+        # received_at alone still places a frame against audio.
         assert archive.has_monotonic is True
         restored = list(archive.frames())
 
@@ -251,22 +226,16 @@ def test_an_upstream_archive_without_the_new_columns_still_reads(written) -> Non
     assert np.array_equal(restored[0].depth, originals[0].depth)
     assert restored[0].color_timestamp_ms is None
     assert restored[0].depth_timestamp_ms is None
-    # Without the newer columns, the best available answer is arrival time -
-    # the same value this format always used for received_monotonic anyway.
+    # Without the newer columns, arrival time is the best answer.
     assert restored[0].received_monotonic == pytest.approx(
         originals[0].received_monotonic, abs=1e-9
     )
 
 
 def test_written_files_declare_the_current_version(written) -> None:
-    """Each version changed what an existing structure means.
+    """Each version changed what a structure means, so old readers refuse it.
 
-    v2 and v3 are different: colour moved to three columns, depth may be zlib
-    rather than PNG, and the per-frame ``motion`` table became ``imu`` at the
-    sensor's own rate. v4 replaces ``timestamp_ms`` / ``received_at`` /
-    ``capture_monotonic`` with ``color_timestamp_ms`` / ``depth_timestamp_ms``
-    / ``received_monotonic`` (decision 21). A reader of an older version would
-    misread or silently miss all of these, so it refuses.
+    See docs/decisions.md 8, 12 and 21.
     """
     path, _ = written()
     with ArchiveSource(path) as archive:

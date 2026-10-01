@@ -1,13 +1,7 @@
 """Where frames come from.
 
-``FrameSource`` is the seam that keeps everything downstream - analysis, the
-web server, the CLI tools - from knowing whether a real camera is attached.
-Only ``LiveSource`` exists today; a rosbag reader or a client that pulls frames
-from a running server can be added without touching a consumer.
-
-The seam earns its keep immediately: a RealSense device can be opened by one
-process at a time, so anything that wants frames while the server holds the
-camera has to get them from somewhere else.
+``FrameSource`` hides from consumers whether frames come from a live camera
+(``LiveSource``) or a recording (``ArchiveSource``).
 """
 
 from __future__ import annotations
@@ -39,23 +33,14 @@ from .types import (
 
 logger = logging.getLogger(__name__)
 
-#: How long to block for one frame set before looking up to check whether we
-#: have been asked to stop. Short enough that closing a source is responsive,
-#: long enough not to spin.
+#: How long to block for one frame set before checking whether to stop.
 FRAME_TIMEOUT_MS = 1000
 
 #: Consecutive seconds without a frame before the stream is declared broken.
-#: The USB link recovers from the odd missed frame on its own; five seconds of
-#: silence is a device that has gone away or wedged.
 STALL_LIMIT_S = 5.0
 
-#: Inertial samples held between drains, per stream.
-#:
-#: Measured on a D455: 482 Hz accelerometer, 478 Hz gyroscope. A recorder drains
-#: once per video frame, so about 16 of each accumulate; 4096 is eight seconds
-#: of slack, which covers a stalled writer without letting the memory grow
-#: without bound. Older samples are discarded first and counted, because a
-#: reader that has stopped draining is not a reason to stop capturing.
+#: Inertial samples held between drains (both streams share it): about four
+#: seconds at ~960 Hz. Oldest are discarded first and counted as overrun.
 MOTION_BUFFER = 4096
 
 
@@ -134,9 +119,8 @@ def _motion_intrinsics(profile: rs.stream_profile) -> MotionIntrinsics | None:
         profile: An accelerometer or gyroscope stream profile.
 
     Returns:
-        The correction, or None if the device does not carry one. Not every
-        unit is calibrated, and a missing correction is worth recording as
-        absent rather than as an identity somebody might mistake for measured.
+        The correction, or None if the device does not carry one - never a
+        substituted identity.
     """
     try:
         intr = profile.as_motion_stream_profile().get_motion_intrinsics()
@@ -152,9 +136,8 @@ def _motion_intrinsics(profile: rs.stream_profile) -> MotionIntrinsics | None:
     )
 
 
-#: Every metadata field the SDK defines. A given frame supports a subset - 22 of
-#: 131 on this D455's depth stream - so the supported set is worked out once per
-#: stream and cached rather than probed per frame.
+#: Every metadata field the SDK defines. A stream supports a subset (22 on a
+#: D455's depth), probed once per stream and cached.
 _METADATA_FIELDS = tuple(rs.frame_metadata_value.__members__.values())
 
 
@@ -181,17 +164,15 @@ def _read_metadata(frame: rs.frame, fields: tuple[rs.frame_metadata_value, ...])
 class LiveSource:
     """Frames from an attached RealSense device.
 
-    One instance owns one ``rs.pipeline``, and therefore the device. Opening a
-    second one while this is running fails inside the SDK, which is the reason
-    the server and the CLI tools cannot both stream at once.
+    One instance owns one ``rs.pipeline``, and therefore the device: a second
+    one cannot open it while this is running.
     """
 
     def __init__(self, config: StreamConfig | None = None, serial: str = "") -> None:
         """Prepare a source without touching the device.
 
         Args:
-            config: Streams to request. Defaults to aligned color and depth at
-                848x480/30.
+            config: Streams to request. Defaults to ``StreamConfig()``.
             serial: Serial number of the device to use. Empty means whichever
                 device the SDK finds first.
         """
@@ -206,28 +187,16 @@ class LiveSource:
         self._index = 0
         self._stop = False
         self._metadata_fields: dict[str, tuple[rs.frame_metadata_value, ...]] = {}
-        #: Frame numbers of the last set that was yielded, per stream. The SDK
-        #: re-delivers a frame it has already given out, and processing one
-        #: twice would put two entries in a recording for one moment.
+        #: Frame numbers of the last set yielded, per stream, to discard sets
+        #: the SDK re-delivers.
         self._last_numbers: dict[str, int] = {}
         self._skipped_duplicate = 0
-        #: Sets discarded before the first good one was delivered. Counted
-        #: apart from the rest because they mean something different: the
-        #: syncer settling, not the stream faltering. Measured on a D455, the
-        #: first three sets after ``pipeline.start`` pair one stale depth frame
-        #: with successive colour frames, 129 to 230 ms apart, and the depth
-        #: counter then restarts at 1. Reporting those beside a mid-stream drop
-        #: makes a healthy recording look damaged.
+        #: Sets discarded before the first good one: the syncer settling, not
+        #: a loss. See docs/frame-loss.md "What is still discarded, on purpose".
         self._skipped_warmup = 0
 
-        #: The motion sensor, opened separately from the video pipeline.
-        #:
-        #: Not through the frameset: the syncer delivers one inertial sample per
-        #: video frame, which is a fourteenth of what the sensor produces. A
-        #: callback on the sensor itself receives every one. Measured: with the
-        #: callback running at 960 Hz, video still arrived at 30.17 fps with no
-        #: frames lost - the GIL contention this looked like it would cause does
-        #: not materialise, because the callback only appends a tuple.
+        #: The motion sensor, opened separately from the video pipeline with
+        #: its own callback. See docs/decisions.md 12.
         self._motion_sensor: rs.sensor | None = None
         self._motion: collections.deque[MotionSample] = collections.deque(
             maxlen=MOTION_BUFFER
@@ -256,12 +225,9 @@ class LiveSource:
             StreamError: If no device, or none with the configured serial, is
                 attached.
 
-        ``pipeline.start()`` with nothing attached waits about 15 s before
-        giving up, and holds the GIL throughout: measured, 15.12 s to fail
-        with a second thread unable to run for 15.11 s of it. In a server that
-        is every request stalled. The enumeration asked here instead takes
-        0.10 s. It holds the GIL too, which is why it is asked once per open
-        rather than polled.
+        Avoids ``pipeline.start()``'s 15 s GIL-holding failure with nothing
+        attached (docs/decisions.md 29). Holds the GIL for ~0.1 s itself, so
+        call it once per open, never poll it.
         """
         serials = [
             device.get_info(rs.camera_info.serial_number)
@@ -280,8 +246,7 @@ class LiveSource:
 
         Raises:
             StreamError: If no device is present or it cannot serve the
-                requested profiles. The SDK's own message is preserved, since
-                it names the profile that was refused.
+                requested profiles. Carries the SDK's own message.
         """
         if self._pipeline is not None:
             return
@@ -305,14 +270,11 @@ class LiveSource:
                     rs_config.enable_stream(
                         rs.stream.infrared, index, width, height, rs.format.y8, fps
                     )
-        # Motion is deliberately NOT enabled on the pipeline. Through the
-        # frameset the syncer hands over one sample per video frame; opened
-        # directly, the sensor delivers all of them. See _open_motion.
+        # Motion is deliberately NOT enabled on the pipeline; see _open_motion
+        # and docs/decisions.md 12.
         if cfg.record_path:
-            # Checked here rather than left to the SDK so that the message names
-            # the constraint. librealsense 2.56 moved recording from rosbag1
-            # (.bag) to rosbag2 (.db3, SQLite), and every tutorial written before
-            # that says .bag.
+            # librealsense 2.56+ records rosbag2 (.db3), not .bag; say so here
+            # rather than leave it to the SDK's message.
             if not cfg.record_path.endswith(".db3"):
                 raise StreamError(
                     f"recordings must be named *.db3, got {cfg.record_path!r}"
@@ -334,8 +296,8 @@ class LiveSource:
         if cfg.motion:
             self._open_motion(profile)
         if cfg.record_path:
-            # Recording starts the moment the pipeline does; a caller who wants
-            # to arm it later pauses it here and resumes on demand.
+            # Recording starts with the pipeline; pause/resume via
+            # set_recording.
             self._recorder = profile.get_device().as_recorder()
             self._recording = True
         logger.info(
@@ -352,8 +314,7 @@ class LiveSource:
         generator notices within ``FRAME_TIMEOUT_MS`` and returns.
         """
         self._stop = True
-        # Before the pipeline: the sensor was opened from the pipeline's device,
-        # and stopping that first leaves the callback running against a device
+        # Before the pipeline, or the motion callback runs against a device
         # being torn down.
         self._close_motion()
         pipeline, self._pipeline = self._pipeline, None
@@ -392,10 +353,8 @@ class LiveSource:
     def _read_calibration(self, profile: rs.pipeline_profile) -> Calibration:
         """Read intrinsics, extrinsics and depth scale from a started pipeline.
 
-        When depth is aligned to color the delivered depth image lives in the
-        color camera's geometry, so that is what gets reported: handing back the
-        depth sensor's own intrinsics here would silently misplace every
-        unprojected point.
+        When depth is aligned to color, the color intrinsics are reported for
+        depth, since that is the geometry of the delivered image.
         """
         cfg = self._config
         color_profile = (
@@ -422,11 +381,7 @@ class LiveSource:
         infrared = tuple(
             _intrinsics(entry) if entry else None for entry in infrared_profiles
         )
-        # The left imager is where a D400 computes its depth, so the first of
-        # these is expected to be the identity. Read rather than assumed: it is
-        # what fixes the infrared pair against the depth, and the baseline
-        # between the two is what fixes the scale of anything reconstructed
-        # from them.
+        # The first is expected to be the identity on a D400; read, not assumed.
         depth_to_infrared = tuple(
             _extrinsics(depth_profile, entry) if depth_profile and entry else None
             for entry in infrared_profiles
@@ -465,10 +420,8 @@ class LiveSource:
             The calibration, or None if the device has no inertial sensor or
             depth is not running to express the transforms against.
 
-        Read here rather than in :meth:`_open_motion`, because it is a property
-        of the device rather than of a stream: a session whose inertial sensor
-        failed to start should still record what the sensor was, and a failure
-        to read the calibration must not stop the recording.
+        Separate from :meth:`_open_motion` so it is recorded even when the
+        sensor fails to start; a read failure never stops the recording.
         """
         if depth_profile is None:
             return None
@@ -517,9 +470,7 @@ class LiveSource:
             index: Stream index, for the infrared pair.
 
         Returns:
-            The profile, or None. The SDK raises rather than returning nothing
-            when a stream was not enabled, and every caller here treats a
-            missing stream as ordinary.
+            The profile, or None where the SDK would raise.
         """
         try:
             return profile.get_stream(stream, index)
@@ -547,9 +498,7 @@ class LiveSource:
     def options(self) -> dict[str, float]:
         """Read every sensor option the device exposes, with its current value.
 
-        The state the data was taken in: exposure, gain, laser power, the visual
-        preset, the emitter mode, and the temperatures. 48 values on this D455,
-        costing 14 ms - worth taking once at the start of a recording, not per
+        48 values on a D455, costing 14 ms: read once per recording, not per
         frame.
 
         Returns:
@@ -580,10 +529,7 @@ class LiveSource:
 
         Args:
             key: ``"Sensor Name/option_name"`` - e.g.
-                ``"RGB Camera/enable_auto_exposure"``. The sensor name is
-                whatever :meth:`options` reports (``"RGB Camera"``, ``"Stereo
-                Module"``); the option name is the bare SDK enum member, the
-                same string :meth:`options`' own keys use after the ``/``.
+                ``"RGB Camera/enable_auto_exposure"``.
             value: The value to set.
 
         Raises:
@@ -591,12 +537,8 @@ class LiveSource:
                 the option name is not one the SDK knows, or that sensor does
                 not support it.
 
-        A narrow escape hatch, not part of ordinary recording: normal use asks
-        for everything once, through :class:`~.config.StreamConfig`, before
-        ``pipeline.start()``. This exists for a caller that needs to change
-        something mid-stream - so far, only
-        ``tests/perf/frame_number_gaps.py`` toggling auto-exposure to compare
-        against decision 21's AE-on and AE-off measurements.
+        A diagnostic escape hatch (``tests/perf/frame_number_gaps.py``);
+        ordinary recording configures everything through ``StreamConfig``.
         """
         if self._pipeline is None:
             raise StreamError("open the source before changing its options")
@@ -628,9 +570,6 @@ class LiveSource:
     def set_recording(self, active: bool) -> None:
         """Pause or resume writing to the rosbag.
 
-        The file itself was fixed when the pipeline started, so this switches an
-        existing recording on and off rather than choosing where it goes.
-
         Args:
             active: True to write frames, False to stop writing them.
 
@@ -653,13 +592,8 @@ class LiveSource:
         Args:
             profile: The started pipeline's profile, for the device.
 
-        A failure is logged and swallowed: video is the reason this exists, and
-        a recording without inertial data is worth more than no recording. The
-        session records that it has none.
-
-        The rate asked for is the highest each stream offers - 400 Hz nominal on
-        a D455, 482 and 478 measured. Not configurable: there is no reason to
-        record less of it, at 48 bytes a sample.
+        A failure is logged and swallowed, so video still records. Opens each
+        stream at its highest offered rate (400 Hz nominal on a D455).
         """
         try:
             sensor = next(
@@ -714,10 +648,7 @@ class LiveSource:
         Args:
             frame: The motion frame.
 
-        Kept to an append. It is called about 960 times a second - both streams
-        at 480 Hz - and anything expensive here would compete with whatever is
-        reading video frames. Measured with this implementation: video kept
-        30.17 fps and lost nothing.
+        Kept to an append: it runs ~960 times a second (docs/decisions.md 12).
         """
         motion_frame = frame.as_motion_frame()
         if not motion_frame:
@@ -747,10 +678,6 @@ class LiveSource:
         Returns:
             The samples, oldest first. Empty when motion is disabled or nothing
             has arrived.
-
-        Draining rather than reading: whoever records them is responsible for
-        all of them, and leaving them buffered would mean either duplicating
-        them or losing them.
         """
         with self._motion_lock:
             samples = list(self._motion)
@@ -781,9 +708,7 @@ class LiveSource:
     def timestamp_domain(self) -> str:
         """What the SDK's frame timestamps mean, once frames have arrived.
 
-        ``"global_time"`` - the default, and what makes this recorder work - is
-        epoch milliseconds fitted to the host clock. ``"unknown"`` until the
-        first frame.
+        ``"unknown"`` until the first frame. See docs/features.md "Timing".
         """
         return self._timestamp_domain
 
@@ -801,8 +726,7 @@ class LiveSource:
     def skipped(self) -> int:
         """Sets discarded mid-stream.
 
-        Excludes the startup ones: those are not a loss, and counting them here
-        would mean every healthy recording reports a non-zero figure.
+        Excludes warm-up sets, which are not a loss.
         """
         return self._skipped_duplicate
 
@@ -810,14 +734,8 @@ class LiveSource:
     def frame_numbers(self) -> dict[str, int]:
         """The most recently delivered set's ``frame_number``, per stream.
 
-        The SDK's own per-stream sequence number, read for duplicate detection
-        in :meth:`_is_new` and exposed here for the same reason decision 21
-        used it: verifying that nothing is actually lost, independent of
-        anything this repository's own timestamp handling decides to keep or
-        discard. Not carried on ``FrameSet`` or written to the archive -
-        deliberately not something a consumer should build recording
-        behaviour on, only diagnose with. See
-        ``tests/perf/frame_number_gaps.py``.
+        For diagnosis only (``tests/perf/frame_number_gaps.py``); not carried
+        on ``FrameSet`` or written to the archive.
         """
         return dict(self._last_numbers)
 
@@ -828,14 +746,8 @@ class LiveSource:
         Args:
             profile: The started pipeline's profile.
 
-        Measured on a D455 with librealsense 2.58.3, this is already on: all
-        three sensors report ``global_time_enabled = 1.0`` without being asked.
-        It is set explicitly anyway, because the whole point of this repository
-        is that frame times can be compared with audio times, and that stops
-        being true if a future SDK, a different device or somebody else's
-        leftover configuration turns it off. A failure is logged rather than
-        raised: a recording with frames on the device clock is still worth
-        having, and the session says which it got.
+        Already on by default (librealsense 2.58.3, D455) but set explicitly
+        in case something turned it off. A failure is logged, not raised.
         """
         for sensor in profile.get_device().query_sensors():
             name = sensor.get_info(rs.camera_info.name)
@@ -860,23 +772,9 @@ class LiveSource:
         Args:
             profile: The started pipeline's profile.
 
-        Two options, and **the order between them is not free**. Measured on
-        this D455 (firmware 5.17.3.10), ``emitter_on_off`` is refused with
-        ``hwmon command 0x7b failed (Invalid parameter)`` unless the toggle is
-        first written as 0, the projector is then enabled, and only then is the
-        toggle written as 1. Enabling the projector and asking for the toggle
-        in that order alone is refused; so is asking for it while the projector
-        is off.
-
-        So every mode starts by clearing the toggle. Alternating re-arms it
-        afterwards. That sequence was measured to work from both a fresh
-        pipeline and one left in any other mode, which the obvious orderings
-        were not.
-
-        A failure is logged rather than raised - a recording with the projector
-        in the wrong state is still a recording - and what the device ended up
-        in is read back here and recorded in the archive's option snapshot,
-        which is the number to trust rather than what was asked for.
+        **The write order matters**: the firmware refuses the obvious orderings
+        (docs/decisions.md 18). Failures are logged, not raised, and the
+        read-back is checked and warned about.
         """
         if self._config.depth is None:
             return
@@ -952,9 +850,8 @@ class LiveSource:
             try:
                 composite = pipeline.wait_for_frames(timeout_ms=FRAME_TIMEOUT_MS)
             except RuntimeError as exc:
-                # The SDK raises for a timeout and for a device that went away,
-                # with no way to tell them apart other than waiting to see
-                # whether anything arrives.
+                # A timeout and a vanished device raise the same way; only
+                # STALL_LIMIT_S tells them apart.
                 if self._stop:
                     return
                 waited = time.monotonic() - last_frame_at
@@ -964,10 +861,7 @@ class LiveSource:
                     ) from exc
                 continue
 
-            # Both host clocks, per set. A single pair taken at the start would
-            # be enough only if the offset held still, and NTP slews it - so the
-            # conversion from the camera's epoch milliseconds to the monotonic
-            # axis uses the offset that was in force for this frame.
+            # Both host clocks per set, since NTP slews the offset between them.
             clock = read_clocks()
             last_frame_at = clock.monotonic
             frame_set = self._assemble(composite, clock)
@@ -984,29 +878,14 @@ class LiveSource:
             clock: Both host clocks, read when it returned.
 
         Returns:
-            The frame set, or None if this composite is not worth keeping. Two
-            things cause that, both observed on a D455 within the first two
-            seconds of streaming:
-
-            * an enabled stream was missing from the composite,
-            * every frame in it had already been delivered.
-
-            Colour and depth disagreeing about when they were taken is not one
-            of them: both are kept regardless, each with its own timestamp, so
-            a consumer can judge that for itself rather than have it decided
-            here. See ``FrameSet.color_timestamp_ms`` and
-            ``depth_timestamp_ms``.
+            The frame set, or None if an enabled stream was missing or every
+            frame in it had already been delivered. Colour/depth skew never
+            discards a set (docs/decisions.md 21).
         """
-        # The newest buffered sample of each stream, for consumers that want one
-        # number per frame - a preview, a quick attitude estimate. The samples
-        # themselves are recorded separately and in full; this is a convenience
-        # and is documented as one.
         motion = self._latest_motion() if self._config.motion else None
 
-        # Infrared, for the same reason. The frames are held rather than copied
-        # here - librealsense reference-counts them, so keeping the handles is
-        # enough to survive the align - because the checks below may throw the
-        # whole set away and a copy is 922 KB each.
+        # Taken before the align. Held, not copied, until the checks below
+        # pass; librealsense reference-counts the handles.
         infrared_frames: tuple[rs.frame, rs.frame] | None = None
         if self._config.infrared:
             left = composite.get_infrared_frame(1)
@@ -1018,10 +897,8 @@ class LiveSource:
         if self._align is not None:
             composite = self._align.process(composite)
 
-        # Identify the frames before copying any pixels. Both checks below
-        # reject the whole set, and a copy is 814 KB for depth and 1.2 MB for
-        # colour - not work to do before finding out the set is being thrown
-        # away, at 30 sets a second.
+        # Identify the frames before copying any pixels, since the checks
+        # below may reject the whole set.
         frames: dict[str, rs.frame] = {}
         if self._config.color is not None:
             frame = composite.get_color_frame()
@@ -1046,12 +923,10 @@ class LiveSource:
         metadata: dict[str, dict[str, int]] = {
             name: _read_metadata(frame, self._fields_for(name, frame))
             for name, frame in frames.items()
-            # The infrared pair carries the depth sensor's own metadata, so
-            # recording it a third time would only make the JSON bigger.
+            # The infrared pair carries the depth sensor's metadata again.
             if not name.startswith("ir")
         }
-        # Copied, not viewed: the SDK reuses these buffers as soon as the
-        # composite is released, and consumers hold frames past that point.
+        # Copied, not viewed: the SDK reuses these buffers once released.
         color = (
             np.asanyarray(frames["color"].get_data()).copy()
             if "color" in frames
@@ -1112,16 +987,10 @@ class LiveSource:
         """Record a discarded set, separating startup from the stream proper.
 
         Args:
-            reason: ``"duplicate"``, the only reason left - a set is no longer
-                discarded for its streams disagreeing about the moment; see
-                ``FrameSet.depth_timestamp_ms`` and ``color_timestamp_ms``,
-                which record that disagreement instead of acting on it.
+            reason: ``"duplicate"``, currently the only reason.
 
-        A set discarded before any set has been delivered is the pipeline
-        starting, which every recording does once and which costs nothing. One
-        discarded later is the camera re-delivering a frame it already gave
-        out, which is worth seeing. They are counted apart so a report can say
-        which happened.
+        Before the first delivered set it counts as warm-up, after it as a
+        duplicate.
         """
         if self._index == 0:
             self._skipped_warmup += 1
@@ -1134,11 +1003,8 @@ class LiveSource:
         Args:
             frame: Any frame from the stream.
 
-        Anything other than ``global_time`` means frame times are on the
-        device's own clock, and cannot be compared with the audio's. The
-        recording stays usable - the frames are still frames - but it is not a
-        synchronised one, so this is written into the session rather than left
-        for someone to discover.
+        Anything other than ``global_time`` is logged as a warning; see
+        docs/features.md "Timing".
         """
         self._timestamp_domain = str(frame.get_frame_timestamp_domain()).rsplit(
             ".", 1
@@ -1176,9 +1042,7 @@ class LiveSource:
         """The newest buffered sample of each inertial stream.
 
         Returns:
-            The pair, or None if nothing has arrived yet. Peeks at the buffer
-            rather than draining it: the samples belong to whoever is recording
-            them.
+            The pair, or None if nothing has arrived yet. Peeks; never drains.
         """
         with self._motion_lock:
             if not self._motion:

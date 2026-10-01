@@ -1,18 +1,7 @@
 """Device layer: getting frames off a RealSense camera.
 
-Copied from realsense-playground's ``sensor/`` and changed where recording two
-devices at once demands it:
-
-* a frame carries ``received_monotonic``, read when it arrived, which is the
-  axis the audio is also on,
-* global time is enabled explicitly rather than relied on,
-* a set the SDK re-delivers is discarded rather than written into the
-  recording twice - measured happening on a real D455. A set whose streams
-  disagree about the moment is not: each stream's own timestamp is kept, so a
-  consumer judges that for itself rather than have it decided here.
-
-Depends on pyrealsense2, numpy and :mod:`timeline`. It knows nothing about HTTP,
-JPEG or the audio device.
+Knows nothing about HTTP, JPEG or the audio device. See docs/design.md
+"Module boundaries".
 """
 
 from .archive import LEGACY_SUFFIX as ARCHIVE_LEGACY_SUFFIX

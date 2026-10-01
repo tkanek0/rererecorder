@@ -3,23 +3,8 @@
     uv run python -m rrr.tools.calibrate data/sessions/2026-09-02_15-28-36
     uv run python -m rrr.tools.calibrate data/sessions/... --apply
 
-Both devices timestamp their own measurements, and both are believable to about
-ten milliseconds. What neither says is how long a sound takes to reach the
-array's converter, or light to reach the camera's shutter timestamp - and the
-two are not the same. That residual is what this measures, and it is the only
-number in a session that cannot be derived from the files alone.
-
-A clap gives both devices the same instant to report. The audio side of it is
-easy and precise: an impulse is a step in energy, locatable to well under a
-millisecond. The video side is neither. What is visible is the hands moving, and
-the frame where they meet is only known to within one frame interval - 33 ms at
-30 fps. **So the accuracy of the result is bounded by the frame rate, not by the
-audio**, and averaging several claps is the only way to do better: the spread
-across claps is reported for exactly that reason.
-
-Nothing here writes to a session unless asked. Without ``--apply`` it prints
-what it found and leaves ``calibration.offset_s`` null, because a measurement
-nobody has looked at is not better than an admission of ignorance.
+Without ``--apply`` nothing is written and ``calibration.offset_s`` stays
+null. The frame rate bounds the accuracy - see docs/decisions.md 14.
 """
 
 from __future__ import annotations
@@ -41,14 +26,10 @@ from rrr.timeline import (
 from rrr.video import ArchiveSource
 
 #: How much louder than the preceding second a block must be to be a clap.
-#:
-#: A clap in a room is 20 to 40 dB over the noise floor. Eight is well inside
-#: that and well outside anything speech does, which rises over tens of
-#: milliseconds rather than one.
+#: A clap is 20-40 dB over the floor; speech rises over tens of ms, not one.
 ONSET_RATIO = 8.0
 
-#: Analysis block for the audio energy, in seconds. 2 ms at 16 kHz is 32
-#: samples - short enough to locate the onset to a fraction of a video frame.
+#: Analysis block for the audio energy, in seconds (32 samples at 16 kHz).
 ONSET_BLOCK_S = 0.002
 
 #: Seconds of quiet required before an onset counts, so that one clap's
@@ -56,10 +37,7 @@ ONSET_BLOCK_S = 0.002
 ONSET_GAP_S = 0.5
 
 #: How far either side of an audio impulse to look for the movement in video.
-#:
-#: The hands are visible for longer than the sound, and the offset being
-#: measured is expected to be tens of milliseconds - so a third of a second
-#: covers it with room to spare while excluding unrelated movement.
+#: The expected offset is tens of ms; wider would admit unrelated movement.
 SEARCH_S = 0.35
 
 
@@ -124,9 +102,7 @@ def main(argv: list[str] | None = None) -> int:
             index, video_at, sharpness = found
             offset = audio_at - video_at
             offsets.append(offset)
-            # Capped: a perfectly still scene has a median difference of
-            # zero, and the ratio then reads in the billions, which says
-            # nothing except "there was no noise to compare against".
+            # Capped: a still scene has a zero median and an unbounded ratio.
             print(
                 f"  clap {n}          audio {audio_at:.3f} s, video {video_at:.3f} s "
                 f"(frame {index}) -> {offset * 1000:+.1f} ms"
@@ -198,9 +174,8 @@ def _find_claps(paths: SessionPaths) -> list[float]:
     Returns:
         The onset times, in order. Empty if the audio cannot be read.
 
-    Uses the raw microphones rather than the processed channel: the chip's
-    beamforming and gain control are exactly the kind of processing that moves
-    an onset around, and an impulse needs no help being heard.
+    Uses the raw microphones: the processed channel's beamforming and gain
+    control can move an onset.
     """
     try:
         with wave.open(paths.audio, "rb") as handle:
@@ -223,8 +198,7 @@ def _find_claps(paths: SessionPaths) -> list[float]:
         return []
     energy = signal[:usable].reshape(-1, block).mean(axis=1)
 
-    # Compare each block against the median of the second before it: a running
-    # median ignores the impulse itself, which a running mean would not.
+    # A running median, unlike a mean, is not raised by the impulse itself.
     history = max(1, int(1.0 / ONSET_BLOCK_S))
     onsets: list[int] = []
     floor = float(np.median(energy[:history])) if len(energy) > history else 0.0
@@ -243,8 +217,7 @@ def _find_claps(paths: SessionPaths) -> list[float]:
         timeline = AudioTimeline.read(paths.audio_clock, rate)
     except (OSError, ValueError):
         return []
-    # The onset is somewhere inside its block; its start is the closest thing
-    # to the moment the sound arrived.
+    # The block's start is the closest estimate of when the sound arrived.
     return [timeline.monotonic_at(index * block) for index in onsets]
 
 
@@ -268,13 +241,11 @@ def _find_movement(
     Returns:
         ``(index, received_monotonic, sharpness)`` for the frame where
         successive images differ most, or None if there are too few frames near
-        that instant. ``sharpness`` is how many times the median difference the
-        peak is - under about 2 means there was no distinct movement.
+        that instant. ``sharpness`` is the peak over the median difference;
+        under about 2 means no distinct movement.
 
-    Differences successive frames and takes the peak. Hands meeting is the
-    fastest movement in an ordinary clap, so the peak lands on the frame where
-    the sound was made - to within one frame, which is the whole limit on this
-    measurement.
+    Hands meeting is the fastest movement in a clap, so the peak lands on the
+    clap's frame, to within one frame.
     """
     window = [
         (index, at) for index, at in times if abs(at - around) <= SEARCH_S
@@ -303,8 +274,7 @@ def _find_movement(
     )
     peak = int(np.argmax(diffs))
     median = float(np.median(diffs)) or 1e-9
-    # The difference at position i describes the change between frames i-1 and
-    # i, so the movement happened at frame i.
+    # diffs[i] is the change from image i to i + 1.
     index, at, _ = images[peak + 1]
     return index, at, float(diffs[peak] / median)
 
@@ -319,8 +289,7 @@ def _pick(frames, stream: str) -> np.ndarray | None:
         return frames.depth
     if frames.color is None:
         return None
-    # YUYV: the luma plane alone is what movement shows up in, and it needs no
-    # colour conversion.
+    # YUYV: the luma plane alone, with no colour conversion.
     if frames.color_format == "yuyv":
         height, width = frames.color.shape
         return frames.color.view(np.uint8).reshape(height, width, 2)[:, :, 0]

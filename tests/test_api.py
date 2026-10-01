@@ -1,13 +1,7 @@
 """The control plane's HTTP surface.
 
-The preview is not tested here and cannot be: Starlette's TestClient buffers a
-response body in full, and an MJPEG response never ends - it runs until the
-client disconnects. A test that requested one would hang rather than fail,
-which is worse than not having it. What is tested is everything that changes
-state, because those are the calls that can lose a recording.
-
-The camera is never opened: nothing here acquires the hub, and the hub opens the
-device only when something does.
+The MJPEG preview is untested: it never ends, and TestClient buffers a body in
+full, so a test would hang. Nothing here acquires the hub, so no camera opens.
 """
 
 from __future__ import annotations
@@ -38,8 +32,6 @@ class FakeRecorder:
         self.recording = False
         self.stopped = 0
         self.marks: list[Event] = []
-        # No audio tap: this stand-in never records, so there is nothing for
-        # the devices panel to say is "being recorded" either.
         self.tap = None
         self.doa = None
 
@@ -105,11 +97,7 @@ def test_status_devices_report_each_sdk_directly(client) -> None:
 
 
 def test_storage_reports_free_space_and_no_rate_when_idle(client) -> None:
-    """The rate is measured, so there is none until something is recording.
-
-    Reporting a guess would make the remaining time a guess too, and remaining
-    time is the number this panel exists for.
-    """
+    """The rate is measured, so there is none (and no time left) until recording."""
     storage = client.get("/api/status").json()["storage"]
     assert storage["free_bytes"] > 0
     assert storage["write_bytes_per_s"] is None
@@ -209,11 +197,7 @@ def test_moving_the_directory_is_refused_while_recording(client, tmp_path) -> No
 
 
 def test_an_unwritable_directory_is_refused(client) -> None:
-    """Checked by writing, not by reading permissions.
-
-    A mount can be read-only, full, or owned by somebody else, and only an
-    actual write finds all three.
-    """
+    """Checked by writing: only a write finds read-only, full and foreign mounts."""
     response = client.put("/api/settings", json={"sessions_dir": "/proc/nope"})
     assert response.status_code == 400
 
@@ -303,12 +287,7 @@ def test_sessions_are_listed_newest_first(client, tmp_path) -> None:
 
 
 def test_an_unknown_stream_is_a_404(client) -> None:
-    """Testable because the name is checked before the stream is opened.
-
-    A valid name cannot be tested the same way - the response never ends, so
-    TestClient would buffer it forever - which is the reason the check happens
-    up front rather than inside the generator.
-    """
+    """The name is checked before the never-ending stream opens, so this is testable."""
     response = client.get("/stream/nope.mjpg")
     assert response.status_code == 404
     assert "nope" in response.json()["detail"]

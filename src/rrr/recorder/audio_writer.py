@@ -1,30 +1,8 @@
 """Writing the array to a WAV whose sample positions still mean times.
 
-A WAV is a bare sequence of samples. The only thing that turns position 48000
-into "one second in" is the assumption that every sample the converter produced
-is present, and that assumption breaks in two different ways:
-
-* **The driver drops input.** The callback is simply not called for what was
-  lost, so the tap never sees those samples. Capture time jumps; the sample
-  count does not.
-* **The reader falls behind.** The tap captured the audio and the ring buffer
-  overwrote it before this writer collected it. The sample count jumps; capture
-  time was continuous all along.
-
-The two are opposite in shape and identical in consequence: without repair,
-every sample after the hole sits earlier in the file than it was captured, and
-nothing in the file says so. The upstream respeaker-playground counts the second
-case and writes neither a marker nor the missing samples, which silently
-contracts the recording's time axis.
-
-This writer keeps the axis by filling each hole with exactly as much silence as
-was lost, and by writing a measured point beside the audio so the repair can be
-checked rather than trusted. ``timeline.AudioTimeline`` is what checks it.
-
-Both holes are measured against the block stamps, which is why the two cases can
-be told apart at all - and why the arithmetic below subtracts one from the other
-rather than adding them: a slow reader loses samples *and* the time they
-occupied, so counting both would fill the hole twice.
+Holes are filled with exactly as much silence as was lost, and measured clock
+points are written beside the audio so ``rrr.timeline.AudioTimeline`` can check
+the repair. See docs/features.md "The array".
 """
 
 from __future__ import annotations
@@ -45,20 +23,12 @@ from rrr.timeline import AudioClockPoint, AudioClockWriter
 logger = logging.getLogger(__name__)
 
 #: How far capture time may run past what the samples account for before it is
-#: called a gap, in blocks.
-#:
-#: Measured ADC jitter on a ReSpeaker is 0.35 ms, and a block at the default
-#: 256 frames is 16 ms. Half a block therefore sits 23 times the jitter away from
-#: zero and half a block below the smallest real gap - a driver that drops input
-#: skips whole callbacks, so it cannot lose less than one block.
+#: called a gap, in blocks. Far above the measured 0.35 ms ADC jitter, and below
+#: the smallest real gap: a driver drops whole callbacks, so at least one block.
 GAP_THRESHOLD_BLOCKS = 0.5
 
-#: Seconds between clock points in the ordinary case.
-#:
-#: Every block would be 62.5 points a second at the default block size, or 225k
-#: an hour. One a second is enough to fit a rate and to see a step, because a
-#: gap is written whether or not the interval has elapsed - the points exist to
-#: describe the axis, and between gaps the axis is a straight line.
+#: Seconds between clock points in the ordinary case. Every gap gets a point
+#: regardless, and between gaps the axis is a straight line.
 CLOCK_POINT_INTERVAL_S = 1.0
 
 #: How long to wait for audio before checking whether recording should stop.
@@ -71,9 +41,7 @@ class AudioStats:
 
     Attributes:
         rate: Sample rate, so that ``seconds`` needs nothing else.
-        samples: Frames written to the WAV, counting inserted silence. This is
-            what the WAV header will say, and what a file position is measured
-            against.
+        samples: Frames written to the WAV, counting inserted silence.
         filled: Samples of silence inserted to replace audio that was lost.
         gaps: How many separate holes were filled.
         dropped_by_reader: Samples the ring buffer overwrote before this writer
@@ -81,7 +49,7 @@ class AudioStats:
         overruns: Input overflows the driver reported.
         clock_points: Measured points written to the sidecar.
         first_monotonic: ADC time of sample zero, or None before anything is
-            written. The anchor that places this recording against the video.
+            written.
         last_monotonic: ADC time of the newest sample written.
         error: What went wrong, if anything.
     """
@@ -106,12 +74,7 @@ class AudioStats:
 class AudioWriter:
     """Writes the array to a WAV, a clock sidecar and a direction sidecar.
 
-    Runs on its own thread. Whatever asked for the recording - an HTTP request,
-    a CLI loop - is not the thing that has to keep up with the device.
-
-    All six channels are written whatever anything happens to be listening to.
-    The raw microphones are the part worth keeping: they are what a direction
-    estimator needs, and they cannot be recovered from the processed channel.
+    Runs on its own thread, and always writes every channel.
     """
 
     def __init__(
@@ -279,13 +242,11 @@ class AudioWriter:
 
                 block = self._samples_for(stamp, chunk)
                 if block is None:
-                    # The ring overwrote this block before it could be read. Its
-                    # samples were already accounted for as a fill above.
+                    # Overwritten before it was read; already counted as a fill.
                     previous = stamp
                     continue
 
-                # The point is written before the samples so that the position
-                # it names is where they are about to land.
+                # Before the samples, so the position it names is where they land.
                 if (
                     filled
                     or previous is None
@@ -313,16 +274,9 @@ class AudioWriter:
             if directions is not None and self._doa is not None:
                 seen_reading = _write_directions(directions, self._doa, seen_reading)
 
-        # The last block, whether or not the interval has elapsed: a fit
-        # extrapolates past its final point, and the end of a recording is
-        # exactly where that matters.
-        #
-        # end_monotonic, not monotonic: the position being recorded is where the
-        # file now ends, which is one block *past* the last stamp's first sample.
-        # Pairing that position with the block's start time puts the final point
-        # one block off the line every other point sits on - 16 ms at the default
-        # block size, which a least-squares fit then spreads over the whole
-        # recording.
+        # Always close with a point at the end of the file. end_monotonic, not
+        # monotonic: the position is one block past the last stamp's start, and
+        # pairing it with the start would skew the fit by a block.
         if previous is not None:
             clock.append(
                 AudioClockPoint(
@@ -352,18 +306,9 @@ class AudioWriter:
         Returns:
             Samples of silence to insert. Zero in the ordinary case.
 
-        Two losses, and they overlap:
-
-        * ``stamp.sample`` jumping past ``previous.end_sample`` means the ring
-          overwrote audio the tap did have. The count of missing samples is
-          exact.
-        * capture time running past where those samples put it means the driver
-          never delivered some audio at all. That count has to be inferred from
-          the clock.
-
-        The second is measured *after* accounting for the first, because a
-        reader that lost 8 blocks also lost the 128 ms they occupied - and
-        filling both would put twice the silence in the file.
+        Ring overwrites (exact, from the sample count) and driver drops
+        (inferred from the clock) overlap: the clock lag is measured after the
+        overwritten samples' own duration, or the hole would be filled twice.
         """
         if previous is None:
             return 0
@@ -383,8 +328,7 @@ class AudioWriter:
             chunk: The chunk it was delivered in.
 
         Returns:
-            ``(n, channels)`` samples, or None if none of the block survived in
-            the chunk - which happens when the ring wrapped past it.
+            ``(n, channels)`` samples, or None if the ring wrapped past it.
         """
         start = max(stamp.sample, chunk.first_sample) - chunk.first_sample
         end = min(stamp.end_sample, chunk.cursor) - chunk.first_sample
@@ -403,11 +347,6 @@ def _write_directions(handle, doa: DoaTap, seen: int) -> int:
 
     Returns:
         The new last-written index.
-
-    The timestamps are ``time.monotonic()``, the same axis the audio's ADC times
-    and the camera's converted frame times are on, so an angle can be placed
-    against both the waveform it came from and the picture of whoever was
-    talking.
     """
     reading = doa.latest(timeout=0.0, after=seen)
     if reading is None:

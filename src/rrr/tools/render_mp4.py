@@ -1,9 +1,6 @@
 """Make a reviewable MP4 from a recorded colour stream and ReSpeaker audio.
 
-The archive and WAV remain the measurements; this is a presentation copy.  It
-uses their recorded monotonic clocks, applies a measured audio/video offset when
-one exists, and resamples the WAV onto the video's time axis.  With no clock or
-calibration it still makes a useful movie by starting both tracks together.
+A presentation copy, not a measurement; see docs/features.md "MP4 review copies".
 
 Usage::
 
@@ -126,8 +123,22 @@ def render(
 ) -> RenderReport:
     """Render one raw session as H.264 video with mono AAC audio.
 
-    A temporary sibling file is replaced into place only after both encoders
-    have closed successfully.  The source recording is never modified.
+    Written to a temporary sibling and moved into place only on success.
+
+    Args:
+        directory: The recorded session directory.
+        output: Where to write the MP4.
+        audio_channel: ``processed``, ``mix``, or a zero-based WAV channel.
+        draw_doa: Draw the direction compass when a DOA track exists.
+        crf: H.264 constant rate factor.
+        overwrite: Replace an existing ``output``.
+
+    Returns:
+        What was placed in the movie.
+
+    Raises:
+        FileExistsError: If ``output`` exists and ``overwrite`` is false.
+        ValueError: If the session has no usable colour video.
     """
     directory = Path(directory)
     root = str(directory.parent) if str(directory.parent) else "."
@@ -258,11 +269,8 @@ def _encode(
         video_stream.height = height
         video_stream.pix_fmt = "yuv420p"
         video_stream.time_base = VIDEO_TIME_BASE
-        # The stream time base controls the MP4 track, while the codec context
-        # controls how x264 quantises input PTS.  Leaving the latter at 1/fps
-        # makes two real frames less than one nominal interval apart collapse
-        # onto the same DTS; walk recordings contain ordinary 31/47 ms jitter
-        # around 29.967 fps and MP4 correctly rejects that duplicate timestamp.
+        # x264 quantises PTS to the codec time base; at 1/fps, ordinary frame
+        # jitter (31/47 ms) collapses two frames onto one DTS, which MP4 rejects.
         video_stream.codec_context.time_base = VIDEO_TIME_BASE
         video_stream.options = {"crf": str(crf), "preset": "medium"}
         audio_stream = None
@@ -375,8 +383,7 @@ def _directions(
     corrected = []
     for reading in readings:
         radians = math.radians(reading.angle)
-        # Array convention used by this renderer: 0° is +Y and angles increase
-        # clockwise toward +X.  A rig rotation defines those physical axes.
+        # 0 deg is the array's +Y, increasing clockwise toward +X.
         ray = rotation @ np.array([math.sin(radians), math.cos(radians), 0.0])
         bearing = math.degrees(math.atan2(float(ray[0]), float(ray[2]))) % 360.0
         corrected.append(_Direction(reading.time, bearing, reading.voice))

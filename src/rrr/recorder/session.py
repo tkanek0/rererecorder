@@ -1,26 +1,9 @@
 """Recording both devices into one session, and writing down how they relate.
 
-The two devices are independent: separate USB endpoints, separate clocks,
-separate failure modes. Nothing here tries to start them at the same instant,
-because that would be both impossible and pointless - a RealSense pipeline takes
-about a second to open, and neither device's data is timestamped by when
-recording began. What matters is that every frame and every sample carries a
-time on one axis, and that the axis is written down. Then the overlap can be
-found afterwards, exactly, from the files.
-
-So this class does three things:
-
-* runs a writer per device, each on its own thread, each surviving the other's
-  failure - a session with one track and an explanation beats no session,
-* samples both host clocks throughout, so the monotonic axis can be named in
-  wall-clock terms and an NTP step is visible rather than smeared,
-* rewrites the manifest while recording, so a session interrupted by a crash
-  still describes itself.
-
-What it deliberately does not do is claim the two tracks are aligned. The
-residual offset between a microphone and a shutter is not derivable from either
-device, and until ``rrr/tools/calibrate.py`` measures it the manifest's calibration
-stays null.
+Runs a writer per device, each surviving the other's failure; samples both
+host clocks throughout; and rewrites the manifest while recording so a crashed
+session still describes itself. It never claims the tracks are aligned - see
+docs/design.md "The one idea" and "What it refuses to claim".
 """
 
 from __future__ import annotations
@@ -51,11 +34,8 @@ from .video_writer import VideoWriter
 
 logger = logging.getLogger(__name__)
 
-#: Seconds between clock samples, and between manifest rewrites.
-#:
-#: One second is 3.6k clock samples an hour - nothing beside the frames - and
-#: fine enough to catch an NTP step. It is also how stale a crashed session's
-#: manifest can be, which is the more demanding of the two requirements.
+#: Seconds between clock samples, and between manifest rewrites - so also how
+#: stale a crashed session's manifest can be.
 MONITOR_INTERVAL_S = 1.0
 
 #: How long to wait for the camera's first frame before giving up on it.
@@ -97,13 +77,10 @@ class SessionRecorder:
             record_doa: Whether to record the direction beside the audio.
             codecs: Overrides for the archive's default codecs.
             hub: Frame hub to record from, or None to make one. The server
-                passes its own so that the preview and the recording share one
-                pipeline - opening the camera again for a recording would take
-                a second, drop the preview and leave auto-exposure settling in
-                the middle of what was being recorded.
-            source_factory: Callable returning a :class:`FrameSource`, for
-                tests and for a future replay source. Ignored when a hub is
-                given.
+                passes its own so preview and recording share one pipeline
+                (docs/design.md "The camera is shared").
+            source_factory: Callable returning a :class:`FrameSource`.
+                Ignored when a hub is given.
         """
         self._root = root
         self._streams = streams or StreamConfig()
@@ -116,9 +93,7 @@ class SessionRecorder:
         self._owns_hub = hub is None
         self._hub = hub or FrameHub(self._source_factory)
 
-        # Whether this recorder made the taps, and so has to close them. A tap
-        # passed in belongs to whoever passed it - the server holds its own
-        # across many sessions.
+        # Taps passed in belong to the caller; only taps made here are closed.
         self._owns_taps = tap is None and doa is None
         self._tap = tap or (AudioTap() if record_audio else None)
         self._doa = doa or (DoaTap() if record_audio and record_doa else None)
@@ -132,8 +107,7 @@ class SessionRecorder:
         self._video: VideoWriter | None = None
         self._audio: AudioWriter | None = None
         self._events: EventWriter | None = None
-        # Counted here rather than read off the writer, so that the number
-        # survives the writer being closed at the end of a session.
+        # Counted here so the number survives the event writer being closed.
         self._marks = 0
 
     def _open_camera(self) -> FrameSource:
@@ -147,8 +121,7 @@ class SessionRecorder:
 
         Args:
             session_id: Directory name, or None to build one from the local
-                time. Colons are not usable in a session id, so the timestamp
-                uses dashes.
+                time (with dashes, since colons are not allowed).
 
         Returns:
             Where the session is being written.
@@ -156,9 +129,8 @@ class SessionRecorder:
         Raises:
             RecorderBusy: If a recording is already running.
             SessionError: If the id is unusable or the session exists.
-            RuntimeError: If neither device could be recorded. Both failing is
-                not a recording, and reporting it as one would be a lie; the
-                manifest is written first so the errors survive.
+            RuntimeError: If neither device could be recorded. The manifest
+                is written first so the errors survive.
         """
         with self._lock:
             if self._monitor is not None and self._monitor.is_alive():
@@ -176,9 +148,7 @@ class SessionRecorder:
                 started_at=started,
                 clock_samples=self._clock_track.samples,
             )
-            # Opened for every session rather than on the first mark: a button
-            # press is worth nothing if it has to wait for a file to be
-            # created, and an empty sidecar costs a directory entry.
+            # Opened up front so a mark never waits on creating the file.
             self._events = EventWriter(paths.events)
             self._marks = 0
             self._manifest.events_file = EVENTS_NAME
@@ -260,18 +230,14 @@ class SessionRecorder:
         if monitor is not None:
             monitor.join(timeout=MONITOR_INTERVAL_S * 3)
 
-        # Audio first: it is cheap to close, and stopping the camera can take
-        # seconds while the encoder queue drains. Closing the camera first would
-        # keep recording audio through all of it, for no reason.
+        # Audio first: the camera can take seconds to drain its encoder queue.
         if self._audio is not None:
             self._audio.stop(timeout=timeout)
-        # Kept, not cleared: _collect_tracks below reads the final statistics
-        # off it, and start() replaces it anyway.
+        # Writers are kept, not cleared: _collect_tracks reads their final stats.
         if self._video is not None:
             self._video.stop(timeout=timeout)
-        # Detached under the lock before it is closed: a mark arriving from the
-        # page while the session is being stopped would otherwise reach a file
-        # that has just been closed.
+        # Detached under the lock first, so a concurrent mark() cannot reach a
+        # closed file.
         with self._lock:
             events, self._events = self._events, None
         if events is not None:
@@ -303,14 +269,9 @@ class SessionRecorder:
             The event as written, so a caller can show the time it landed on.
 
         Raises:
-            RuntimeError: If nothing is recording. A mark with no session has
-                nowhere to go, and inventing one would put it in the next
-                recording instead.
+            RuntimeError: If nothing is recording.
 
-        The stamp is taken inside the lock, as close to the call as possible.
-        It is still a person's reaction time late - see
-        :mod:`rrr.timeline.events` - so this is for saying what a stretch of a
-        recording was, not for aligning against a frame.
+        Accurate only to a person's reaction time; see docs/features.md "Marks".
         """
         with self._lock:
             if self._events is None:
@@ -324,14 +285,10 @@ class SessionRecorder:
     def close(self) -> None:
         """Release the devices for good, if this recorder opened them.
 
-        The array needs this most. Its taps run on daemon threads, so a process
-        that exits while a capture stream is still open never closes it - and the array is then in a state where the next
-        ``InputStream`` open fails, silently producing a session with an empty
-        WAV and no error to explain it. Observed exactly that, twice in a row,
-        before this existed.
-
-        Releasing is not enough: a release only starts an idle countdown, and
-        the process is usually gone before it expires.
+        Must be called before exit: the taps run on daemon threads, and a
+        capture stream left open makes the next ``InputStream`` open fail
+        silently (an empty WAV). A tap release only starts an idle countdown
+        the process usually outlives, so this shuts the taps down instead.
         """
         if self._owns_hub:
             self._hub.stop()
@@ -368,13 +325,7 @@ class SessionRecorder:
                 being written stays where it is.
 
         Raises:
-            RecorderBusy: If a recording is running. Moving the directory
-                mid-session would leave half a session on one disk and half on
-                another, and the manifest would describe neither.
-
-        Settable because the choice of disk is a per-session decision here: a
-        recording costs 195 GB an hour, so which volume it lands on is not
-        something to fix at deployment time.
+            RecorderBusy: If a recording is running.
         """
         if self.recording:
             raise RecorderBusy("cannot move the directory while recording")
@@ -393,10 +344,9 @@ class SessionRecorder:
             value: The new stream configuration.
 
         Raises:
-            RecorderBusy: If a recording is running. The SDK settles
-                resolution and frame rate at pipeline start, so this takes
-                effect only the next time the camera opens - restart the hub
-                after setting this if one is shared with a preview.
+            RecorderBusy: If a recording is running.
+
+        Takes effect only when the camera next opens; restart a shared hub.
         """
         if self.recording:
             raise RecorderBusy("cannot change streams while recording")
@@ -416,9 +366,7 @@ class SessionRecorder:
                 unchanged. See ``video.archive.DEFAULT_CODECS``.
 
         Raises:
-            RecorderBusy: If a recording is running - an archive's codecs are
-                fixed for its whole life, so this can only affect one that has
-                not started yet.
+            RecorderBusy: If a recording is running.
         """
         if self.recording:
             raise RecorderBusy("cannot change codecs while recording")
@@ -426,21 +374,12 @@ class SessionRecorder:
 
     @property
     def tap(self) -> AudioTap | None:
-        """The audio tap this recorder reads, or None if audio is not recorded.
-
-        Exposed read-only so a caller can ask whether the array is open right
-        now (``tap.active``) independent of whether a recording is running -
-        the same thing ``hub`` already lets a caller ask about the camera.
-        """
+        """The audio tap this recorder reads, or None if audio is not recorded."""
         return self._tap
 
     @property
     def doa(self) -> DoaTap | None:
-        """The direction tap this recorder reads, or None if it reads none.
-
-        Exposed for the same reason as :attr:`tap`: so that a server can
-        reconnect the array as one device.
-        """
+        """The direction tap this recorder reads, or None if it reads none."""
         return self._doa
 
     @property
@@ -467,10 +406,8 @@ class SessionRecorder:
         """Describe the recording for an API or a CLI.
 
         Returns:
-            What is being recorded, for how long, and what has gone wrong. The
-            drop and fill counts are included deliberately: they are how a
-            caller learns that a recording has holes, and a UI that does not
-            show them lets a bad session look fine.
+            What is being recorded, for how long, and what has gone wrong,
+            including the drop and fill counts that reveal holes.
         """
         video = self._video.stats if self._video is not None else None
         audio = self._audio.stats if self._audio is not None else None
@@ -534,12 +471,10 @@ class SessionRecorder:
             self._write()
 
     def _collect_tracks(self) -> None:
-        """Fold the writers' statistics into the manifest. Caller holds the lock.
+        """Fold the writers' statistics and errors into the manifest.
 
-        Including their errors. A writer that fails after the session started
-        reports through its stats rather than raising - the other device keeps
-        recording - and without this the failure would never reach the file that
-        is supposed to describe the session.
+        Caller holds the lock. A writer failing mid-session reports only
+        through its stats, so this is how that error reaches the manifest.
         """
         if self._manifest is None:
             return
@@ -584,10 +519,7 @@ class SessionRecorder:
         Returns:
             The report, or None while there is not enough to say anything.
 
-        Read from the file rather than kept in memory on purpose: this is the
-        one check that the sidecar a consumer will actually read says what the
-        recording believes. A report built from the writer's own variables would
-        agree with itself no matter what reached the disk.
+        Read from the file on purpose, so it checks what actually reached disk.
         """
         if self._paths is None or self._tap is None:
             return None

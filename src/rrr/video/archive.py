@@ -1,23 +1,9 @@
-"""A recording format that keeps every measurement and a tenth of the disk.
+"""The ``.rrdb`` recording format: SQLite holding losslessly compressed frames.
 
-The SDK's own rosbag2 (`.db3`) writes raw pixels: 61 MB/s with colour and depth
-at 848x480/30, which is 220 GB an hour. Almost all of that is compressible
-without touching a single value - depth especially, being smooth and a seventh
-zeros - so this writes the same frames through lossless codecs instead, at
-about 91 GB an hour.
-
-Nothing is thrown away. Alongside the pixels go the calibration, the stream
-configuration, every sensor option the device exposes, the inertial samples, and
-the per-frame metadata the firmware reports - exposure, gain, laser power and the
-sensor's own timestamps. The intent is that a session recorded here can answer
-the same questions as one recorded by the SDK.
-
-The container is SQLite, like rosbag2 and for the same reasons: one file, random
-access by frame, and readable by anything that speaks SQL whether or not
-librealsense is installed. See `docs/recording.md`.
-
-The one thing given up is `realsense-viewer`, which reads rosbag2 and not this.
-`rrr/tools/record.py --format db3` still writes that when it is what you want.
+Stores pixels, calibration, stream configuration, sensor options, inertial
+samples and per-frame metadata. Lossless codecs instead of rosbag2's raw pixels:
+220 GB/hour for colour and depth at 848x480/30 there, about 91 GB/hour here.
+See docs/features.md "Recording" and docs/decisions.md 4, 5, 8, 22.
 """
 
 from __future__ import annotations
@@ -58,35 +44,8 @@ from .types import (
 
 logger = logging.getLogger(__name__)
 
-#: Bumped when the schema changes in a way a reader must know about.
-#:
-#: 2 adds the infrared pair, splits YUYV colour across three columns, and lets
-#: depth be zlib rather than PNG. Unlike ``capture_monotonic`` - an added column
-#: an older reader can simply ignore - these change what the existing columns
-#: mean, so a v1 reader must not open a v2 file. It cannot: realsense-playground
-#: refuses any version but its own.
-#:
-#: 3 replaces the ``motion`` table with ``imu``. The old one held one
-#: accelerometer and one gyroscope reading per video frame, which is a
-#: fourteenth of what the sensor produces - measured at 482 Hz against 30 fps.
-#: The new one holds every sample with its own timestamp. A v2 reader opening a
-#: v3 file would find no ``motion`` table and conclude there was no inertial
-#: data, which is why the version moves rather than the table merely being
-#: added.
-#:
-#: 4 replaces ``timestamp_ms`` / ``received_at`` / ``capture_monotonic`` with
-#: ``color_timestamp_ms``, ``depth_timestamp_ms`` and ``received_monotonic``.
-#: The old three columns conflated two different things under one name: which
-#: stream's timestamp a set's single ``timestamp_ms`` held was implicit in
-#: whatever the SDK's own composite frame happened to report, and
-#: ``capture_monotonic`` quietly stopped being more accurate than
-#: ``received_at`` the moment the timestamp domain was not ``global_time`` -
-#: see ``docs/windows-native.md``. Splitting colour and depth's timestamps into
-#: their own columns is also what stopped mismatched sets from needing to be
-#: discarded rather than kept and judged later - see decision 21.
-#:
-#: The reader here still opens v1 through v3, because there are real
-#: recordings in those formats and nothing about them became wrong.
+#: Bumped when the schema changes in a way a reader must know about: 2 in
+#: docs/decisions.md 8, 3 in 12, 4 in 21. The reader still opens v1 to v3.
 FORMAT_VERSION = 4
 
 #: The oldest format this reader accepts.
@@ -96,60 +55,26 @@ MIN_READABLE_VERSION = 1
 #: can say what it is missing rather than silently doing without.
 EXTENSIONS_KEY = "extensions"
 
-#: Suffix these files carry.
-#:
-#: Not ``.db3``, which means rosbag2 and would invite someone to open this with
-#: a tool that cannot read it - and no longer ``.rsdb`` either, which means
-#: realsense-playground's format. A v2 file is not one of those, and giving it
-#: their name would only produce a confusing error somewhere else.
+#: Suffix these files carry; see docs/decisions.md 8.
 SUFFIX = ".rrdb"
 
 #: What realsense-playground writes. Readable here; never written here.
 LEGACY_SUFFIX = ".rsdb"
 
-#: PNG effort. Level 1 costs 13 ms for a depth frame and 19 ms for colour, and
-#: level 6 buys 17% at three times the time - which a 30 fps recorder does not
-#: have. Two encoder threads clear 60 fps at level 1.
+#: PNG effort. Level 1: 13 ms depth, 19 ms colour; level 6 saves 17% at three
+#: times the time, which 30 fps cannot afford.
 PNG_LEVEL = 1
 
-#: How each stream is encoded, and what the meta records.
-#:
-#: Measured on real 1280x720 / 1280x800 frames, with four encoder threads: a
-#: whole set - depth, three colour planes and two infrared images - takes 18.3
-#: ms, against the 33.3 ms a 30 fps recorder has. Every codec here was verified
-#: lossless by decoding and comparing, not assumed to be.
-#:
-#: That 18.3 ms figure, and decision 19's 26.2 ms one, were both measured
-#: against synthetic noise, not a real scene - and noise is not representative:
-#: a compressor gives up searching for redundancy in it almost immediately,
-#: where real depth/colour/infrared content has real redundancy to search for.
-#: Measured on real content on a Core Ultra 7 265U: ~29-30 ms/set, at any
-#: worker count from 8 to 12 - the CPU itself, not the thread count, is the
-#: limit. ``"raw"`` (depth) and ``"raw"`` (colour, infrared) exist for a
-#: machine at that ceiling: no compression, so no search, at about 3x the
-#: bytes.
+#: How each stream is encoded by default; ``"raw"`` is the uncompressed
+#: alternative for each (docs/decisions.md 22).
 DEFAULT_CODECS = {"depth": "zlib", "color": "png", "infrared": "png"}
 
-#: Frames buffered between the camera and the encoder threads. Four seconds at
-#: 30 fps: long enough to ride out a stalled disk, short enough that the memory
-#: is bounded. Frames arriving when it is full are counted, not silently lost.
+#: Frames buffered before the encoders: four seconds at 30 fps. Overflow is
+#: counted as dropped.
 QUEUE_DEPTH = 120
 
-#: Encoder threads, when the caller does not choose one.
-#:
-#: Four was measured on a 16-core i9-11900K (decisions.md's reference
-#: machine): "two workers clear 60 fps for a lossless colour and depth pair",
-#: and a whole six-image set stops improving past four. That knee is a
-#: property of that CPU, not of OpenCV's GIL release - measured on a 12-core/
-#: 14-thread mobile chip (Windows, Core Ultra 7 265U), four workers held only
-#: 42.2 ms/set against the 33.3 ms budget; eight held 26.2 ms/set. A
-#: ProcessPoolExecutor was slower at every worker count on that machine, so
-#: this stays threads - OpenCV and zlib already release the GIL, and Windows'
-#: process-spawn/IPC cost outweighs what it would buy.
-#:
-#: Scaling with the core count rather than hard-coding a number keeps a
-#: weaker machine out of the knee without asking a stronger one to spawn
-#: threads doing nothing.
+#: Encoder threads, when the caller does not choose one. See
+#: docs/decisions.md 19.
 DEFAULT_WORKERS = min(8, max(4, os.cpu_count() or 4))
 
 #: Frames per transaction. Committing each one costs more than the encoding.
@@ -158,10 +83,8 @@ COMMIT_EVERY = 30
 #: Blob columns in the order the INSERT lists them.
 _BLOB_COLUMNS = ("depth", "color", "color_y", "color_u", "color_v", "ir1", "ir2")
 
-#: Which blob columns each stream needs, for reading one at a time.
-#:
-#: Infrared is a pair even when only one side is wanted: ``FrameSet.infrared``
-#: holds both or neither, and the second image costs 5 ms.
+#: Which blob columns each stream needs, for reading one at a time. Infrared
+#: is always a pair, as ``FrameSet.infrared`` holds both or neither.
 _STREAM_COLUMNS: dict[str, tuple[str, ...]] = {
     "depth": ("depth",),
     "color": ("color", "color_y", "color_u", "color_v"),
@@ -207,17 +130,8 @@ def encode_depth_zlib(depth: np.ndarray) -> bytes:
         depth: ``(height, width)`` uint16.
 
     Returns:
-        A zlib stream of the raw values, little-endian.
-
-    Faster and smaller than PNG16 on this data - measured on 1280x720 depth
-    from a D455: 12.2 ms and 580 KB against 24.1 ms and 646 KB. PNG's row
-    predictors work on bytes, and a 16-bit depth image interleaves high and low
-    bytes, so they have little to predict from.
-
-    What it gives up is self-description: the blob is values and nothing else,
-    so the shape has to come from the archive's calibration. Written
-    little-endian explicitly rather than in native order, so a recording made on
-    one machine reads on another.
+        A zlib stream of the raw values, little-endian regardless of host. The
+        shape comes from the archive's calibration (docs/decisions.md 5).
     """
     return zlib.compress(depth.astype("<u2", copy=False).tobytes(), 1)
 
@@ -250,19 +164,8 @@ def encode_depth_raw(depth: np.ndarray) -> bytes:
         depth: ``(height, width)`` uint16.
 
     Returns:
-        The values as little-endian bytes, row-major. Self-description is
-        given up, same as :func:`encode_depth_zlib` - the shape has to come
-        from the archive's calibration.
-
-    Chosen for a machine whose CPU cannot compress real camera content fast
-    enough to hold 30 fps: measured on a Core Ultra 7 265U (real depth,
-    colour and infrared content, not synthetic noise - noise compresses much
-    faster than a real scene does), the full six-image PNG/zlib set costs
-    ~29-30 ms against a 33.3 ms budget, with no headroom for anything else in
-    the pipeline, and more encoder threads do not help - the CPU itself is
-    the limit. Raw trades disk space for reliably clearing that budget: about
-    3x the bytes of the compressed set (see the module docstring), against a
-    recording that otherwise drops frames.
+        The values as little-endian bytes, row-major. The shape comes from the
+        archive's calibration. See docs/decisions.md 22.
     """
     return depth.astype("<u2", copy=False).tobytes()
 
@@ -295,9 +198,7 @@ def encode_plane_raw(plane: np.ndarray) -> bytes:
         plane: ``(height, width)`` uint8.
 
     Returns:
-        The raw bytes, row-major. See :func:`encode_depth_raw` for why this
-        exists: a machine whose PNG encoding of real content cannot clear the
-        30 fps budget, even with more encoder threads.
+        The raw bytes, row-major. See docs/decisions.md 22.
     """
     return plane.tobytes()
 
@@ -327,8 +228,8 @@ def encode_plane(plane: np.ndarray) -> bytes:
         plane: ``(height, width)`` uint8.
 
     Returns:
-        A PNG. Measured 10.8 ms and 231 KB for a 1280x720 infrared frame, and
-        beating zlib on size here because the predictors do work on 8-bit data.
+        A PNG; on 8-bit data it beats zlib on size (10.8 ms, 231 KB for
+        1280x720 infrared).
 
     Raises:
         RuntimeError: If OpenCV refused to encode it.
@@ -354,8 +255,7 @@ def encode_depth(depth: np.ndarray) -> bytes:
         depth: ``(height, width)`` uint16.
 
     Returns:
-        A 16-bit PNG. Self-describing, so the file stays readable with ordinary
-        image tools rather than only with this module.
+        A 16-bit PNG, readable by ordinary image tools.
 
     Raises:
         RuntimeError: If OpenCV refused to encode it.
@@ -396,9 +296,7 @@ def encode_color_raw(color: np.ndarray) -> bytes:
         color: ``(height, width, 3)`` uint8 RGB.
 
     Returns:
-        The raw bytes, row-major, RGB order (not BGR - there is no OpenCV
-        conversion to undo on the way back). See :func:`encode_depth_raw`
-        for why this exists.
+        The raw bytes, row-major, RGB order.
     """
     return color.tobytes()
 
@@ -440,8 +338,8 @@ class WriterStats:
 
     Attributes:
         frames: Frames written.
-        dropped: Frames the queue could not accept. Non-zero means the disk or
-            the encoders could not keep up, and is reported rather than hidden.
+        dropped: Frames the queue could not accept: the disk or the encoders
+            fell behind.
         motion: Inertial samples written.
         bytes_written: Size of the file on disk at the last commit.
     """
@@ -453,13 +351,10 @@ class WriterStats:
 
 
 class ArchiveWriter:
-    """Writes frame sets to a `.rsdb` archive.
+    """Writes frame sets to a ``.rrdb`` archive.
 
-    Encoding runs on a small thread pool - OpenCV releases the GIL, so two
-    workers clear 60 fps for a lossless colour and depth pair - and the SQLite
-    writes happen on one thread of their own, batched into transactions. The
-    caller's thread does no work beyond a queue put, which matters because the
-    caller is whatever is reading the camera.
+    Encoding runs on a thread pool and SQLite writes on one thread of their
+    own, so the caller - the camera's reader thread - only does a queue put.
     """
 
     def __init__(
@@ -482,22 +377,13 @@ class ArchiveWriter:
             config: Stream configuration, stored once.
             device: Identity of the camera, stored once.
             options: Sensor options at the start of the recording.
-            codecs: Overrides for DEFAULT_CODECS. ``depth`` chooses between
-                ``"zlib"`` (default, faster and smaller than PNG16),
-                ``"png16"`` (openable by any image tool) or ``"raw"`` (no
-                compression at all). ``color`` and ``infrared`` choose between
-                ``"png"`` (default) or ``"raw"``. Raw exists for a CPU that
-                cannot compress real content fast enough to hold 30 fps - see
-                DEFAULT_CODECS.
-            workers: Encoder threads. Defaults to DEFAULT_WORKERS, which scales
-                with the core count - see its docstring for why a fixed number
-                does not travel between machines.
-            clock_anchor: What names the monotonic axis in wall-clock terms,
-                for the inertial samples' own epoch-ms timestamps (see
-                ``MotionSample.capture_monotonic``). None - the default - reads
-                the host's clocks fresh when the first frame arrives, which is
-                what a live recording wants; a test supplies one explicitly so
-                its synthetic frames and its synthetic anchor agree.
+            codecs: Overrides for DEFAULT_CODECS. ``depth`` is ``"zlib"``,
+                ``"png16"`` or ``"raw"``; ``color`` and ``infrared`` are
+                ``"png"`` or ``"raw"``.
+            workers: Encoder threads.
+            clock_anchor: Host clock pair naming the monotonic axis in
+                wall-clock terms, for the inertial timestamps. None reads the
+                host's clocks at the first frame; tests pass one explicitly.
         """
         self._path = path
         self._clock_anchor = clock_anchor
@@ -509,9 +395,8 @@ class ArchiveWriter:
             raise ValueError(f"unknown color codec {self._codecs['color']!r}")
         if self._codecs["infrared"] not in ("png", "raw"):
             raise ValueError(f"unknown infrared codec {self._codecs['infrared']!r}")
-        # Frames and inertial samples share one queue, so they share the
-        # writer thread, its transactions and its commit interval. Two queues
-        # would mean two writers contending for one SQLite connection.
+        # Frames and inertial samples share one queue, so one writer thread
+        # owns the SQLite connection.
         self._queue: queue.Queue[FrameSet | list[MotionSample] | None] = queue.Queue(
             QUEUE_DEPTH
         )
@@ -522,9 +407,7 @@ class ArchiveWriter:
 
         self._connection = sqlite3.connect(path, check_same_thread=False)
         self._connection.executescript(SCHEMA)
-        # Durability against a crash, without paying a flush per frame. The
-        # sidecar files are folded back in on close, so an archive is one file
-        # once it is finished.
+        # Crash durability without a flush per frame; folded back on close.
         self._connection.execute("PRAGMA journal_mode=WAL")
         self._connection.execute("PRAGMA synchronous=NORMAL")
         self._write_meta(
@@ -538,8 +421,7 @@ class ArchiveWriter:
                 "codecs": self._codecs,
                 "color_format": config.color_format,
                 EXTENSIONS_KEY: [],
-                # Filled in from the first frame: neither is known until one
-                # arrives, and both describe the whole recording.
+                # Filled in from the first frame.
                 "timestamp_domain": None,
                 "clock_anchor": None,
             }
@@ -587,16 +469,9 @@ class ArchiveWriter:
 
         Args:
             frames: The frame set to store.
-            timeout: How long to wait for room.
-
-                None - the default - does not wait at all, and is what a live
-                recording wants: a camera nobody can stall is worth more than a
-                frame, and the drop is counted rather than hidden.
-
-                A number waits that long, which is what an offline pass wants.
-                Converting a file or replaying one runs far faster than the
-                encoders, so without waiting most of it would be dropped. Pass
-                a generous value, or ``float("inf")`` to insist.
+            timeout: How long to wait for room. None does not wait, for a
+                live recording that must not stall the camera. An offline pass
+                should pass a generous value, or ``float("inf")`` to insist.
 
         Returns:
             Whether it was accepted. False means the frame was dropped.
@@ -623,11 +498,7 @@ class ArchiveWriter:
 
         Returns:
             Whether they were accepted. False means the queue was full and they
-            were dropped, which is counted like a dropped frame.
-
-        Never waits for room. At 960 samples a second and 48 bytes each this is
-        30 KB/s against the video's 54 MB/s, so a full queue means the video is
-        already in trouble and blocking here would make it worse.
+            were dropped, which is counted like a dropped frame. Never waits.
         """
         if self._closed or not samples:
             return not samples
@@ -705,19 +576,14 @@ class ArchiveWriter:
     def _insert(self, frames: FrameSet) -> None:
         """Encode one frame set and add it to the open transaction."""
         if self._stats.frames == 0:
-            # What the timestamps mean, and one pair of host clocks to name the
-            # monotonic axis in wall-clock terms - needed for the inertial
-            # samples in `imu`, which carry only their own epoch-ms timestamp.
-            # Written from the first frame because the domain is not known
-            # until one has arrived; read fresh here rather than carried on
-            # FrameSet, since nothing else needs a whole ClockPair per frame.
+            # The domain is only known once a frame arrives; the anchor lets
+            # `imu`'s epoch-ms timestamps be placed on the monotonic axis.
             self._write_meta(
                 {
                     "timestamp_domain": frames.timestamp_domain,
                     "clock_anchor": (self._clock_anchor or read_clocks()).as_dict(),
                 }
             )
-        # Every plane at once: the pool is what makes this keep up with 30 fps.
         futures = self._submit(frames)
         self._connection.execute(
             "INSERT OR REPLACE INTO frames"
@@ -736,9 +602,8 @@ class ArchiveWriter:
                 json.dumps(frames.metadata) if frames.metadata else None,
             ),
         )
-        # No per-frame inertial row: FrameSet.motion is the newest buffered
-        # sample, and writing it here would store a fourteenth of the data
-        # twice over. The samples go to `imu` through append_motion.
+        # FrameSet.motion is not written; samples go to `imu` via
+        # append_motion (docs/decisions.md 12).
         with self._lock:
             self._stats.frames += 1
 
@@ -747,9 +612,6 @@ class ArchiveWriter:
 
         Args:
             samples: Samples to write, in any order.
-
-        One executemany rather than a statement each: at 960 samples a second
-        the per-statement overhead is what would matter, not the bytes.
         """
         self._connection.executemany(
             "INSERT INTO imu(stream, timestamp_ms, x, y, z) VALUES(?, ?, ?, ?, ?)",
@@ -769,10 +631,6 @@ class ArchiveWriter:
 
         Returns:
             Column name to future, with None where the set has nothing.
-
-        The YUYV split happens on this thread rather than in the pool: it is a
-        pair of strided copies, tens of microseconds, and submitting it would
-        cost more in scheduling than it saves.
         """
         futures: dict[str, Any] = dict.fromkeys(_BLOB_COLUMNS)
         if frames.depth is not None:
@@ -846,9 +704,7 @@ def _motion_calibration(raw: dict[str, Any] | None) -> MotionCalibration | None:
             inertial calibration was recorded.
 
     Returns:
-        The calibration, or None. Absent rather than empty, so that a consumer
-        can tell "this recording has no inertial calibration" from "this
-        recording has one and it is all zeros".
+        The calibration, or None if the archive has none.
     """
     if not raw:
         return None
@@ -884,12 +740,7 @@ def _intrinsics(raw: dict[str, Any] | None) -> Intrinsics | None:
 
 
 class ArchiveSource:
-    """Replays a `.rsdb` archive as a ``FrameSource``.
-
-    The point of the seam: analysis written against the live camera runs against
-    a recording with no change, and - unlike the camera, which admits one process
-    at a time - any number of readers can work on the same file at once.
-    """
+    """Replays a ``.rrdb`` (or legacy ``.rsdb``) archive as a ``FrameSource``."""
 
     def __init__(self, path: str, *, realtime: bool = False, loop: bool = False) -> None:
         """Open an archive for reading.
@@ -897,8 +748,7 @@ class ArchiveSource:
         Args:
             path: Archive to read.
             realtime: Pace playback at the rate the frames were recorded.
-                False replays as fast as the reader can consume, which is what
-                an analysis pass wants.
+                False replays as fast as the reader can consume.
             loop: Start again from the beginning when the archive runs out.
 
         Raises:
@@ -957,14 +807,13 @@ class ArchiveSource:
             depth_scale=raw["depth_scale"],
             depth_to_color=_extrinsics(raw.get("depth_to_color")),
             aligned=raw["aligned"],
-            # Absent from any archive written before these were recorded, which
-            # reads back as "not known" rather than failing to open.
+            # Absent from older archives; reads back as unknown.
             infrared=_pair(raw.get("infrared"), _intrinsics),
             depth_to_infrared=_pair(raw.get("depth_to_infrared"), _extrinsics),
             motion=_motion_calibration(raw.get("motion")),
         )
-        # Detected, not inferred from the version: a file written by
-        # realsense-playground has no such column, and one written here does.
+        # Detected, not inferred from the version: realsense-playground's
+        # files lack columns ours have.
         self._columns = {
             row[1]
             for row in connection.execute("PRAGMA table_info(frames)").fetchall()
@@ -1024,12 +873,8 @@ class ArchiveSource:
     def has_monotonic(self) -> bool:
         """Whether frames carry a capture time on the monotonic axis.
 
-        True for any archive that has at least one of ``received_monotonic``
-        (v4+), ``capture_monotonic`` (v2-v3) or ``received_at`` (every
-        version, including realsense-playground's own) - all three name the
-        same axis the audio is on, just at whatever accuracy that version
-        recorded. False only for a file with none of them, which cannot be
-        placed against an audio recording at all.
+        True if it has ``received_monotonic`` (v4+), ``capture_monotonic``
+        (v2-v3) or ``received_at`` (every version).
         """
         return self._has_monotonic
 
@@ -1042,8 +887,7 @@ class ArchiveSource:
     def clock_anchor(self) -> ClockPair | None:
         """One pair of host clocks from the start of the recording.
 
-        What names the monotonic axis in wall-clock terms. None for an archive
-        written without one.
+        None for an archive written without one.
         """
         raw = self._meta.get("clock_anchor")
         return ClockPair.from_dict(raw) if raw else None
@@ -1061,9 +905,7 @@ class ArchiveSource:
             index: The archive's own ``idx``, as :meth:`bounds` reports the
                 range of.
             only: Decode just one stream - ``"depth"``, ``"color"`` or
-                ``"infrared"`` - leaving the rest None. What playback wants: a
-                player shows one image at a time, and decoding all five to
-                produce one costs 30 ms against 11.
+                ``"infrared"`` - leaving the rest None (11 ms instead of 30).
 
         Returns:
             The set, or None if there is no frame with that index.
@@ -1071,11 +913,6 @@ class ArchiveSource:
         Raises:
             StreamError: If the archive is not open.
             ValueError: If ``only`` names no stream this format has.
-
-        What playback needs. ``frames()`` is a forward iterator, so seeking
-        through it would mean decoding everything up to the point of interest -
-        seconds of work to answer a question about one frame. ``idx`` is the
-        primary key, so this is a single row lookup.
         """
         if self._connection is None:
             raise StreamError("open the archive before reading frames")
@@ -1104,9 +941,7 @@ class ArchiveSource:
 
         Returns:
             ``(first_index, last_index, first_monotonic, last_monotonic)``, or
-            None if it is empty. Indices are not assumed contiguous: a set the
-            source discarded leaves a gap, so a player has to know both the
-            range and that it may have holes in it.
+            None if it is empty. Indices may have gaps.
 
         Raises:
             StreamError: If the archive is not open.
@@ -1132,11 +967,8 @@ class ArchiveSource:
         Raises:
             StreamError: If the archive is not open.
 
-        Reads whichever table the recording has. A v3 file holds every sample
-        the sensor produced in ``imu``; a v1 or v2 file holds one accelerometer
-        and one gyroscope reading per video frame in ``motion``, which is a
-        fourteenth of them. Both are yielded the same way, and
-        :meth:`motion_rate` is how a consumer tells which it got.
+        Reads ``imu`` (v3+) or the per-frame ``motion`` table (v1-v2);
+        :meth:`motion_rate` tells which a consumer got.
         """
         if self._connection is None:
             raise StreamError("open the archive before reading samples")
@@ -1159,8 +991,7 @@ class ArchiveSource:
 
         if "motion" not in self._tables:
             return
-        # One row held both readings; split it back into two samples so that
-        # consumers see one shape whichever format they were handed.
+        # One row held both readings; split it into two samples.
         rows = self._connection.execute(
             "SELECT timestamp_ms, ax, ay, az, gx, gy, gz FROM motion ORDER BY idx"
         )
@@ -1174,10 +1005,8 @@ class ArchiveSource:
         """Measured sample rate of each inertial stream, in Hz.
 
         Returns:
-            Stream name to rate, empty if there are no samples. Measured from
-            the timestamps rather than taken from the configuration, which is
-            how a recording that stored one sample per frame gives itself away:
-            it reports 30 Hz where the sensor runs at 480.
+            Stream name to rate, measured from the timestamps; empty if there
+            are no samples. A per-frame (v1-v2) recording reports ~30 Hz.
 
         Raises:
             StreamError: If the archive is not open.
@@ -1209,10 +1038,6 @@ class ArchiveSource:
 
         Raises:
             StreamError: If the archive is not open.
-
-        What turns an instant into a frame to fetch. Interpolating from
-        :meth:`bounds` would be close but not exact - a set the camera mispaired
-        leaves a gap - and this costs one query over an integer column.
         """
         if self._connection is None:
             raise StreamError("open the archive before reading frames")
@@ -1231,10 +1056,8 @@ class ArchiveSource:
         """Every frame index the archive holds, in order.
 
         Returns:
-            The indices. About 8 KB of JSON for a 30 second recording and 860 KB
-            for an hour, which is why a player seeks by index and asks the
-            server for the time of the frame it landed on rather than fetching
-            this.
+            The indices. About 860 KB of JSON for an hour, too much for a
+            player to fetch.
 
         Raises:
             StreamError: If the archive is not open.
@@ -1257,10 +1080,7 @@ class ArchiveSource:
 
         Raises:
             StreamError: If the file claims a zlib or raw depth but records no
-                shape to give it. Neither blob is self-describing - both are
-                values and nothing else - so without the calibration's depth
-                size it cannot be read at all, and guessing would silently
-                produce a differently-shaped image.
+                depth calibration to give it a shape.
         """
         if blob is None:
             return None
@@ -1284,9 +1104,8 @@ class ArchiveSource:
         """The six inertial columns to select, or nulls in their place.
 
         Returns:
-            SQL. A v3 file has no per-frame inertial row - the samples live in
-            ``imu`` at their own rate - so ``FrameSet.motion`` is None there and
-            :meth:`motion_samples` is what a consumer wants.
+            SQL. Nulls from v3 on, where ``FrameSet.motion`` is None and
+            :meth:`motion_samples` holds the data.
         """
         if "motion" in self._tables:
             return "m.ax, m.ay, m.az, m.gx, m.gy, m.gz"
@@ -1303,27 +1122,19 @@ class ArchiveSource:
 
         Args:
             prefix: Table alias to qualify column names with, or ``""`` for a
-                query with no join - :meth:`bounds` has neither ``f`` nor
-                anything to alias.
+                query with no join.
 
         Returns:
             ``(color_timestamp_ms, depth_timestamp_ms, received_monotonic)``
-            SQL expressions. A v4 file has all three columns. A v1-v3 file has
-            none of them - only the single, ambiguous ``timestamp_ms`` and
-            ``received_at`` (and ``capture_monotonic`` from partway through
-            v2) - so it reads back with both per-stream timestamps unknown and
-            ``received_monotonic`` taken from whichever of the old columns is
-            the closest equivalent. A reader written against this format never
-            needs to know which version it opened.
+            SQL expressions. For v1-v3 the per-stream timestamps are NULL and
+            ``received_monotonic`` maps to the closest old column.
         """
         color_ts = f"{prefix}color_timestamp_ms" if "color_timestamp_ms" in self._columns else "NULL"
         depth_ts = f"{prefix}depth_timestamp_ms" if "depth_timestamp_ms" in self._columns else "NULL"
         if "received_monotonic" in self._columns:
             monotonic = f"{prefix}received_monotonic"
         elif "capture_monotonic" in self._columns and "received_at" in self._columns:
-            # capture_monotonic is nullable in v1-v3 - NULL on any row whose
-            # domain was not global_time - so a row with nothing better falls
-            # back to received_at rather than losing its capture time entirely.
+            # capture_monotonic is NULL on rows not in global_time.
             monotonic = f"COALESCE({prefix}capture_monotonic, {prefix}received_at)"
         elif "received_at" in self._columns:
             monotonic = f"{prefix}received_at"
@@ -1339,7 +1150,7 @@ class ArchiveSource:
                 ``idx, color_timestamp_ms, depth_timestamp_ms,
                 received_monotonic, metadata, <blobs>, <motion>``.
             realtime: Stamp ``received_monotonic`` with now rather than with
-                what was recorded, which is what a paced replay wants.
+                what was recorded.
 
         Returns:
             The frame set, with every stream decoded.
@@ -1386,8 +1197,7 @@ class ArchiveSource:
 
         Raises:
             StreamError: If the codec is raw but the recording has no depth
-                calibration - infrared shares the depth sensor's resolution,
-                and a raw blob has no shape of its own to fall back on.
+                calibration, whose resolution infrared shares.
         """
         if ir1 is None or ir2 is None:
             return None
@@ -1419,13 +1229,11 @@ class ArchiveSource:
             v: Second chroma plane.
 
         Returns:
-            ``(image, format)``. The format travels with the array because
-            nothing about a uint16 array says it holds YUYV.
+            ``(image, format)``.
 
         Raises:
             StreamError: If the codec is raw but the recording has no colour
-                calibration to give the planes their shape - a raw blob is
-                bytes and nothing else.
+                calibration to give the planes their shape.
         """
         raw = self._codecs.get("color") == "raw"
         if y is not None and u is not None and v is not None:
@@ -1480,8 +1288,7 @@ class ArchiveSource:
         while not self._stop:
             previous: float | None = None
             color_ts, depth_ts, monotonic = self._timestamp_columns()
-            # A v1 file has neither the colour planes nor the infrared columns;
-            # selecting NULL in their place keeps one code path for both.
+            # NULL for columns a v1 file lacks.
             blobs = ", ".join(
                 f"f.{name}" if name in self._columns else "NULL"
                 for name in _BLOB_COLUMNS

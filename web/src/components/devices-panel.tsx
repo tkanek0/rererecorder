@@ -44,11 +44,8 @@ const codecChoiceOf = (codec: string | undefined): CodecChoice =>
   codec === 'raw' ? 'raw' : 'compressed';
 
 /**
- * Where each microphone sits on the circle, in degrees - the same convention
- * as the chip's own DOA angle. **Not yet verified against the physical
- * board** (see `src/rrr/audio/config.py` MIC_ANGLES): the spacing is real, the
- * absolute rotation is a guess, so the panel says so rather than implying a
- * measurement.
+ * Each microphone's angle on the circle, in the chip's DOA convention.
+ * Unverified, like `src/rrr/audio/config.py` MIC_ANGLES: the rotation is a guess.
  */
 const MIC_LAYOUT: { key: keyof Omit<AudioLevels, 'mix'>; angleDeg: number }[] = [
   { key: 'mic1', angleDeg: 45 },
@@ -88,14 +85,8 @@ const micPosition = (angleDeg: number, radius: number) => {
 };
 
 /**
- * Subscribe to the live per-channel level stream for as long as this
- * component is mounted.
- *
- * Server-sent events rather than polling: the array is already open for the
- * duration of the connection (see `rrr.api.app.audio_levels`), so a plain
- * `EventSource` is the whole client. Reconnects on its own if the server
- * restarts; a stale reading just decays to silence-coloured rather than
- * being cleared, which reads better than a flash to empty on every retry.
+ * Subscribe to the live per-channel level stream while mounted. `EventSource`
+ * reconnects on its own; the last reading is kept rather than cleared meanwhile.
  */
 const useAudioLevels = (): AudioLevels => {
   const [levels, setLevels] = useState<AudioLevels>({
@@ -112,7 +103,7 @@ const useAudioLevels = (): AudioLevels => {
       try {
         setLevels(JSON.parse(event.data) as AudioLevels);
       } catch {
-        // A malformed line is not worth tearing the connection down for.
+        // Ignore a malformed line rather than closing the stream.
       }
     };
     return () => source.close();
@@ -124,14 +115,8 @@ const useAudioLevels = (): AudioLevels => {
 const dbLabel = (db: number | null): string => (db === null ? '—' : `${db.toFixed(0)} dB`);
 
 /**
- * Which streams the camera captures, and how each is stored.
- *
- * Lives inside the RealSense card, not in a page-wide settings area: it is a
- * property of this one device, the same way its serial and firmware are.
- * Streams take effect the next time the camera opens (the SDK settles
- * resolution and frame rate at pipeline start); codecs need nothing
- * restarted. Disabled while recording, since a session cannot describe two
- * configurations at once.
+ * Which streams the camera captures, and how each is stored. Disabled while
+ * recording. See docs/decisions.md 23.
  */
 const CaptureControls = ({
   settings,
@@ -156,8 +141,7 @@ const CaptureControls = ({
       const wanted: Partial<Record<CaptureName, boolean>> = {
         [name]: !streams[name],
       };
-      // Infrared is the depth sensor's own pair - turning depth off takes it
-      // with it, rather than leaving a combination the server would refuse.
+      // Infrared needs depth, so turning depth off turns infrared off too.
       if (name === 'depth' && streams.depth && streams.infrared) {
         wanted.infrared = false;
       }
@@ -249,16 +233,9 @@ const CaptureControls = ({
 };
 
 /**
- * An `<img>` showing an MJPEG stream, which closes the stream when it goes.
- *
- * Measured in Chrome: removing an `<img>` whose source is a multipart stream
- * leaves the connection open, so each time the player hid this panel two more
- * were left behind. At six connections per host - Chrome's limit - the page's
- * next requests to the server, the player's frames and audio among them, queued
- * behind streams nobody was watching. Clearing `src` before removal closes it.
- *
- * The source is set here rather than in the markup, so that setting and
- * clearing it are one effect's two halves and cannot run out of order.
+ * An `<img>` showing an MJPEG stream, which closes the stream on unmount.
+ * Chrome keeps a removed `<img>`'s multipart connection open, and leaked ones
+ * exhaust its six-per-host limit; clearing `src` in the effect cleanup closes it.
  */
 const LiveImage = ({ src, alt }: { src: string; alt: string }) => {
   const image = useRef<HTMLImageElement>(null);
@@ -276,12 +253,8 @@ const LiveImage = ({ src, alt }: { src: string; alt: string }) => {
 };
 
 /**
- * Ask the server to try a device again.
- *
- * Shown only while the device has failed or is not detected: the server never
- * retries on its own, because a retry loop against a missing camera stalled
- * every request it served (docs/decisions.md 29). The status poll picks up
- * the result, so this only reports a refusal.
+ * Ask the server to try a device again. See docs/decisions.md 29.
+ * The status poll picks up the result, so this only reports a refusal.
  */
 const ReconnectButton = ({
   name,
@@ -320,14 +293,8 @@ const ReconnectButton = ({
 };
 
 /**
- * The camera and the array, each as its own device: connection state,
- * identity, what it is set to capture, and a live view of what it is
- * actually sensing right now.
- *
- * Independent of whether anything has started a recording - `devices.*`
- * reports what each SDK sees just by asking, the same way `make devices`
- * does, so a device reads as connected before a preview or a session ever
- * opens it.
+ * The camera and the array, each with its connection state, identity, capture
+ * settings and a live view, whether or not anything has opened it.
  */
 export const DevicesPanel = ({ devices, settings, recording, onChanged }: Props) => {
   const levels = useAudioLevels();
@@ -448,8 +415,7 @@ export const DevicesPanel = ({ devices, settings, recording, onChanged }: Props)
                   </g>
                 );
               })}
-              {/* The beamformed channel, at the centre: what the chip itself
-                  considers "the" signal once it has combined the four mics. */}
+              {/* The chip's beamformed channel, at the centre. */}
               <circle cx={100} cy={100} r={26} fill="none" stroke="var(--line)" />
               <circle
                 cx={100}

@@ -1,28 +1,8 @@
 """How the host's two clocks relate, measured rather than assumed.
 
-Two devices are being recorded and they hand out times on different clocks:
-
-* The camera's frame timestamps are **epoch milliseconds**. librealsense enables
-  ``global_time`` by default and fits the device's own clock onto the host's
-  ``CLOCK_REALTIME``, so what comes out of ``frame.get_timestamp()`` is directly
-  comparable to ``time.time()``. Measured on a D455: the fit is re-estimated
-  while streaming, which moves the mapping by about 10 ms over a minute.
-* The array's audio timestamps are ``CLOCK_MONOTONIC``. PortAudio's
-  ``inputBufferAdcTime`` shares an origin with ``time.monotonic()`` - measured on
-  a ReSpeaker at 16 kHz with 1024-sample blocks, the two differ by exactly one
-  block (64.0 ms, std 0.35 ms), which is the block's own length and not an
-  offset between clocks.
-
-``CLOCK_MONOTONIC`` is the axis everything is converted to. It is the one that
-cannot be moved: an NTP step correction changes ``CLOCK_REALTIME`` underneath a
-running recording, and a session whose timeline jumps backwards halfway through
-is not repairable afterwards. Realtime is still recorded - it is what says when
-the session happened - but as a series of measured pairs rather than as the axis
-itself.
-
-Nothing here imports a device, numpy or a web framework. It is the piece most
-worth testing and the piece that has to be right for anything else to mean
-anything.
+Camera frames carry epoch milliseconds, audio carries ``CLOCK_MONOTONIC``;
+``CLOCK_MONOTONIC`` is the axis, and realtime is kept as measured pairs. See
+docs/design.md "The one idea".
 """
 
 from __future__ import annotations
@@ -38,10 +18,8 @@ class ClockPair:
     Attributes:
         monotonic: ``time.monotonic()`` in seconds.
         realtime: ``time.time()`` in seconds since the epoch.
-        uncertainty: How long the pair of reads took, in seconds. The two
-            clocks cannot be read at the same instant, so this bounds how wrong
-            the pairing can be. Recorded rather than dropped because a pair
-            taken while the process was descheduled is worth distrusting.
+        uncertainty: How long the pair of reads took, in seconds, which
+            bounds how wrong the pairing can be.
     """
 
     monotonic: float
@@ -116,11 +94,8 @@ class ClockPair:
 def read_clocks() -> ClockPair:
     """Read both host clocks, bounding how far apart the readings were taken.
 
-    The realtime read is sandwiched between two monotonic reads and the midpoint
-    is kept, so the pairing error is measured - it lands in ``uncertainty`` -
-    rather than assumed to be zero. Typically well under 10 microseconds, and
-    occasionally much worse if the scheduler intervenes, which is exactly the
-    case worth being able to see.
+    The realtime read sits between two monotonic reads; their midpoint is kept
+    and their gap (typically under 10 us) becomes ``uncertainty``.
 
     Returns:
         The pair.
@@ -138,12 +113,8 @@ def read_clocks() -> ClockPair:
 class ClockTrack:
     """A series of clock pairs taken across a session.
 
-    A single pair, taken when the recording started, is enough to convert
-    between the axes - but only if the offset holds still, and it does not: NTP
-    slews ``CLOCK_REALTIME`` continuously, and can step it. Sampling throughout
-    means the camera's epoch timestamps can be converted using the offset that
-    was in force at the time, and means a step correction is visible afterwards
-    instead of silently smearing the timeline.
+    Sampled throughout because NTP slews and can step ``CLOCK_REALTIME``, so
+    the offset in force at each instant is known and a step stays visible.
 
     Not thread safe. One recorder owns one track.
     """
@@ -152,9 +123,7 @@ class ClockTrack:
         """Start an empty track.
 
         Args:
-            interval_s: Minimum seconds between kept samples. One second costs
-                3.6k entries an hour - negligible beside the frames - and is
-                fine enough to catch a step correction.
+            interval_s: Minimum seconds between kept samples.
         """
         self._interval_s = interval_s
         self._samples: list[ClockPair] = []
@@ -163,8 +132,8 @@ class ClockTrack:
         """Read the clocks, keeping the reading if enough time has passed.
 
         Args:
-            force: Keep the reading whatever the interval says. Used for the
-                first and last samples of a session, which anchor it.
+            force: Keep the reading whatever the interval says, as for a
+                session's first and last samples.
 
         Returns:
             The pair just read, whether or not it was kept.
@@ -195,10 +164,8 @@ class ClockTrack:
         Returns:
             The latest sample taken at or before ``monotonic``, falling back to
             the earliest sample if the instant precedes all of them, or None if
-            the track is empty.
-
-        A step correction makes interpolation across it meaningless, so this
-        picks a sample rather than blending two.
+            the track is empty. Not interpolated, since a step would make
+            blending meaningless.
         """
         if not self._samples:
             return None
@@ -215,9 +182,8 @@ class ClockTrack:
 
         Returns:
             The change in offset divided by the monotonic span, or None if the
-            track is too short or too brief to say. A value of a few tens is
-            ordinary NTP slew; a large one means the realtime clock was stepped
-            and epoch timestamps either side of it should not be compared.
+            track is too short to say. A few tens is ordinary NTP slew; a large
+            value means the realtime clock was stepped.
         """
         if len(self._samples) < 2:
             return None

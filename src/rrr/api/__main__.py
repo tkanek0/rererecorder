@@ -20,20 +20,14 @@ def main() -> None:
         format="%(asctime)s %(levelname)-7s %(name)s: %(message)s",
     )
     uvicorn.run(
-        # The app object itself, not the "api.app:app" import string: the
-        # string form re-imports by module name, which needs `rrr/` itself -
-        # not just the repository root - on sys.path to resolve the bare
-        # `api` package, and nothing arranges that when this runs as
-        # `python -m rrr.api`. Passing the object sidesteps the lookup
-        # entirely; only `--reload` or multiple workers need the string form,
-        # neither of which this uses.
+        # The object, not an import string: no module lookup is needed, and
+        # only --reload or multiple workers would require the string form.
         app,
         host=config.HOST,
         port=config.PORT,
         log_level="info",
-        # Finite: an MJPEG response ends only when its client disconnects, so
-        # an unbounded graceful shutdown never finishes - and a server that will
-        # not stop leaves the camera held.
+        # Finite: MJPEG responses never end on their own, and a server that
+        # will not stop keeps the camera held.
         timeout_graceful_shutdown=config.SHUTDOWN_TIMEOUT_S,
     )
 

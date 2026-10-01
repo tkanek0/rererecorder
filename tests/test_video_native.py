@@ -1,10 +1,7 @@
 """The v2 archive: raw infrared, YUYV colour, and zlib depth.
 
-These are the streams as the sensors produce them, which is the point - a
-recording that keeps the infrared pair can have its depth recomputed by a
-different stereo matcher years later, and one that keeps YUYV has not had a
-colour conversion baked into it. All three codecs are checked by decoding and
-comparing rather than by trusting the word "lossless".
+All three codecs are checked by decoding and comparing, not by trusting the
+word "lossless". See docs/decisions.md 3-5.
 """
 
 from __future__ import annotations
@@ -188,11 +185,7 @@ def test_an_unknown_depth_codec_is_refused(tmp_path, native) -> None:
 
 
 def test_zlib_depth_without_a_shape_is_refused(written_native, tmp_path) -> None:
-    """A zlib blob carries no dimensions, so the calibration is not optional.
-
-    Rather than reshape to whatever fits and hand back a plausible-looking
-    image, this must say it cannot be read.
-    """
+    """A zlib blob has no dimensions; without calibration it is refused, not guessed."""
     path, _ = written_native(count=1)
     import json
 
@@ -226,11 +219,7 @@ def test_yuyv_split_and_join_are_inverse(width: int) -> None:
 
 
 def test_the_split_separates_luma_from_chroma() -> None:
-    """Not just reversible - the planes have to be the right planes.
-
-    A reversible-but-wrong split would compress badly and mislead anyone
-    reading a plane directly, and the round-trip test alone cannot see it.
-    """
+    """The planes must be the right planes, which a round trip alone cannot see."""
     # Y=1, U=2 and Y=3, V=4 in successive pixels.
     packed = np.array([[0x0201, 0x0403]], dtype=np.uint16)
     y, u, v = split_yuyv(packed)
@@ -243,17 +232,9 @@ def test_the_split_separates_luma_from_chroma() -> None:
 
 
 def test_startup_discards_are_counted_apart_from_losses() -> None:
-    """The first few sets after pipeline.start are the syncer, not a fault.
+    """A duplicate before the first delivery is the syncer settling, not a fault.
 
-    A duplicate delivery - the SDK re-handing-out a frame it already gave
-    out - is the one remaining reason a set is discarded (decision 21 removed
-    the other one, streams disagreeing about the moment). Measured on a D455,
-    this happens within the same millisecond as ``pipeline.start`` and then
-    not again for the rest of the recording, so it is worth telling apart from
-    a duplicate found mid-stream, which is a real fault.
-
-    Reaches into the source's counter directly because the alternative is a
-    camera.
+    See docs/frame-loss.md, "What is still discarded, on purpose".
     """
     from rrr.video import LiveSource
 
@@ -291,11 +272,7 @@ def _imu_burst(count: int, *, start_ms: float = 1_788_000_000_000.0) -> list:
 
 
 def test_every_inertial_sample_survives(tmp_path, native) -> None:
-    """The point of the change: 480 Hz in, 480 Hz out.
-
-    The old format stored one sample per video frame, which at 30 fps against a
-    482 Hz accelerometer discarded 93% of what the sensor measured.
-    """
+    """480 Hz in, 480 Hz out. See docs/decisions.md 12."""
     path = str(tmp_path / "video.rrdb")
     original = _imu_burst(500)
 
@@ -322,11 +299,7 @@ def test_every_inertial_sample_survives(tmp_path, native) -> None:
 
 
 def test_the_measured_rate_is_reported(tmp_path, native) -> None:
-    """Measured from the timestamps, not taken from the configuration.
-
-    That is how a recording which stored one sample per frame gives itself
-    away: it reports 30 Hz where the sensor runs at 480.
-    """
+    """Measured from the timestamps, so a one-per-frame recording shows 30 Hz."""
     path = str(tmp_path / "video.rrdb")
     with ArchiveWriter(
         path, calibration=native, config=StreamConfig(motion=True)
@@ -352,8 +325,7 @@ def test_samples_carry_the_clock_so_they_can_be_placed(tmp_path, native, make_fr
         path,
         calibration=native,
         config=StreamConfig(motion=True),
-        # The anchor is read fresh from the host clocks by default - fixed
-        # here so the assertion below can lean on the synthetic OFFSET.
+        # Fixed, rather than read from the host, so OFFSET applies.
         clock_anchor=ClockPair(MONO, REAL),
     ) as writer:
         assert writer.append(
@@ -373,12 +345,7 @@ def test_samples_carry_the_clock_so_they_can_be_placed(tmp_path, native, make_fr
 
 
 def test_a_v2_recording_still_yields_its_samples(tmp_path, native, make_frames) -> None:
-    """One per frame is a fourteenth of the data, but it is not wrong.
-
-    Recordings in that format exist. They are read through the same call and
-    split back into one sample per stream, so a consumer sees one shape either
-    way - and `motion_rate` tells it which it got.
-    """
+    """v2's one-per-frame samples read through the same call, in the same shape."""
     path = str(tmp_path / "video.rrdb")
     with ArchiveWriter(
         path, calibration=native, config=StreamConfig(motion=True)

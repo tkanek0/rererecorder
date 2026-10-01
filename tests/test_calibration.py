@@ -1,12 +1,7 @@
 """What a recording says about the rig it was made with.
 
-Depth and colour were always recorded. The infrared pair and the inertial
-sensor were not, and without them a session cannot be used for anything that
-fuses the two: a stereo pair with no baseline has no scale, and inertial
-samples with no transform to the camera are numbers in an unnamed frame.
-
-Nothing here opens a device. What is tested is that the values survive the
-archive, and that an archive written before they existed still opens.
+Infrared and inertial calibration must survive the archive, and an archive
+written before they existed must still open. No device is opened.
 """
 
 from __future__ import annotations

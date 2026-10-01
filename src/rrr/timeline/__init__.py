@@ -1,10 +1,7 @@
 """The clock layer: what time it was, on which clock, and how well it is known.
 
-Imports nothing but numpy - no device, no web framework - so every claim it
-makes can be tested without a camera or an array attached. That matters more
-here than anywhere else in this repository: the whole point of recording two
-devices at once is that the result can be lined up afterwards, and if the
-arithmetic in this package is wrong, nothing downstream can detect it.
+Imports nothing but numpy - no device, no web framework - so all of it can be
+tested without hardware.
 """
 
 from .audio_clock import (

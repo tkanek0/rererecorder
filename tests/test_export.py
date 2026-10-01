@@ -1,10 +1,7 @@
 """The neutral layout: what leaves this repository for anything else to read.
 
-`video.rrdb` is shaped for writing 54 MB/s. Nothing outside this repository
-should have to know that, so a session is exported as plain files. The tests
-here build a small but complete session - both devices, inertial samples, a
-direction track and a mark - and check that the export says what the recording
-said, including where it says nothing.
+A small complete session is exported, and the export must say what the
+recording said, including where it says nothing. See docs/decisions.md 17.
 """
 
 from __future__ import annotations

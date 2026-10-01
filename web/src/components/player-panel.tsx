@@ -43,14 +43,7 @@ const KIND_LABELS: Record<PreviewKind, string> = {
 
 /**
  * Play one recorded session back, one frame at a time.
- *
- * Frames are fetched individually rather than as a stream. That costs a request
- * per frame - about 16 ms of server work, so 30 fps is comfortable - and buys
- * the two things a stream cannot give: seeking to an arbitrary frame, and
- * knowing which frame is on screen. The server reports each frame's own capture
- * time in a header, so the clock shown is the recording's, not one computed by
- * assuming frames are evenly spaced. They are not: a set the camera mispaired
- * leaves a gap.
+ * See docs/decisions.md 10 and docs/features.md "The page".
  */
 export const PlayerPanel = ({ sessionId, onClose }: Props) => {
   const [detail, setDetail] = useState<SessionDetail | null>(null);
@@ -61,26 +54,20 @@ export const PlayerPanel = ({ sessionId, onClose }: Props) => {
   const [meta, setMeta] = useState<FrameMeta | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  // The position lives in a ref as well as in state: the playback loop reads it
-  // to decide what to fetch next, and a state dependency would restart the loop
-  // on every frame.
+  // Also kept in a ref so the playback loops can read it without restarting.
   const indexRef = useRef(0);
   const [index, setIndex] = useState(0);
   const objectUrl = useRef<string | null>(null);
   const panel = useRef<HTMLElement>(null);
 
-  // When the session has audio, the audio element is the clock: it cannot be
-  // paused and resumed without a gap the ear notices, whereas a late video
-  // frame is simply a late video frame. Frames are then chased rather than
-  // scheduled, which is why `loading` exists - it drops requests rather than
-  // queueing them when decoding falls behind.
+  // With audio, the audio element is the clock; `loading` drops frame requests
+  // rather than queueing them when fetching falls behind.
   const audioRef = useRef<HTMLAudioElement>(null);
   const loading = useRef(false);
   const [frameTimes, setFrameTimes] = useState<[number, number][]>([]);
   const [channel, setChannel] = useState(0);
 
-  // The panel appears below the live preview, so opening it would otherwise
-  // leave the transport controls off screen.
+  // Bring the transport controls on screen when the panel opens.
   useEffect(() => {
     panel.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
   }, [sessionId]);
@@ -119,8 +106,7 @@ export const PlayerPanel = ({ sessionId, onClose }: Props) => {
   const show = useCallback(
     async (at: number): Promise<void> => {
       const loaded = await loadFrame(sessionId, at, kind, 960);
-      // Revoked as soon as it is replaced: a blob URL holds its bytes until it
-      // is, and 40 KB a frame at 30 fps is 1.2 MB a second leaked otherwise.
+      // Revoke the previous blob URL, or every frame's bytes leak.
       if (objectUrl.current) URL.revokeObjectURL(objectUrl.current);
       objectUrl.current = loaded.url;
       setSrc(loaded.url);
@@ -157,10 +143,8 @@ export const PlayerPanel = ({ sessionId, onClose }: Props) => {
     );
   }, [detail, kind, playing, show]);
 
-  // Audio-led playback: the audio element runs, and each animation frame asks
-  // which video frame belongs to its current position. Frames that cannot be
-  // fetched in time are skipped rather than queued - the sound is the thing
-  // that must not stutter, and a dropped frame during playback costs nothing.
+  // Audio-led playback: each animation frame shows the video frame nearest the
+  // audio position, skipping any that cannot be fetched in time.
   useEffect(() => {
     if (!playing || !hasAudio || audioStart === null || frameTimes.length === 0) {
       return;
@@ -201,10 +185,8 @@ export const PlayerPanel = ({ sessionId, onClose }: Props) => {
     };
   }, [playing, hasAudio, audioStart, frameTimes, speed, show]);
 
-  // Frame-led playback, for a session with no audio. Chained rather than on an
-  // interval: the next frame is requested only once the previous has arrived,
-  // so a slow server makes playback slower rather than making it queue up
-  // requests it cannot serve.
+  // Frame-led playback, without audio. Chained rather than on an interval, so
+  // a slow server slows playback instead of queueing requests.
   useEffect(() => {
     if (!playing || !detail || hasAudio) return;
     let cancelled = false;
@@ -240,7 +222,6 @@ export const PlayerPanel = ({ sessionId, onClose }: Props) => {
     };
   }, [playing, detail, hasAudio, last, fps, speed, show]);
 
-  // Nothing left holding bytes once the panel goes away.
   useEffect(
     () => () => {
       if (objectUrl.current) URL.revokeObjectURL(objectUrl.current);
@@ -248,13 +229,8 @@ export const PlayerPanel = ({ sessionId, onClose }: Props) => {
     [],
   );
 
-  // Pause when the tab goes away, rather than pretending to still be playing.
-  //
-  // Chrome throttles timers in a hidden tab: measured, a setTimeout(10) in a
-  // background tab took 557 ms, so the loop would crawl at under 2 fps while
-  // the button still said "Pause". Stopping is honest, and it stops fetching
-  // frames nobody is looking at. Resuming is left to the person coming back -
-  // playback restarting on its own would be a surprise.
+  // Pause when the tab is hidden: Chrome throttles background timers. See
+  // docs/features.md "The page". Resuming is left to the user.
   useEffect(() => {
     const onVisibility = () => {
       if (document.hidden) setPlaying(false);
@@ -292,8 +268,7 @@ export const PlayerPanel = ({ sessionId, onClose }: Props) => {
         <p className="error">{detail.archive.error}</p>
       ) : null}
 
-      {/* Present but not shown: the transport below drives it, and a second
-          set of controls would only disagree with the first. */}
+      {/* No controls of its own: the transport below drives it. */}
       {hasAudio ? (
         <audio
           ref={audioRef}
@@ -314,8 +289,7 @@ export const PlayerPanel = ({ sessionId, onClose }: Props) => {
           <div className="transport">
             <button
               onClick={() => {
-                // The effect starts and stops the audio; this only flips the
-                // intent, so that one place owns the element.
+                // The playback effect owns the audio element; this only flips intent.
                 setPlaying((was) => !was);
               }}
               disabled={!detail}
@@ -336,8 +310,7 @@ export const PlayerPanel = ({ sessionId, onClose }: Props) => {
               onChange={(event) => seek(Number(event.target.value))}
             />
             <span className="counter">
-              {/* Index, not position: it is the archive's own number, and it
-                  is what the frame endpoint takes. */}
+              {/* The archive's own frame index, not a position. */}
               {index} / {last}
               {elapsed === null ? '' : ` · ${elapsed.toFixed(2)}s`}
             </span>

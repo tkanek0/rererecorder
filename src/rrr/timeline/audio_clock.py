@@ -1,25 +1,8 @@
 """When each audio sample in the file was actually captured.
 
-A WAV file has no timestamps. It has a sample rate, which invites the assumption
-that sample *n* was captured at ``start + n / rate`` - and that assumption fails
-in two ways that both matter here:
-
-* **The nominal rate is not the real one.** The array clocks its own converter,
-  and a USB audio device's crystal is not the host's. An error of 100 ppm - well
-  within what these devices exhibit - is 0.36 s over an hour, which is a lip-sync
-  failure against video that has its own, correct, clock.
-* **Samples go missing.** An input overflow drops audio that never reaches the
-  file, so every sample after it sits earlier in the file than it was captured.
-  Unrecorded, the timeline silently contracts.
-
-This module keeps a measured point per capture block - the absolute position of
-the block's first sample *in the file*, and the ADC time of that sample - and
-writes them beside the audio. That turns "sample to time" from an assumption into
-a measurement, and makes the two failures above visible: the first as a fitted
-rate that differs from the nominal one, the second as a residual that steps.
-
-The recorder is responsible for keeping file position and capture continuous by
-filling a detected gap with silence. This module is what checks that it did.
+Measured ``(file sample, ADC time)`` points written beside the WAV, so sample
+to time is fitted rather than assumed from the nominal rate, and gaps the
+recorder filled with silence are recorded. See docs/features.md "The array".
 """
 
 from __future__ import annotations
@@ -39,9 +22,8 @@ class AudioClockPoint:
     """When one block of audio was captured, and where it landed in the file.
 
     Attributes:
-        sample: Absolute index, in the file, of the block's first sample. Counts
-            silence inserted to fill a gap, because the point of the index is to
-            address the file.
+        sample: Absolute index, in the file, of the block's first sample,
+            counting inserted silence.
         monotonic: ``CLOCK_MONOTONIC`` time at which that sample entered the
             converter, from PortAudio's ``inputBufferAdcTime``.
         filled: Samples of silence inserted immediately before this block to
@@ -77,13 +59,7 @@ class AudioClockPoint:
 
 
 class AudioClockWriter:
-    """Appends clock points beside a recording, one JSON object per line.
-
-    JSON lines rather than a column in the manifest: at 16 kHz with 1024-sample
-    blocks this is 15.6 entries a second, so an hour is 56k of them. That is
-    small next to the audio and far too large to sit inside a file meant to be
-    read at a glance.
-    """
+    """Appends clock points beside a recording, one JSON object per line."""
 
     def __init__(self, path: str) -> None:
         """Open the sidecar for writing.
@@ -137,17 +113,13 @@ class TimelineReport:
         points: How many measurements the sidecar holds.
         span_s: Seconds between the first and last measurement.
         nominal_rate: The rate the file's header claims.
-        measured_rate: Rate fitted to the measurements, in Hz. What the
-            converter actually ran at, as the host observed it.
+        measured_rate: Rate fitted to the measurements, in Hz.
         rate_error_ppm: How far the measured rate is from the nominal one.
-            Tens of ppm is an ordinary crystal; hundreds means a recording
-            longer than a few minutes will visibly drift against the video.
-        residual_rms_ms: Scatter of the measurements about the fitted line.
-            This is the jitter of the ADC timestamps themselves; measured at
-            0.35 ms on a ReSpeaker.
-        residual_max_ms: Worst single departure from the fitted line. Much
-            larger than the RMS means something discontinuous happened - a
-            dropped block that was not filled, or the process being starved.
+            Tens of ppm is an ordinary crystal.
+        residual_rms_ms: Scatter of the measurements about the fitted line,
+            i.e. the ADC timestamps' own jitter.
+        residual_max_ms: Worst single departure from the fitted line. Far above
+            the RMS means a discontinuity, such as an unfilled drop.
         filled: Samples of silence inserted to replace dropped audio.
     """
 
@@ -191,10 +163,8 @@ class TimelineReport:
 class AudioTimeline:
     """Maps between a file's sample positions and the monotonic clock.
 
-    Built from the measured points rather than from the nominal rate, so the
-    mapping is what was observed. With fewer than two points there is nothing to
-    fit and the nominal rate is used, which is said plainly in the report rather
-    than hidden.
+    Fitted to the measured points; with fewer than two, the nominal rate is
+    used and the report's measured fields are None.
     """
 
     def __init__(self, points: list[AudioClockPoint], rate: int) -> None:
@@ -218,9 +188,7 @@ class AudioTimeline:
         self._times = np.array([point.monotonic for point in self._points], dtype=np.float64)
 
         if len(self._points) >= 2:
-            # Seconds per sample and the intercept, in one least-squares fit.
-            # polyfit rather than a hand-rolled normal equation so that the
-            # conditioning is somebody else's problem.
+            # Seconds per sample and the intercept, by least squares.
             slope, intercept = np.polyfit(self._samples, self._times, 1)
             self._slope = float(slope)
             self._intercept = float(intercept)
@@ -266,9 +234,8 @@ class AudioTimeline:
         """When a sample position in the file was captured.
 
         Args:
-            sample: Sample index in the file. May be fractional, and may sit
-                outside the measured range - the fitted line extrapolates,
-                which is what a query about the last partial block needs.
+            sample: Sample index in the file. May be fractional or outside
+                the measured range, which extrapolates.
 
         Returns:
             The monotonic time of that sample.
@@ -282,9 +249,8 @@ class AudioTimeline:
             monotonic: A ``CLOCK_MONOTONIC`` time.
 
         Returns:
-            The sample index, fractional. Negative or past the end of the file
-            if the instant falls outside the recording; the caller decides
-            whether that is an error.
+            The sample index, fractional; outside the file if the instant is
+            outside the recording.
         """
         return (monotonic - self._intercept) / self._slope
 
@@ -301,8 +267,7 @@ class AudioTimeline:
         """Summarise what the measurements say about this recording.
 
         Returns:
-            The report. Read the rate error and the maximum residual: those are
-            the two numbers that say whether audio can be trusted against video.
+            The report.
         """
         measured = self.measured_rate
         residuals = self.residuals_ms() if len(self._points) >= 2 else None

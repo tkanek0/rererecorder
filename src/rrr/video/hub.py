@@ -1,28 +1,9 @@
-"""Fan-out of the newest frame set to however many consumers want it.
+"""Fan-out of one ``FrameSource`` to however many consumers want it.
 
-A ``FrameSource`` can be iterated exactly once by exactly one reader, which is
-awkward when a web server, an analysis pass and a point-cloud channel all want
-the same frames. The hub reads the source on its own thread and lets anyone ask
-for the most recent result.
-
-Two decisions shape it, both borrowed from what the THETA playground learned:
-
-* Only the newest set is kept **for readers that poll**. A preview wants "what
-  the camera sees now" and gains nothing from a queue of stale frames.
-* A recorder wants the opposite, and polling cannot give it: ``latest`` hands
-  back whatever arrived most recently, so a reader that falls a frame behind
-  loses one and cannot tell. Recording is what this repository is for, so
-  there is a second way out - a listener, called on the hub's own thread for
-  every set, in order, with nothing dropped. What it must not do is take long:
-  it runs before the next frame can be published.
-* The source is reference counted. It opens when the first consumer arrives and
-  closes shortly after the last one leaves, so an idle server does not hold the
-  camera - which matters more here than it did there, because holding it stops
-  anything else on the machine from opening it at all.
-
-A failure is not retried. The hub stops and stays stopped until someone calls
-:meth:`FrameHub.reconnect` - see docs/decisions.md 29 for what a retry loop
-cost.
+Pollers get the newest set via ``latest``; recorders get every set via a
+listener (docs/decisions.md 7, docs/design.md "The camera is shared"). The
+source is reference counted and closes after an idle period. A failure is not
+retried until :meth:`FrameHub.reconnect` (docs/decisions.md 29).
 """
 
 from __future__ import annotations
@@ -38,12 +19,8 @@ from .types import Calibration, DeviceInfo, FrameSet
 
 logger = logging.getLogger(__name__)
 
-#: How long the source stays open after the last consumer leaves.
-#:
-#: Without this, a series of one-shot requests would reopen the device every
-#: time, and a RealSense pipeline takes on the order of a second to start -
-#: plus the auto-exposure needs a few frames to settle, so the first image
-#: after a restart is also the worst one.
+#: How long the source stays open after the last consumer leaves, so one-shot
+#: requests do not pay a ~1 s pipeline start and auto-exposure settling each.
 IDLE_SHUTDOWN_S = 10.0
 
 
@@ -73,34 +50,28 @@ class FrameHub:
         self._released_at = 0.0
         self._generation = 0
         self._wanted_generation = 0
-        #: Index below which frames are from a superseded source. Without it a
-        #: consumer that asks for "the current frame" right after a restart is
-        #: handed one from before it - which means the calibration that comes
-        #: back describes the resolution the caller just changed away from.
+        #: Index below which frames are from a superseded source, so a reader
+        #: right after a restart does not get the old configuration's frame.
         self._floor = 0
 
         self._source: FrameSource | None = None
         self._latest: FrameSet | None = None
-        #: Counted by the hub rather than taken from the frame set, so that it
-        #: keeps increasing across a restart. A consumer polling with `after`
-        #: would otherwise be handed frames it thinks it has already seen.
+        #: Counted by the hub, not the source, so it keeps increasing across a
+        #: restart and `after` stays meaningful.
         self._index = 0
-        #: Set when the source fails, and kept until reconnect() or restart():
-        #: while it is set, nothing opens the source again on its own.
+        #: Set when the source fails; nothing reopens it until reconnect() or
+        #: restart().
         self._failed = False
-        #: Why the source last failed. Cleared along with _failed, so it always
-        #: describes the failure the hub is currently stopped by, if any.
+        #: Why the source failed; cleared along with _failed.
         self._error: str | None = None
         self._error_at = 0.0
         self._device: DeviceInfo | None = None
-        #: Smoothed frame *interval*, not frame rate. Averaging instantaneous
-        #: rates instead reads high whenever delivery is jittery, because the
-        #: mean of 1/dt exceeds 1/mean(dt): alternating 5 ms and 60 ms gaps
-        #: average to 30.8 fps but their reciprocals average to 108.
+        #: Smoothed frame *interval*, not rate: mean(1/dt) reads high under
+        #: jitter, since it exceeds 1/mean(dt).
         self._interval = 0.0
         self._last_at = 0.0
-        #: Called for every set, in order. Held under its own lock so that
-        #: adding one cannot deadlock against a publish in progress.
+        #: Called for every set, in order. Own lock, so adding one cannot
+        #: deadlock against a publish in progress.
         self._listeners: list[Callable[[FrameSet], None]] = []
         self._listener_lock = threading.Lock()
 
@@ -130,16 +101,9 @@ class FrameHub:
         """Call ``listener`` for every frame set, in order, dropping none.
 
         Args:
-            listener: Called on the hub's reader thread with each set as it
-                arrives. It must return quickly - the next frame cannot be
-                published until it does - and must not raise. A raise is
-                logged and swallowed, because one broken consumer taking the
-                camera away from the others would be a worse failure than
-                whatever it was complaining about.
-
-        This is what recording uses. ``latest`` cannot: it returns the newest
-        set, so a consumer that is briefly late silently misses one, and a
-        recorder that misses frames without knowing is worse than useless.
+            listener: Called on the hub's reader thread with each set. It
+                must return quickly - the next frame waits for it - and should
+                not raise; a raise is logged and swallowed.
 
         Registering does not hold the source open; pair it with ``acquire``.
         """
@@ -151,8 +115,7 @@ class FrameHub:
 
         Args:
             listener: The callable passed to :meth:`add_listener`. Removing one
-                that was never added is not an error - a recorder that failed
-                to start still tidies up.
+                that was never added is not an error.
         """
         with self._listener_lock:
             if listener in self._listeners:
@@ -167,9 +130,7 @@ class FrameHub:
     def reconnect(self) -> None:
         """Clear a failure and, if anyone is waiting, open the source again.
 
-        The only way out of a failure besides :meth:`restart`. Nothing calls
-        it automatically: it stands for a person deciding the device is worth
-        trying again, typically after plugging it back in.
+        Never called automatically; see docs/decisions.md 29.
         """
         with self._lock:
             self._clear_failure()
@@ -179,15 +140,9 @@ class FrameHub:
     def restart(self) -> None:
         """Close the current source and open a fresh one.
 
-        Used when the requested stream configuration changed: the SDK settles
-        resolution and frame rate at pipeline start, so there is no way to
-        change them in place. Being asked for explicitly, it also clears a
-        failure, as :meth:`reconnect` does.
-
-        With no consumers this only records the intent. Starting the reader
-        would spawn a thread that immediately decides it should not be running -
-        briefly reporting the hub as active while it did - and the next consumer
-        to arrive opens with the new configuration regardless.
+        Used when the stream configuration changed, which the SDK only accepts
+        at pipeline start. Also clears a failure. With no consumers it only
+        records the intent; the next consumer opens with the new configuration.
         """
         with self._lock:
             self._wanted_generation += 1
@@ -268,12 +223,8 @@ class FrameHub:
     def source(self) -> FrameSource | None:
         """The source currently open, or None if the hub is not streaming.
 
-        A way to reach controls that belong to the device rather than to the
-        stream - recording, most of all, which can be paused and resumed without
-        restarting the pipeline. The hub owns this object's lifetime, so it may
-        be closed and replaced between the moment this returns and the moment a
-        caller uses it: expect a call on the result to raise, and treat that as
-        "the stream restarted" rather than as a failure.
+        For device-level controls. The hub may replace it at any moment, so a
+        call on the result may raise; treat that as "the stream restarted".
         """
         with self._lock:
             return self._source
@@ -289,16 +240,12 @@ class FrameHub:
 
         Args:
             timeout: Seconds to wait for a set newer than ``after``.
-            after: Only return a set whose index exceeds this. Pass the index of
-                the set you last handled to avoid handling it twice; pass 0 to
-                take whatever is current - which, after a restart, means waiting
-                for the new source rather than being handed the old one's last
-                frame.
+            after: Only return a set whose index exceeds this; 0 takes the
+                current one (after a restart, the new source's first).
 
         Returns:
             The frame set, or None if nothing new arrived within the timeout.
-            None at once, without waiting, while the hub has failed: nothing
-            will arrive until someone reconnects it.
+            None at once while the hub has failed.
         """
         deadline = time.monotonic() + timeout
         with self._updated:
@@ -333,8 +280,6 @@ class FrameHub:
         now = frame_set.received_monotonic
         with self._updated:
             self._index += 1
-            # The source's own counter restarts with each source; the hub's does
-            # not, and `after` compares against the hub's.
             self._latest = dataclasses.replace(frame_set, index=self._index)
             if self._last_at:
                 interval = now - self._last_at
@@ -348,8 +293,7 @@ class FrameHub:
             published = self._latest
             self._updated.notify_all()
 
-        # Outside the condition: a listener runs arbitrary code, and holding
-        # the lock across it would block every poller for its duration.
+        # Outside the condition, so a slow listener does not block pollers.
         with self._listener_lock:
             listeners = list(self._listeners)
         for listener in listeners:
@@ -361,8 +305,7 @@ class FrameHub:
     def _run(self) -> None:
         """Open the source and publish its frames until told to stop.
 
-        Loops only to follow a restart. A failure - opening, or a stream that
-        stops delivering - ends the thread rather than retrying.
+        Loops only to follow a restart; a failure ends the thread.
         """
         logger.info("frame hub starting")
         failure: str | None = None
@@ -400,9 +343,8 @@ class FrameHub:
                 self._failed = True
                 self._error = failure
                 self._error_at = time.monotonic()
-                # Detached as this thread's last act, so that a reconnect
-                # arriving while it is still returning starts a fresh reader
-                # instead of finding this one alive and leaving it at that.
+                # Detach, so a reconnect arriving while this thread is still
+                # returning starts a fresh reader instead of finding it alive.
                 if self._thread is threading.current_thread():
                     self._thread = None
             self._updated.notify_all()

@@ -2,14 +2,10 @@
 
     uv run python -m rrr.tools.record --seconds 20
     uv run python -m rrr.tools.record --session kitchen-test --no-doa
-
-    # color only, uncompressed: the one combination measured to hold 30 fps
-    # with nothing dropped on native Windows - see docs/windows-native.md.
     uv run python -m rrr.tools.record --no-depth --no-infrared --color-codec raw
 
 The same :class:`~recorder.SessionRecorder` the server uses, with a progress
-line instead of a browser. Nothing here needs the web stack, which is the point:
-a machine that only records does not need one installed.
+line instead of a browser, and no web stack needed.
 """
 
 from __future__ import annotations
@@ -32,9 +28,7 @@ def main(argv: list[str] | None = None) -> int:
         argv: Command line arguments, or None to read them from the process.
 
     Returns:
-        A process exit status. Non-zero when nothing was recorded, or when a
-        recording finished with holes in it - a caller scripting this should
-        find out without parsing the output.
+        A process exit status; see ``_status``.
     """
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument(
@@ -124,8 +118,7 @@ def main(argv: list[str] | None = None) -> int:
         _wait(recorder, args.seconds, quiet=args.quiet)
         manifest = recorder.stop()
     finally:
-        # The array is left in a state where the next open fails if its capture
-        # stream is not closed before the process exits.
+        # An unclosed capture stream makes the array's next open fail.
         recorder.close()
 
     _report(manifest, paths.directory)
@@ -143,14 +136,11 @@ def _build_streams(args: argparse.Namespace) -> StreamConfig:
         object, when none of the three flags was given.
 
     Raises:
-        ValueError: If the combination asked for is not valid - most commonly
-            turning off depth while infrared is still on, since infrared is
-            the depth sensor's own pair. Not checked here: it is
-            ``StreamConfig`` itself that refuses it.
+        ValueError: If ``StreamConfig`` refuses the combination, e.g. infrared
+            without depth.
 
-    Skipped entirely when ``--no-video`` is also given: a configuration
-    nothing will use should not be able to fail a recording that does not need
-    it, e.g. ``--no-video --no-color --no-depth``.
+    Skipped when ``--no-video`` is given, so an unused configuration cannot
+    fail the recording.
     """
     streams = config.DEFAULT_STREAMS
     if args.no_video or not (args.no_color or args.no_depth or args.no_infrared):
@@ -191,9 +181,8 @@ def _wait(recorder: SessionRecorder, seconds: float, *, quiet: bool) -> None:
         seconds: How long to record, or 0 to wait for a signal.
         quiet: Suppress the progress line.
 
-    Ctrl-C stops the recording rather than killing the process: the archive has
-    to be closed and the manifest finished, and a session abandoned mid-write is
-    the one case where the files are hard to interpret afterwards.
+    SIGINT and SIGTERM stop the recording cleanly instead of killing the
+    process, so the archive and manifest are finished.
     """
     stopping = False
 
@@ -315,8 +304,8 @@ def _overlap(manifest: SessionManifest) -> float | None:
         manifest: The finished session.
 
     Returns:
-        The overlap, or None if only one track exists. Computed on the monotonic
-        axis, which is the whole reason both tracks carry one.
+        The overlap on the shared monotonic axis, or None if only one track
+        exists.
     """
     video, audio = manifest.video, manifest.audio
     if video is None or audio is None:
@@ -337,12 +326,11 @@ def _status(manifest: SessionManifest) -> int:
 
     Returns:
         0 if both tracks recorded cleanly, 1 if nothing was recorded, 2 if
-        something was lost. Scriptable without parsing the report.
+        something was lost.
     """
     if manifest.video is None and manifest.audio is None:
         return 1
-    # A track that was asked for and recorded nothing is a failure even when
-    # nothing raised: an empty WAV beside a full archive is the shape a device
+    # An empty track is a failure even if nothing raised: it is what a device
     # left in a bad state produces.
     if manifest.video is not None and not manifest.video.frames:
         return 1

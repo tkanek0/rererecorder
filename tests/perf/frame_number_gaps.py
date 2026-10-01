@@ -1,18 +1,9 @@
 """Reproduce decision 21's frame_number gap check.
 
-Decision 21 stopped discarding a set for colour/depth timestamp skew, on the
-strength of a specific check: does the SDK's own per-stream `frame_number`
-ever skip - which is real, device-reported loss - independent of whether this
-repository's own timestamp handling would have paired or discarded the set.
-A timestamp disagreement between streams is not evidence of loss on its own;
-a gap in a stream's own numbering is.
-
-This drives `rrr.video.source.LiveSource` directly - the same class the
-recorder uses, so the same stream configuration, emitter sequencing (decision
-18) and calibration apply - and watches `LiveSource.frame_numbers` after every
-set. Verified in decision 21 with both AE on and AE off; AE off is also where
-a slow timestamp drift showed up (still legitimate frames, no gaps), so run
-both if colour/depth timing is what is actually in question:
+Watches the SDK's own per-stream `frame_number` for skips (real,
+device-reported loss) through `LiveSource`, as the recorder uses it. See
+docs/decisions.md 21. Run with AE both on and off if colour/depth timing is in
+question:
 
     uv run python tests/perf/frame_number_gaps.py --seconds 60
     uv run python tests/perf/frame_number_gaps.py --seconds 60 --auto-exposure off
@@ -37,10 +28,6 @@ def _apply_auto_exposure(source: LiveSource, mode: str) -> None:
     Args:
         source: An already-open source.
         mode: ``"on"``, ``"off"`` or ``"leave"`` (the default - untouched).
-
-    AE off is what decision 21 found introduces a slow timestamp drift with
-    occasional multi-frame "slips" - still no lost frames, just a different
-    timing pattern worth being able to reproduce on demand.
     """
     if mode == "leave":
         return
@@ -61,8 +48,6 @@ def _collect(source: LiveSource, seconds: float) -> dict[str, list[int]]:
     """
     numbers: dict[str, list[int]] = collections.defaultdict(list)
     deadline = time.monotonic() + seconds
-    # The frame sets themselves are not needed - only the SDK's own per-stream
-    # counters, read back through `frame_numbers` after each one arrives.
     for _ in source.frames():
         for stream, number in source.frame_numbers.items():
             numbers[stream].append(number)
@@ -75,8 +60,8 @@ def _report(name: str, sequence: list[int]) -> bool:
     """Print one stream's gap analysis.
 
     Returns:
-        Whether the stream showed no gap - a jump other than 0 (a set this
-        repository's own duplicate check would also have skipped) or 1.
+        Whether the stream showed no gap, i.e. no jump other than 0
+        (a duplicate) or 1.
     """
     if len(sequence) < 2:
         print(f"{name:>8}: only {len(sequence)} frame(s), nothing to check")

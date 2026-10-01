@@ -283,10 +283,8 @@ def test_listing_of_a_missing_root_is_empty(tmp_path) -> None:
 
 
 def test_a_manifest_from_before_mispairing_was_retired_reads_back_as_undated() -> None:
-    """Old ``skipped`` and ``skipped_unpaired`` counted a reason recording no
-    longer has: a set no longer gets discarded for its streams disagreeing
-    about the moment (decision 21), so neither old field means anything a
-    current recording can produce, and neither is read back.
+    """Old ``skipped``/``skipped_unpaired`` counted skew discards, which no longer
+    happen, so neither is read back. See docs/decisions.md 21.
     """
     track = VideoTrack.from_dict(
         {"frames": 290, "dropped": 0, "skipped": 45, "skipped_unpaired": 45}
@@ -311,10 +309,8 @@ def test_skipped_duplicate_is_read_over_a_stale_total() -> None:
 
 # -- the rig ------------------------------------------------------------------
 #
-# The mounting is expected to be filled in by hand, in the file, long after the
-# recording. That only works if the manifest declares the field: an unknown key
-# would be dropped the first time anything rewrote the session - which
-# `calibrate --apply` does.
+# Filled in by hand after recording, so the manifest must declare the field or
+# a rewrite (e.g. `calibrate --apply`) would drop it.
 
 NOMINAL = Rig(
     source="nominal",

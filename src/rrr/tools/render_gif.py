@@ -1,17 +1,7 @@
 """Make a short GIF from a recorded colour stream, optionally showing its sound.
 
-Every ``--stride``-th colour frame becomes one GIF frame. Two strips can be
-added beneath it, each placed on the video clock the same way ``render_mp4``
-places its soundtrack:
-
-- ``--volume``: the whole recording's loudness (RMS per pixel column, linear,
-  scaled to its loudest column) with a playhead at the frame's time.
-- ``--waveform``: the samples of the ``--window-s`` seconds ending at the
-  frame's time, on one amplitude scale shared by the whole recording.
-
-Like the MP4, this is a presentation copy: the archive and WAV remain the
-measurements, and audio is only as aligned as the recorded clocks and a
-measured ``calibration.offset_s`` make it.
+A presentation copy, like ``render_mp4``; see docs/features.md "MP4 review
+copies".
 
 Usage::
 
@@ -166,8 +156,7 @@ def render(
 ) -> GifReport:
     """Render one raw session as an animated GIF.
 
-    A temporary sibling file is replaced into place only after the encoder has
-    closed successfully. The source recording is never modified.
+    Written to a temporary sibling and moved into place only on success.
 
     Args:
         directory: The recorded session.
@@ -399,11 +388,8 @@ def _waveform_scale(samples: np.ndarray) -> float:
 def _encode(output: Path, images: Any, delay: int, colours: int) -> None:
     """Encode BGR images as a looping GIF with a palette chosen per frame.
 
-    OpenCV's own GIF writer was tried first: with one global palette it is
-    about three times further from the source than a palette per frame, and
-    asking it for local palettes fails inside the encoder. FFmpeg's
-    ``palettegen``/``paletteuse`` in single-frame mode is what gives each frame
-    its own palette here.
+    FFmpeg rather than OpenCV: OpenCV's global palette measured about 3x further
+    from the source, and its local-palette mode fails inside the encoder.
     """
     iterator = iter(images)
     first = next(iterator, None)

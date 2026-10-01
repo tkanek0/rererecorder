@@ -1,8 +1,6 @@
 """Recording both devices at once, into one self-describing session.
 
-Depends on :mod:`video`, :mod:`audio` and :mod:`timeline`, and on no web
-framework: the CLI records without a server running, and the server records
-through exactly this code rather than a copy of it.
+Imports no web framework; the CLI and the server both record through this.
 """
 
 from .audio_writer import AudioStats, AudioWriter

@@ -1,19 +1,8 @@
 """Turning measurements into pictures for the browser.
 
-Presentation only. Nothing recorded depends on anything here, and nothing here
-is used to decide anything - which is why it lives in ``server/`` rather than in
-``video/``: a preview is a choice a viewer makes, not a property of the
-measurement. Depth is raw z16 everywhere else in this repository; this is the
-one place it acquires a range and a colour scale.
-
-Images are carried as BGR because that is what OpenCV encodes, and because the
-colour stream arrives as YUYV whose conversion lands in BGR directly. Converting
-to RGB in between would cost a pass over 1 MB per frame to arrive back where it
-started.
-
-Everything is downscaled before encoding. A 1280x800 JPEG is about 100 KB and
-looks no better in a 640-wide panel, so full size would spend CPU and bandwidth
-on pixels the page throws away.
+Presentation only: nothing recorded depends on this, and it is the one place
+depth acquires a range and a colour scale. Images stay BGR, as OpenCV encodes
+them, and are downscaled before encoding.
 """
 
 from __future__ import annotations
@@ -28,11 +17,8 @@ from rrr.video import FrameSet
 #: Which preview a request is asking for.
 Kind = Literal["color", "depth", "ir1", "ir2"]
 
-#: Colour scales offered by name, so a query parameter can pick one.
-#:
-#: Turbo rather than the jet that RealSense samples traditionally use: jet's
-#: bands are perceptually uneven, which invents edges in a smooth surface and
-#: hides real ones elsewhere.
+#: Colour scales offered by name, so a query parameter can pick one. Turbo is
+#: the default: jet's perceptually uneven bands invent and hide edges.
 COLORMAPS: dict[str, int] = {
     "turbo": cv2.COLORMAP_TURBO,
     "jet": cv2.COLORMAP_JET,
@@ -40,19 +26,15 @@ COLORMAPS: dict[str, int] = {
     "magma": cv2.COLORMAP_MAGMA,
 }
 
-#: Default near and far clip for colorization, in metres. The D455's usable
-#: range starts around 0.4 m; showing 0-20 m instead spends almost the whole
-#: scale on an indoor scene.
+#: Default near and far clip for colorization, in metres, sized for indoors.
 DEFAULT_NEAR_M = 0.3
 DEFAULT_FAR_M = 6.0
 
-#: multipart boundary for the MJPEG streams. Any token works as long as it
-#: cannot appear in a JPEG payload.
+#: multipart boundary for the MJPEG streams.
 BOUNDARY = "frame"
 
-#: Content type for ``multipart/x-mixed-replace``. The browser replaces the
-#: previous part with each new one, which is the whole trick: an ``<img>``
-#: pointed at this shows live video with no JavaScript at all.
+#: Content type for ``multipart/x-mixed-replace``, which an ``<img>`` shows as
+#: live video.
 MJPEG_CONTENT_TYPE = f"multipart/x-mixed-replace; boundary={BOUNDARY}"
 
 
@@ -75,10 +57,8 @@ def colorize_depth(
             turbo.
 
     Returns:
-        ``(height, width, 3)`` uint8 BGR. Pixels the device could not measure
-        are black, which is outside every scale here and so cannot be mistaken
-        for a real reading - a quarter of a typical indoor depth frame is
-        unmeasured, and showing that as "very close" would be a lie.
+        ``(height, width, 3)`` uint8 BGR. Unmeasured pixels are black, which
+        is outside every scale here so it cannot pass for a reading.
     """
     metres = depth.astype(np.float32) * depth_scale
     span = max(far_m - near_m, 1e-6)
@@ -102,14 +82,8 @@ def to_bgr(frames: FrameSet) -> np.ndarray | None:
     if frames.color is None:
         return None
     if frames.color_format == "yuyv":
-        # One call: the packed YUYV buffer straight to BGR. Doing it by hand
-        # through the split planes would be three passes and a wrong answer at
-        # the chroma edges.
-        #
-        # Reshaped to two channels first. A uint16 view of the buffer is one
-        # channel of double width, and cvtColor wants the pair of bytes to be
-        # the channel axis - it rejects the flat view outright rather than
-        # guessing, which is the good outcome.
+        # Packed YUYV straight to BGR in one call; cvtColor needs the byte
+        # pair as a channel axis, so reshape the uint16 view to two channels.
         height, width = frames.color.shape
         return cv2.cvtColor(
             frames.color.view(np.uint8).reshape(height, width, 2),
@@ -130,16 +104,11 @@ def to_bgr_from_planes(
 
     Returns:
         ``(height, width, 3)`` uint8 BGR.
-
-    Used when playing a recording back, where the planes are what is on disk.
-    Interleaving them first and calling COLOR_YUV2BGR_YUY2 would give the same
-    answer and cost an extra pass over 2 MB.
     """
     height, width = y.shape
     yuv = np.empty((height, width, 3), np.uint8)
     yuv[:, :, 0] = y
-    # Each chroma sample covers two pixels, which is what 4:2:2 means; repeat
-    # rather than interpolate so the result matches the packed conversion.
+    # 4:2:2: repeat each chroma sample, not interpolate, to match to_bgr.
     yuv[:, :, 1] = np.repeat(u, 2, axis=1)
     yuv[:, :, 2] = np.repeat(v, 2, axis=1)
     return cv2.cvtColor(yuv, cv2.COLOR_YUV2BGR)
@@ -164,8 +133,7 @@ def render(
 
     Returns:
         The image, or None if that stream is not in this recording. Colour and
-        depth come back as BGR; the infrared streams stay single-channel, which
-        JPEG encodes as greyscale and is a third of the work.
+        depth come back as BGR; infrared stays single-channel.
     """
     if kind == "color":
         return to_bgr(frames)
@@ -195,9 +163,7 @@ def downscale(image: np.ndarray, width: int) -> np.ndarray:
     Returns:
         The resized image.
 
-    INTER_AREA rather than the default bilinear: shrinking by more than a factor
-    of two with bilinear samples too sparsely and aliases, which on a depth
-    colormap looks like structure that is not there.
+    INTER_AREA, because bilinear aliases when shrinking by more than two.
     """
     if width <= 0 or width >= image.shape[1]:
         return image
@@ -233,9 +199,8 @@ def mjpeg_part(jpeg: bytes) -> bytes:
     Returns:
         The part, ready to write to the response.
 
-    ``Content-Length`` is included deliberately. Without it the browser has to
-    scan for the next boundary before it can decode, which shows up as the
-    preview running a frame behind.
+    ``Content-Length`` lets the browser decode without waiting for the next
+    boundary, which would otherwise leave the preview a frame behind.
     """
     return b"".join(
         (

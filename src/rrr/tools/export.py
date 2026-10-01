@@ -4,55 +4,9 @@
     uv run python -m rrr.tools.export data/sessions/x -o /mnt/elsewhere/x
     uv run python -m rrr.tools.export data/sessions/x --stride 5 --end 600
 
-``video.rrdb`` is shaped for recording: one SQLite row per frame, colour left in
-the sensor's own YUYV, depth in raw z16. That is the right shape for writing 54
-MB/s without dropping anything and the wrong shape for anything else to read.
-This writes the same recording as plain files - PNG images, CSV tables, a WAV -
-so that a consumer needs a filesystem and nothing else.
-
-The layout is flat, one directory per stream, named for what the stream *is*:
-
-    <session>/
-        manifest.json     the index: every stream, what it holds, where it is
-        calibration.json  every sensor's intrinsics, every transform between them
-        color/            index.csv + data/<sample>.png
-        ir_left/          index.csv + data/<sample>.png
-        ir_right/         index.csv + data/<sample>.png
-        depth/            index.csv + data/<sample>.png   (16-bit, raw z16)
-        frame_metadata/   index.jsonl
-        imu_accel/        index.csv
-        imu_gyro/         index.csv
-        audio/            audio.wav + clock.csv + clock_fit.json
-        doa/              index.csv
-        events/           index.csv
-        derived/          empty, for whatever is computed from this later
-
-Four properties are deliberate, and each of them is a thing that would hurt
-later if it were otherwise:
-
-* **Names are roles, not numbers.** ``ir_left``, not ``cam0``. Dropping a camera
-  from the rig renumbers every ``camN`` layout and silently changes what an old
-  configuration file means; it leaves this one alone.
-* **``manifest.json`` is the index.** What a session holds is answered by
-  reading one file, not by walking directories and guessing from suffixes.
-* **Every sampled stream has an explicit index.** Images use an ``index.csv``
-  with stable sample and frame-set ids, both host and sensor timestamps, and a
-  relative path into ``data/``. Variable firmware metadata uses JSONL because
-  its fields differ by device and stream.
-* **Anything variable-length is an array, not a layout.** Eight microphones
-  instead of four is a longer list in ``calibration.json``; the directories do
-  not move.
-
-Times are integer nanoseconds on ``CLOCK_MONOTONIC``, the axis the recording
-was made on. ``manifest.json`` carries the wall-clock anchors, so an absolute
-time is recoverable without making it the axis.
-
-**Nothing is converted that cannot be converted back**, with one exception that
-is named in the manifest: colour is written as RGB, because a YUYV PNG is not a
-thing any tool reads, and the packed original stays in the archive. Depth keeps
-its raw z16 and carries its scale. The measured device offset is written down
-but **not applied** - applying it would bake one alignment into the files, and
-the recording exists to let a consumer decide.
+Writes the recording as plain files - PNG, CSV, a WAV - so a consumer needs
+a filesystem and nothing else. The layout and the four principles behind it are
+in docs/decisions.md 17 and docs/features.md "Exporting".
 """
 
 from __future__ import annotations
@@ -563,10 +517,6 @@ def _rgb(frames: Any) -> np.ndarray | None:
 
     Returns:
         ``(height, width, 3)`` uint8 RGB, or None if colour was not recorded.
-
-    This is the one conversion the export performs. The archive keeps the
-    sensor's packed YUYV, which nothing outside the SDK reads; the packed
-    original is still in the archive, so nothing is lost by writing RGB here.
     """
     if frames.color is None:
         return None
@@ -587,14 +537,12 @@ def _write_motion(
     Args:
         archive: The open archive.
         destination: Directory being filled.
+        time_range: Interval to keep samples from.
 
     Returns:
         The stream entries for the manifest.
 
-    The accelerometer and the gyroscope are kept apart rather than joined into
-    one table. They run at different rates - measured 482 and 478 Hz on this
-    D455 - so a joined table would need one of them resampled onto the other,
-    and this repository does not resample anything it can hand over as measured.
+    Kept as two tables, since joining them would mean resampling one.
     """
     columns = ("t_ns", "x", "y", "z")
     writers = {
@@ -637,10 +585,6 @@ def _describe_sensors(archive: ArchiveSource, calibration: dict[str, Any]) -> No
     Args:
         archive: The open archive.
         calibration: Mapping to fill in.
-
-    Transforms are listed rather than nested, each naming the two frames it
-    relates, so that a rig with a different set of sensors produces the same
-    shape of file with different rows.
     """
     have = archive.calibration
     sensors: dict[str, Any] = {}
@@ -697,10 +641,8 @@ def _array(manifest: SessionManifest) -> dict[str, Any]:
         manifest: The session's manifest.
 
     Returns:
-        The array's entry for ``calibration.json``. ``source`` is ``"unset"``
-        when nobody has written the mounting down, and every value is then
-        null - a reader must refuse to place a direction rather than assume the
-        array sits at the camera's origin.
+        The array's entry for ``calibration.json``. When ``source`` is
+        ``"unset"`` every value is null, never an identity.
     """
     rig = manifest.rig
     return {
@@ -737,15 +679,13 @@ def _write_audio(
     Args:
         paths: Where the session lives.
         destination: Directory being filled.
+        time_range: Interval to crop the audio to.
 
     Returns:
         The stream entry for the manifest.
 
-    The WAV is copied rather than re-encoded, every channel kept. The mapping
-    from a sample position to a time is what makes it placeable at all, and it
-    is written twice: the measured points as they were taken, and the line
-    fitted through them with its residual, so a consumer can use the fit and
-    still see how good it is.
+    Every channel is copied without re-encoding, with both the measured clock
+    points and the fit through them.
     """
     folder = os.path.join(destination, "audio")
     os.makedirs(folder, exist_ok=True)
@@ -765,9 +705,7 @@ def _write_audio(
     try:
         timeline = AudioTimeline.read(paths.audio_clock, rate)
     except (OSError, ValueError) as error:
-        # A WAV with no time mapping can only be read as frames / nominal rate,
-        # which is the assumption the sidecar exists to avoid. Exported anyway,
-        # with the absence visible, rather than refusing the whole session.
+        # Exported anyway, with the missing clock visible.
         logger.warning("no usable audio clock: %s", error)
         timeline = None
 
@@ -863,13 +801,12 @@ def _write_doa(
     Args:
         paths: Where the session lives.
         destination: Directory being filled.
+        time_range: Interval to keep readings from.
 
     Returns:
         The stream entry, or nothing if the session has no direction track.
 
-    Kept because it is a baseline worth comparing against, not because it is
-    the answer: it comes out of the array's firmware, whose band, threshold and
-    method are not documented and cannot be changed.
+    A baseline only: the firmware's band, threshold and method are undocumented.
     """
     if not os.path.exists(paths.doa):
         return {}
@@ -910,6 +847,7 @@ def _write_events(
     Args:
         paths: Where the session lives.
         destination: Directory being filled.
+        time_range: Interval to keep marks from.
 
     Returns:
         The stream entry, or nothing if nobody marked anything.
@@ -952,8 +890,13 @@ def _write_events(
 def validate_export(directory: str) -> list[str]:
     """Return contradictions found in a completed neutral export.
 
-    Validation is deliberately filesystem-only: it uses no archive reader and
-    therefore checks the same boundary an external consumer sees.
+    Filesystem-only, so it checks what an external consumer sees.
+
+    Args:
+        directory: The exported session directory.
+
+    Returns:
+        One message per problem; empty if the export is consistent.
     """
     problems: list[str] = []
     manifest_path = os.path.join(directory, "manifest.json")
@@ -1220,9 +1163,7 @@ def _ns(seconds: float) -> int:
         seconds: A ``CLOCK_MONOTONIC`` reading.
 
     Returns:
-        The same instant in nanoseconds. Integer, because a float second near
-        10^6 has about 200 ns of resolution left, and a filename has to be an
-        exact key.
+        The same instant in integer nanoseconds, an exact key.
     """
     return round(seconds * 1e9)
 

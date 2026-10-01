@@ -1,23 +1,14 @@
 """Reproduce decision 22's SQLite/WAL write-throughput finding.
 
-Isolates the archive's own insert cost from encoding by writing pre-sized
-byte blobs directly into the exact schema and pragmas
-`rrr.video.archive.ArchiveWriter` uses - no device, no encoder, nothing but
-disk and SQLite. What decision 22 measured with this: compressed-size blobs
-(~600 KB, a whole six-image set) insert at 10.2 ms each - `ArchiveWriter` was
-never disk-bound at that size - but raw-size blobs (~1.8 MB, no compression)
-at 55.5 ms each, past the 33.3 ms/frame budget on its own, independent of any
-encoding cost at all. That is why decision 22's raw codec fixes colour alone
-(about 61 MB/s, comfortably inside this) but not the full six-image set.
+Writes pre-sized blobs into `ArchiveWriter`'s schema and pragmas - no device,
+no encoder - to measure the archive's insert cost alone. Results and what they
+settled: docs/decisions.md 22.
 
     uv run python tests/perf/sqlite_write_benchmark.py
     uv run python tests/perf/sqlite_write_benchmark.py --dir data/ --frames 3600
 
-No device needed - only a disk to measure. Not part of `pytest`: it takes
-real wall-clock time and its answer is about the disk and machine it runs on,
-not about this repository's correctness. Worth rerunning after a disk change,
-an OS update, or on a different machine before trusting decision 22's numbers
-there.
+No device needed. Not part of `pytest`: the answer is about the disk, not the
+code.
 """
 
 from __future__ import annotations
@@ -49,16 +40,12 @@ def _insert_batch(
     Args:
         connection: An open connection with the schema already applied.
         frames: How many rows to insert.
-        blob_bytes: Size of the ``depth`` blob each row carries - the other
-            blob columns stay NULL, since only total bytes per insert is what
-            this is measuring.
+        blob_bytes: Size of the ``depth`` blob each row carries; the other
+            blob columns stay NULL, as only bytes per insert matter. One blob
+            is reused for every row so the RNG adds no noise.
 
     Returns:
         Seconds spent in each individual ``execute()``, in order.
-
-    One blob reused for every row rather than a fresh one per insert: decision
-    22's own benchmark was about blob *size*, not content, and generating
-    random bytes 300 times over would only add noise from the RNG itself.
     """
     durations = []
     blob = os.urandom(blob_bytes)
@@ -92,10 +79,8 @@ def _run(path: str, frames: int, blob_bytes: int, label: str) -> bool:
         connection.execute("PRAGMA wal_checkpoint(TRUNCATE)")
     finally:
         connection.close()
-    # Until it is on the disk, not in the page cache. With synchronous=NORMAL an
-    # insert returns once the kernel has the bytes, so the per-insert figure is
-    # SQLite's cost and says nothing about the disk; on a machine with RAM to
-    # spare, gigabytes fit in the cache and never wait for it. This one does.
+    # synchronous=NORMAL returns once the kernel has the bytes, so the
+    # per-insert figure is SQLite's cost; fsync measures the disk itself.
     descriptor = os.open(path, os.O_RDONLY)
     try:
         os.fsync(descriptor)
@@ -126,9 +111,7 @@ def main(argv: list[str] | None = None) -> int:
         argv: Command line arguments, or None to read them from the process.
 
     Returns:
-        0 if every size measured cleared the frame budget, 1 otherwise - so a
-        regression on a future machine or disk shows up as a failing command,
-        not just a number to eyeball.
+        0 if every size measured cleared the frame budget, 1 otherwise.
     """
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument(

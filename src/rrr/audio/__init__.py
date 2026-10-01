@@ -1,13 +1,8 @@
 """Device layer: getting audio and a direction off a ReSpeaker USB Mic Array.
 
-Copied from respeaker-playground and changed in one place that matters: times
-come from PortAudio's ``inputBufferAdcTime`` rather than from ``time.monotonic()``
-in the callback, and each capture block carries its own stamp. That is what lets
-a sample position in a recording be placed against a camera frame; the upstream
-version is 64 ms late and has no per-block resolution.
-
-Imports sounddevice, pyusb and numpy, and nothing else in this repository except
-:mod:`timeline` conventions. It knows nothing about HTTP or about the camera.
+Derived from respeaker-playground, but each capture block is stamped with
+PortAudio's ``inputBufferAdcTime`` (see :mod:`rrr.audio.capture`). Knows nothing
+about HTTP or the camera.
 """
 
 from .capture import (

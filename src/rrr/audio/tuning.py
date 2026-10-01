@@ -1,16 +1,10 @@
 """Read and write the XVF-3000's DSP parameters over USB control transfer.
 
-The array carries a second, non-audio interface through which the chip exposes
-its whole signal chain: echo cancellation, noise suppression, gain control, the
-beamformer, and - the reason this module exists - the direction it currently
-believes sound is coming from.
-
-The parameter table is transcribed from Seeed's ``usb_4_mic_array`` (Apache
-2.0), which in turn follows the XVF-3000 datasheet:
+Mainly for the chip's direction-of-arrival estimate. The parameter table is
+transcribed from Seeed's ``usb_4_mic_array`` (Apache 2.0):
 https://github.com/respeaker/usb_4_mic_array/blob/master/tuning.py
 
-Reading needs write access to the USB device node, which the desktop user does
-not have by default. See :class:`AccessDenied` for the udev rule that grants it.
+Needs write access to the USB device node; see :data:`UDEV_HINT`.
 """
 
 from __future__ import annotations
@@ -30,8 +24,7 @@ _CTRL_OUT = (
     usb.util.CTRL_OUT | usb.util.CTRL_TYPE_VENDOR | usb.util.CTRL_RECIPIENT_DEVICE
 )
 
-#: Milliseconds. Generous: the chip answers in well under a millisecond, and a
-#: timeout here means something is wrong rather than merely slow.
+#: Milliseconds. A timeout means something is wrong, not merely slow.
 _TIMEOUT_MS = 1000
 
 
@@ -42,13 +35,11 @@ class DeviceNotFound(RuntimeError):
 class AccessDenied(RuntimeError):
     """Raised when the device is present but its node cannot be written to.
 
-    Audio capture is unaffected either way: that goes through ALSA, which has
-    no such restriction. Only the tuning interface needs the rule.
+    Audio capture is unaffected; only the tuning interface needs the rule.
     """
 
 
-#: Printed whenever a control transfer is refused. The device node is root-only
-#: out of the box, and there is no way to discover that from the errno alone.
+#: Printed whenever a control transfer is refused: the node is root-only by default.
 UDEV_HINT = f"""USB control transfer was refused: the device node is not writable.
 
 Grant access once:
@@ -217,8 +208,7 @@ PARAMETERS: dict[str, Parameter] = {
 class Tuning:
     """A handle on the chip's parameter interface.
 
-    Not thread-safe: one control transfer at a time per device. The pollers in
-    :mod:`respeaker.doa` own their handle rather than sharing one.
+    Not thread-safe: one control transfer at a time per device.
     """
 
     def __init__(self, device: usb.core.Device) -> None:
@@ -247,9 +237,8 @@ class Tuning:
         """
         parameter = PARAMETERS[name]
 
-        # The read command packs the offset into wValue: bit 7 marks it a read,
-        # bit 6 an integer. The chip answers with two words whose meaning
-        # depends on the kind - a plain value, or a mantissa and an exponent.
+        # wValue: offset, bit 7 = read, bit 6 = int. The reply is a value, or
+        # a mantissa and exponent for a float.
         command = 0x80 | parameter.offset
         if parameter.kind == "int":
             command |= 0x40

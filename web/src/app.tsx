@@ -18,11 +18,8 @@ import { StoragePanel } from './components/storage-panel';
 const POLL_MS = 1000;
 
 /**
- * The recorder page.
- *
- * Status is polled rather than pushed. It changes once a second at most and a
- * websocket would be a second thing to keep alive for no gain; the preview,
- * which does need to be continuous, is MJPEG and needs no JavaScript at all.
+ * The recorder page. Status is polled once a second rather than pushed; the
+ * continuous previews are MJPEG and server-sent events.
  */
 export const App = () => {
   const [status, setStatus] = useState<Status | null>(null);
@@ -67,8 +64,7 @@ export const App = () => {
     refreshSessions();
   }, [refreshSessions]);
 
-  // The listing only changes when a recording ends, so it is refreshed then
-  // rather than polled - a directory of sessions is not free to stat.
+  // The listing changes only when a recording ends, so refresh then, not on poll.
   const wasRecording = status?.recording.recording ?? false;
   useEffect(() => {
     if (!wasRecording) refreshSessions();
@@ -91,10 +87,7 @@ export const App = () => {
 
       {status ? (
         <>
-          {/* Hidden while playing back. Stacking both would push the
-              transport controls off screen, and watching the devices live while
-              studying a recording is not a thing anyone does - the recording
-              keeps running either way, since it holds both devices itself. */}
+          {/* Hidden while playing back, to keep the transport on screen. */}
           {playing ? null : (
             <DevicesPanel
               devices={status.devices}

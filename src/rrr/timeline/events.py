@@ -1,21 +1,8 @@
 """Marks made by a person while a session was recording.
 
-Everything else in a session is a measurement a device made. This is the one
-sidecar written by a human: a label, stamped with the instant the mark reached
-the recorder, saying what was being done. It exists because a recording of an
-experiment is unusable without knowing which part of it was which condition -
-"speaker at 45 degrees, two metres" is not recoverable from the audio.
-
-**A mark is accurate to a person's reaction time, not to a sample.** Somebody
-presses a button after they notice something, which is a few hundred
-milliseconds late and varies. So a mark is for *segmenting* a session into
-conditions and for saying what a stretch of it was, never for aligning against
-a frame or a sample. When an instant has to be exact, it comes from the signal
-itself - an onset in the audio - and the mark only says what that onset was.
-
-JSON lines, like the other sidecars, and flushed on every write. There are a
-handful of these in a session rather than thousands, so the cost of flushing is
-nothing next to losing the one that says what the recording was of.
+JSON lines, flushed on every write. **A mark is accurate to a person's
+reaction time, not to a sample**: never align against it. See
+docs/decisions.md 16.
 """
 
 from __future__ import annotations
@@ -35,16 +22,11 @@ class Event:
     """One mark, and when it was made.
 
     Attributes:
-        monotonic: ``time.monotonic()`` when the mark reached the recorder, on
-            the axis every other measurement in the session uses.
-        realtime: ``time.time()`` at the same instant, so a mark can be found
-            again from a wall-clock note in a lab book.
-        label: What the mark means. Short and free text - this repository does
-            not interpret it.
-        data: Anything else worth recording with the mark, such as the
-            conditions of an experimental run. Not interpreted here either:
-            what belongs in it depends on the experiment, and fixing a schema
-            now would fix the wrong one.
+        monotonic: ``time.monotonic()`` when the mark reached the recorder.
+        realtime: ``time.time()`` at the same instant.
+        label: What the mark means; free text, not interpreted.
+        data: Anything else worth recording, such as run conditions; free
+            form, not interpreted.
     """
 
     monotonic: float
@@ -61,9 +43,7 @@ class Event:
             data: Anything else worth recording with it.
 
         Returns:
-            The event. Both clocks are read here rather than passed in, so that
-            the stamp is as close to the button press as the process can make
-            it.
+            The event, with both clocks read here.
         """
         return Event(
             monotonic=time.monotonic(),
@@ -92,10 +72,7 @@ class Event:
             The event.
 
         Raises:
-            KeyError: If the time or the label is missing. Unlike the rig, this
-                file is written by a program rather than edited by hand, so a
-                malformed line is a bug rather than a typo and is worth
-                reporting.
+            KeyError: If the time or the label is missing.
         """
         data = raw.get("data")
         return Event(
@@ -161,9 +138,8 @@ def read_events(path: str) -> list[Event]:
         path: The file to read.
 
     Returns:
-        Every mark, in the order it was written. An empty list if the file does
-        not exist: a session where nobody marked anything is ordinary, not
-        broken.
+        Every mark, in the order it was written; an empty list if the file
+        does not exist.
 
     Raises:
         ValueError: If a line is not a readable event.

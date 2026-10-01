@@ -1,17 +1,11 @@
 /** Finding the frame that belongs to an instant. */
 
 /**
- * The frame whose capture time is nearest an instant.
+ * The frame whose capture time is nearest an instant, by binary search.
  *
  * @param times `[index, received_monotonic]` pairs, in time order.
  * @param at The instant to look up.
- *
- * A binary search rather than a scan: playback asks this on every animation
- * frame, and an hour of recording is 108,000 entries.
- *
- * Returns the index, or null if there are no frames. Instants outside the
- * recording clamp to its ends, which is what seeking past either edge should
- * do.
+ * @returns The frame index, clamped to the ends, or null if there are no frames.
  */
 export const nearestFrame = (
   times: readonly [number, number][],
@@ -37,6 +31,7 @@ export const nearestFrame = (
  *
  * @param times `[index, received_monotonic]` pairs, in time order.
  * @param index The frame to look up.
+ * @returns The capture time, or null if the index is absent.
  */
 export const timeOfFrame = (
   times: readonly [number, number][],

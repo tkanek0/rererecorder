@@ -1,32 +1,7 @@
 """The manifest that makes a recorded session self-describing.
 
-A session is a directory, not a file. Two devices with different natural formats
-are being recorded at once, and forcing both into one container would mean the
-audio could no longer be opened by anything that opens a WAV - which is most of
-what anyone would want to do with it.
-
-    data/sessions/2026-09-01_17-30-00/
-        session.json        this manifest
-        video.rsdb          frames, calibration, sensor options, inertial samples
-        audio.wav           every channel, int16, gaps filled with silence
-        audio.clock.jsonl   measured capture time per block
-        doa.jsonl           the array's direction estimate
-        events.jsonl        marks made by whoever was recording
-        export/             rrr.tools.export's neutral copy, when one is made
-        review.mp4          rrr.tools.render_mp4's review movie, likewise
-
-The manifest is what ties them together. Without it the directory is three
-recordings that happen to share a folder: the WAV has no start time, and the
-archive's frame timestamps are on a clock the WAV knows nothing about. With it,
-any sample can be placed against any frame.
-
-What it deliberately does **not** claim is that the two are aligned. The
-absolute offset between the array's converter and the camera's shutter cannot be
-derived from either device's documentation - each reports its own idea of when a
-measurement happened, and the paths in between are not specified - so it is left
-null until something measures it. ``rrr/tools/calibrate.py`` does that from a
-handclap; until it has run, ``calibration.offset_s`` is None and every consumer
-knows the alignment is only as good as the two clocks.
+The directory layout and what the manifest refuses to claim are in
+docs/design.md "A session is a directory" and "What it refuses to claim".
 """
 
 from __future__ import annotations
@@ -43,8 +18,7 @@ from .clock import ClockPair, ClockTrack
 #: Bumped when the layout changes in a way a reader must know about.
 FORMAT_VERSION = 1
 
-#: File names inside a session directory. Fixed rather than recorded per session
-#: so that a directory can be understood without reading the manifest first.
+#: File names inside a session directory, fixed so it reads without the manifest.
 MANIFEST_NAME = "session.json"
 VIDEO_NAME = "video.rrdb"
 AUDIO_NAME = "audio.wav"
@@ -52,17 +26,13 @@ AUDIO_CLOCK_NAME = f"audio{AUDIO_CLOCK_SUFFIX}"
 DOA_NAME = "doa.jsonl"
 EVENTS_NAME = f"events{EVENTS_SUFFIX}"
 
-#: Where derived copies go by default. Inside the session, so that a recording
-#: and what was made from it are kept, moved and deleted together; nothing here
-#: reads them back, and the recording never depends on them.
+#: Default names of derived copies, kept inside the session so they are deleted
+#: with it; nothing reads them back.
 EXPORT_NAME = "export"
 REVIEW_NAME = "review.mp4"
 
-#: Session directory names this module will produce and accept back.
-#:
-#: A session id reaches the filesystem from an HTTP path, so it is rejected
-#: rather than sanitised. No dots at all: a name with none cannot be a relative
-#: path, which is a stronger statement than checking for "..".
+#: Session directory names accepted. An id arrives from an HTTP path, so it is
+#: rejected rather than sanitised; no dots means it cannot be a relative path.
 ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]*$")
 
 
@@ -77,32 +47,20 @@ class VideoTrack:
     Attributes:
         file: Archive name inside the session directory.
         frames: Frames written.
-        dropped: Frames the encoder queue could not accept. Non-zero means the
-            disk or the CPU could not keep up, and is reported rather than
-            hidden.
+        dropped: Frames the encoder queue could not accept.
         skipped_warmup: Sets discarded before the first one was written, while
-            the SDK's syncer settled. Measured on a D455: three, every time,
-            within the same millisecond as ``pipeline.start``. Not a loss, and
-            kept apart from the counts below so that a recording which lost
-            nothing does not report a number that looks like it did.
+            the SDK's syncer settled. Not a loss.
         skipped_duplicate: Sets discarded mid-stream because every frame in them
             had already been delivered.
         first_monotonic: Capture time of the first frame written, on the
             monotonic axis, or None if nothing was written.
         last_monotonic: Capture time of the last frame written.
-        motion: Inertial samples written. About 960 a second against 30
-            frames, because the sensor is recorded at its own rate rather than
-            sampled once per frame - measured 482 Hz accelerometer, 478 Hz
-            gyroscope. Zero means inertial recording was off, or the sensor
-            could not be opened.
+        motion: Inertial samples written, both streams at their own rates.
+            Zero means inertial recording was off or failed.
         motion_overrun: Samples discarded because the writer did not drain the
             source's buffer in time. Should be zero.
-        timestamp_domain: What the SDK said its timestamps mean, as
-            ``frame.get_frame_timestamp_domain()`` reports it. Expected to be
-            ``global_time``, which is epoch milliseconds fitted to the host
-            clock. If it reads ``hardware_clock`` instead, the frame times are
-            on the device's own clock and nothing here can place them against
-            the audio - so it is recorded, not assumed.
+        timestamp_domain: ``frame.get_frame_timestamp_domain()``, normally
+            ``global_time``. See docs/features.md "Timing".
         fps: Frames written divided by the span they cover.
     """
 
@@ -128,12 +86,9 @@ class VideoTrack:
         """Inertial samples per second across the recording, both streams.
 
         Returns:
-            The rate, or None if there is nothing to divide. Approximate: the
-            span is the video's, and the sensor runs a little before and after
-            it, so the figure reads slightly high. It is precise enough for
-            what it is for - telling roughly 800 Hz (the sensor's own rate)
-            from roughly 60 (one sample of each per video frame). For the
-            measured rate, ask the archive: ``ArchiveSource.motion_rate``.
+            The rate, or None if there is nothing to divide. Approximate,
+            since the span is the video's; ``ArchiveSource.motion_rate`` gives
+            the measured one.
         """
         first, last = self.first_monotonic, self.last_monotonic
         if not self.motion or first is None or last is None or last <= first:
@@ -161,10 +116,8 @@ class VideoTrack:
     def from_dict(raw: dict[str, object]) -> VideoTrack:
         """Rebuild a track from its stored form.
 
-        A manifest written before mispairing was retired as a reason to
-        discard a set may carry ``skipped_unpaired`` - or, older still, a
-        single combined ``skipped`` - neither of which means anything a
-        current recording can produce, so neither is read back.
+        Legacy ``skipped_unpaired`` and combined ``skipped`` are ignored
+        (docs/decisions.md 21).
         """
         return VideoTrack(
             file=str(raw.get("file", VIDEO_NAME)),
@@ -189,17 +142,13 @@ class AudioTrack:
         file: WAV name inside the session directory.
         clock_file: Sidecar of measured capture times.
         rate: Nominal sample rate from the WAV header.
-        channels: Channels written. All of them, whatever was being listened
-            to - the raw microphones cannot be recovered from the processed one.
+        channels: Channels written; always all of them.
         samples: Frames written to the WAV, counting inserted silence.
-        filled: Samples of silence inserted to replace dropped audio, so that a
-            file position keeps corresponding to a capture time.
+        filled: Samples of silence inserted to replace dropped audio.
         overruns: How often the driver reported an input overflow.
         first_monotonic: Capture time of sample zero, on the monotonic axis.
         timeline: What the measured points say about the time axis, as
-            :meth:`~timeline.audio_clock.AudioTimeline.report` produced it.
-            Read ``rate_error_ppm`` and ``residual_max_ms`` before trusting the
-            recording against the video.
+            :meth:`~rrr.timeline.audio_clock.AudioTimeline.report` produced it.
     """
 
     file: str = AUDIO_NAME
@@ -253,11 +202,8 @@ class AudioTrack:
 class SyncCalibration:
     """The measured offset between the two devices, or the absence of one.
 
-    Both devices timestamp their own measurements, and both are believable to
-    about ten milliseconds. What neither says is how much time passes between a
-    sound reaching a microphone and the array's converter stamping it, or
-    between light reaching the sensor and the camera's shutter timestamp - and
-    the two are not the same. That residual is what this holds.
+    The residual between a microphone and a shutter that neither device
+    reports. See docs/design.md "What it refuses to claim".
 
     Attributes:
         offset_s: Seconds to add to an audio time to reach the video time of the
@@ -306,23 +252,8 @@ class SyncCalibration:
 class Rig:
     """How the two devices are mounted, and how well that is known.
 
-    A direction estimate from the array is a bearing in the array's own frame.
-    Turning it into a ray in the world needs two things this holds: where the
-    array sits relative to the camera, and where each microphone sits on the
-    array. Neither is derivable from either device - the camera knows nothing
-    about the array, and the array's firmware reports an angle without saying
-    what it is measured from.
-
-    Every field starts empty. An unset rig is the honest state of a recording
-    made before anybody wrote the mounting down, and it is recorded that way
-    rather than defaulted to identity, which would silently place every sound
-    at the camera's own origin.
-
-    ``source`` is the point of this block. Nominal values - taken from how the
-    mount was designed, or from a datasheet - are usable and are what the Aria
-    recordings the analysis side works from use for their own microphones, but
-    they are not the same claim as a measurement on this unit. Which one a
-    recording was processed with has to survive in the file.
+    Every field starts empty and is filled in by hand; never defaulted to
+    identity. See docs/design.md "What it refuses to claim".
 
     Attributes:
         source: ``"unset"`` until somebody fills it in, then ``"nominal"`` for
@@ -330,19 +261,14 @@ class Rig:
             from this hardware.
         rotation: Row-major 3x3 rotation of ``depth_from_array``: applied to a
             direction in the array frame, it gives that direction in the depth
-            stream's frame.
-
-            The depth stream rather than the colour one, because that is the
-            frame every other transform in a recording is expressed against -
-            the archive stores ``depth_to_color``, ``depth_to_infrared`` and
-            ``depth_to_accel``. On a D400 it is the left infrared imager.
+            stream's frame, which every other transform in a recording is
+            expressed against (the left infrared imager on a D400).
         translation: Position of the array's origin in the depth stream's
             frame, in metres.
         microphones: Position of each microphone in the array frame, in metres,
             in the order :attr:`channels` names.
         channels: Which channel of ``audio.wav`` each microphone in
-            :attr:`microphones` is. The array's processed and playback channels
-            are not microphones, so this is not simply ``0..n``.
+            :attr:`microphones` is; not simply ``0..n``.
         description: How the mount is arranged, in words, for whoever reads the
             session later.
         note: Anything worth knowing about where these numbers came from.
@@ -361,9 +287,8 @@ class Rig:
         """Whether the array can actually be placed against the camera.
 
         Returns:
-            True only when a placement is present. A consumer that gets False
-            must say the two devices are unregistered rather than assume they
-            share an origin.
+            True only when a placement is present; otherwise a consumer must
+            not assume the devices share an origin.
         """
         return self.rotation is not None and self.translation is not None
 
@@ -388,10 +313,9 @@ class Rig:
         """Rebuild a rig from its stored form.
 
         Args:
-            raw: A mapping as :meth:`as_dict` produced. Hand-edited files are
-                the expected case, so a field that is absent, null or the wrong
-                shape leaves that part unset rather than raising: a typo in the
-                mounting should not make the rest of the session unreadable.
+            raw: A mapping as :meth:`as_dict` produced, usually hand-edited;
+                a field absent, null or the wrong shape is left unset rather
+                than raising.
 
         Returns:
             The rig.
@@ -414,25 +338,17 @@ class SessionManifest:
     Attributes:
         session_id: Directory name.
         format_version: Layout version.
-        started_at: Both host clocks, read when recording began. The anchor
-            that lets the monotonic axis be named in wall-clock terms.
+        started_at: Both host clocks, read when recording began.
         stopped_at: The same, read when it ended. None while recording.
-        clock_samples: Pairs taken throughout, so that a camera timestamp can
-            be converted with the offset that was in force at the time.
+        clock_samples: Pairs taken throughout the recording.
         video: What the camera contributed, or None if it was not recorded.
         audio: What the array contributed, or None.
         doa_file: Direction sidecar name, or None.
-        events_file: Mark sidecar name, or None if nobody marked anything. No
-            count is kept here: how many marks a session holds is a question
-            the file answers, and a number copied into the manifest could
-            disagree with it.
+        events_file: Mark sidecar name, or None if nobody marked anything.
+            No count is kept, so it cannot disagree with the file.
         calibration: The measured offset between the devices, if any.
-        rig: How the two devices are mounted relative to each other. Empty
-            unless somebody has written it down.
-        errors: What went wrong during the session. A device that failed does
-            not stop the other one - a recording with one track and an
-            explanation beats no recording - so failures are written down here
-            rather than raised past the recorder.
+        rig: How the two devices are mounted relative to each other.
+        errors: What went wrong; a failed device does not stop the other.
     """
 
     session_id: str
@@ -535,8 +451,7 @@ class SessionManifest:
             calibration: The measurement to record.
 
         Returns:
-            A new manifest. The rest of the session is untouched, which is what
-            lets a calibration be measured long after the recording.
+            A new manifest; the rest of the session is untouched.
         """
         return replace(self, calibration=calibration)
 
@@ -547,10 +462,7 @@ class SessionManifest:
             rig: The mounting to record.
 
         Returns:
-            A new manifest. As with a calibration, the rest of the session is
-            untouched, so a mounting can be written down long after the
-            recording - which is the expected case while the rig is still
-            being built.
+            A new manifest; the rest of the session is untouched.
         """
         return replace(self, rig=rig)
 
@@ -580,9 +492,7 @@ class SessionPaths:
 
         Raises:
             SessionError: If the id is not a usable directory name, or a
-                session of that name already exists. Refusing rather than
-                overwriting: a recording is not reproducible, so clobbering one
-                is not a recoverable mistake.
+                session of that name already exists (never overwritten).
         """
         if not ID_PATTERN.match(session_id):
             raise SessionError(f"{session_id!r} is not a usable session id")
@@ -605,8 +515,7 @@ class SessionPaths:
 
         Raises:
             SessionError: If the id is not a plain session name, or no such
-                session exists. This is the only thing standing between an HTTP
-                path parameter and the filesystem.
+                session exists. This guards the filesystem from HTTP paths.
         """
         if not ID_PATTERN.match(session_id):
             raise SessionError(f"{session_id!r} is not a session id")
@@ -663,8 +572,7 @@ class SessionPaths:
     def size_bytes(self) -> int:
         """Total size of everything in the session directory.
 
-        Recursive, because an export and a review movie are written inside the
-        session, and deleting the session deletes them with it.
+        Recursive, so it includes an export and a review movie.
         """
         total = 0
         for root, _, files in os.walk(self.directory):
@@ -684,9 +592,8 @@ def write_manifest(paths: SessionPaths, manifest: SessionManifest) -> None:
         paths: Where the session lives.
         manifest: What to write.
 
-    Written to a temporary file and renamed, so a manifest is never half
-    written: the recorder rewrites it while recording so that a session
-    interrupted by a crash still describes itself.
+    Written to a temporary file and renamed, so a manifest the recorder
+    rewrites while recording is never half written.
     """
     temporary = f"{paths.manifest}.tmp"
     with open(temporary, "w", encoding="utf-8") as handle:
@@ -725,9 +632,8 @@ def listing(root: str) -> list[SessionManifest]:
         root: Where sessions are kept.
 
     Returns:
-        One manifest per readable session. A directory without a readable
-        manifest is skipped rather than raising - a session being recorded right
-        now has one, but a crashed one may not.
+        One manifest per readable session; a directory without one is
+        skipped.
     """
     if not os.path.isdir(root):
         return []
@@ -776,8 +682,7 @@ def _optional_points(value: object) -> tuple[tuple[float, float, float], ...] | 
         value: The stored value.
 
     Returns:
-        The points, or None if any of them is not three numbers. All or
-        nothing: a microphone layout missing one microphone is not a layout.
+        The points, or None (all or nothing) if any is not three numbers.
     """
     if not isinstance(value, (list, tuple)) or not value:
         return None

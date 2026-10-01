@@ -316,8 +316,11 @@ frame interval. **So the frame rate bounds the result, at 33 ms.** A single clap
 gives ±16.7 ms; N claps give ±16.7/√N, which is why the tool reports the spread
 across claps and warns when they disagree by more than two intervals.
 
-Verified on a synthetic session with 80 ms planted in it, which it measured back
-as +80.0 ms.
+The offset is stored with `SyncCalibration`'s sign - added to an audio time, it
+gives the video time - which is what export and the renderers apply. Verified on
+a synthetic session with the audio planted 80 ms late, measured back as
+-80.0 ms. Until 2026-10-01 the tool wrote the opposite sign, so an `offset_s`
+written by `--apply` before then has to be negated.
 
 **Cost:** somebody has to clap in front of the camera. Until they do,
 `calibration.offset_s` stays null and every consumer is told the alignment is

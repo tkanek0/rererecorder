@@ -198,8 +198,8 @@ def test_the_planted_offset_is_measured_back(session: SessionPaths, capsys) -> N
 
     printed = capsys.readouterr().out
     assert "impulses        1 found" in printed
-    # The printed offset is the planted one.
-    assert f"{PLANTED_OFFSET_S * 1000:+.1f} ms" in printed or "+80" in printed
+    # Audio planted late, so adding the offset to an audio time must go back.
+    assert f"{-PLANTED_OFFSET_S * 1000:+.1f} ms" in printed
 
 
 def test_nothing_is_written_without_apply(session: SessionPaths) -> None:
@@ -216,7 +216,7 @@ def test_apply_writes_the_offset_and_its_uncertainty(session: SessionPaths) -> N
 
     result = read_manifest(session).calibration
     assert result.measured is True
-    assert result.offset_s == pytest.approx(PLANTED_OFFSET_S, abs=1.0 / FPS)
+    assert result.offset_s == pytest.approx(-PLANTED_OFFSET_S, abs=1.0 / FPS)
     assert result.method == "handclap"
     # Half a frame for a single clap - the tool's own claim about itself.
     assert result.uncertainty_s == pytest.approx(1 / FPS / 2, rel=0.01)

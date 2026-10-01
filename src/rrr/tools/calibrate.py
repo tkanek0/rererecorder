@@ -100,7 +100,8 @@ def main(argv: list[str] | None = None) -> int:
                 print(f"  clap {n}          audio {audio_at:.3f} s - no movement found")
                 continue
             index, video_at, sharpness = found
-            offset = audio_at - video_at
+            # SyncCalibration's sign: added to an audio time, gives video time.
+            offset = video_at - audio_at
             offsets.append(offset)
             # Capped: a still scene has a zero median and an unbounded ratio.
             print(
@@ -138,9 +139,8 @@ def main(argv: list[str] | None = None) -> int:
                 "intervals; something other than a clap may have been detected"
             )
     print(
-        "\n  A positive offset means the audio's clock reads later than the "
-        "video's\n  for the same instant: subtract it from an audio time to "
-        "reach video time."
+        "\n  Add the offset to an audio time to reach the video time of the same "
+        "instant;\n  negative means the audio's clock reads later."
     )
 
     if not args.apply:

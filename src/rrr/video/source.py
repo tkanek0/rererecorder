@@ -122,8 +122,9 @@ def _extrinsics(source: rs.stream_profile, target: rs.stream_profile) -> Extrins
 
 
 def _option_name(option: rs.option) -> str:
-    """The bare name of an SDK option, for a log line."""
-    return str(option).split(".")[-1]
+    """The SDK enum member's name, e.g. ``emitter_enabled``."""
+    # Not str(option): that is the display name, "Emitter Enabled".
+    return option.name
 
 
 def _motion_intrinsics(profile: rs.stream_profile) -> MotionIntrinsics | None:

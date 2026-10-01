@@ -164,6 +164,16 @@ def test_an_unknown_emitter_mode_is_refused() -> None:
         StreamConfig(emitter="sometimes")
 
 
+def test_the_emitter_read_back_compares_like_with_like() -> None:
+    """The read-back keys must match the names it is compared against, or every
+    mode warns and a real refusal is lost among them."""
+    rs = pytest.importorskip("pyrealsense2")
+    from rrr.video.source import _option_name
+
+    assert _option_name(rs.option.emitter_enabled) == "emitter_enabled"
+    assert _option_name(rs.option.emitter_on_off) == "emitter_on_off"
+
+
 def test_the_emitter_mode_is_recorded_in_the_archive(tmp_path, make_frames) -> None:
     path = str(tmp_path / "video.rrdb")
     with ArchiveWriter(

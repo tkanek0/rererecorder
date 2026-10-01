@@ -242,13 +242,7 @@ const CaptureControls = ({
         <p className="note">
           Stop recording to change what is captured or how it is stored.
         </p>
-      ) : (
-        <p className="note">
-          On this machine, color alone with raw is the only combination
-          measured to hold 30 fps with nothing dropped - see
-          docs/windows-native.md.
-        </p>
-      )}
+      ) : null}
       {error ? <p className="error">{error}</p> : null}
     </div>
   );
@@ -364,9 +358,6 @@ export const DevicesPanel = ({ devices, settings, recording, onChanged }: Props)
               )}
             </div>
             {realsense.error ? <p className="error">{realsense.error}</p> : null}
-            {realsense.connected && !realsense.streaming && !realsense.error ? (
-              <p className="note">Opens as soon as something watches it.</p>
-            ) : null}
             {realsense.failed || !realsense.connected ? (
               <ReconnectButton name="realsense" recording={recording} />
             ) : null}
@@ -429,11 +420,7 @@ export const DevicesPanel = ({ devices, settings, recording, onChanged }: Props)
               <p className="note">
                 Being recorded.{respeaker.overruns ? ` ${respeaker.overruns} overruns.` : ''}
               </p>
-            ) : (
-              <p className="note">
-                Mic layout is nominal (unverified against the physical board).
-              </p>
-            )}
+            ) : null}
           </div>
 
           <div className="visual">

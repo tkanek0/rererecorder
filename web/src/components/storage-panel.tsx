@@ -102,16 +102,7 @@ export const StoragePanel = ({
         </button>
       </div>
 
-      {recording ? (
-        <p className="note">
-          The directory cannot move while recording: half a session on each disk
-          would be described by neither manifest.
-        </p>
-      ) : (
-        <p className="note">
-          Created if it does not exist. About 54 MB/s with every stream on.
-        </p>
-      )}
+      {recording ? <p className="note">Stop recording to move it.</p> : null}
       {storage.error ? <p className="error">{storage.error}</p> : null}
       {error ? <p className="error">{error}</p> : null}
     </section>

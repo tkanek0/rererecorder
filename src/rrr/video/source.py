@@ -1016,10 +1016,9 @@ class LiveSource:
             )
         else:
             logger.warning(
-                "frame timestamps are in domain %r, not global_time: they are on "
-                "the device's own clock and cannot be compared with audio times. "
-                "Frame arrival times will be used instead, which costs a few "
-                "milliseconds of accuracy",
+                "frame timestamps are in domain %r, not global_time: colour and "
+                "depth were stamped independently, not through one drift-corrected "
+                "clock, so received_monotonic is the axis to compare against audio",
                 self._timestamp_domain,
             )
 

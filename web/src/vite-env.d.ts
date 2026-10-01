@@ -2,7 +2,9 @@
 
 /** Environment the page is built with. */
 type ImportMetaEnv = {
-  /** Where the control plane is, when it is not on this host's default port. */
+  /** Port the control plane listens on, when it is not the default 8040. */
+  readonly VITE_CONTROL_PORT?: string;
+  /** Whole control plane URL, when it is not on the host serving this page. */
   readonly VITE_CONTROL_URL?: string;
 };
 

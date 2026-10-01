@@ -9,10 +9,21 @@
 
 const DEFAULT_PORT = 8040;
 
-/** Base HTTP URL of the control plane, derived from the page's own host. */
+/**
+ * Base HTTP URL of the control plane.
+ *
+ * The host comes from the page's own location rather than from a build-time
+ * value: a recorder on another machine is opened by its address, and a pinned
+ * `localhost` there would send the page at its own viewer. Only the port needs
+ * telling, through `VITE_CONTROL_PORT`, because the two halves are served
+ * separately in development. `VITE_CONTROL_URL` still overrides the whole thing
+ * for the case where the control plane is somewhere else entirely.
+ */
 export const controlBase = (): string =>
   import.meta.env.VITE_CONTROL_URL ??
-  `http://${window.location.hostname}:${DEFAULT_PORT}`;
+  `http://${window.location.hostname}:${
+    import.meta.env.VITE_CONTROL_PORT ?? DEFAULT_PORT
+  }`;
 
 /** Which preview a panel is showing. */
 export type PreviewKind = 'color' | 'depth' | 'ir1' | 'ir2';

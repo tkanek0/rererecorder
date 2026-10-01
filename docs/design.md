@@ -14,7 +14,7 @@ measured `(monotonic, realtime)` pairs rather than as the axis itself.
 
 | Source | What it hands out | How it reaches the axis |
 |---|---|---|
-| D455 frames | epoch milliseconds (`global_time`) | minus the clock offset measured for that frame |
+| D455 frames | its own timestamps, kept alongside | `received_monotonic`, read when the set is assembled |
 | ReSpeaker audio | `inputBufferAdcTime` | already there - PortAudio's ALSA backend shares its origin |
 | Direction (DOA) | `time.monotonic()` | already there |
 

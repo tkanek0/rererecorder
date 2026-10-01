@@ -117,9 +117,9 @@ When `timestamp_domain` is `global_time` - librealsense's own device-to-host
 clock fit, the default on Linux/RSUSB - `color_timestamp_ms` and
 `depth_timestamp_ms` are also directly comparable to each other and to
 `time.time() * 1000`, re-fitted while streaming (moved the mapping by about
-10 ms over one minute of observation on a D455). Anything else - measured as
-`system_time` on Windows - means each was stamped independently when its own
-frame reached the SDK: see `docs/windows-native.md`.
+10 ms over one minute of observation on a D455). `system_time`, which is what
+Windows gives, means each was stamped independently when its own frame reached
+the SDK: see `docs/windows-native.md`.
 
 ## Honesty about losses
 
@@ -131,7 +131,7 @@ they went wrong would let a bad session look fine.
 | `dropped` | the encoder queue was full: the disk or CPU fell behind, and the recording has holes |
 | `skipped_duplicate` | a set the SDK re-delivered |
 | `skipped_warmup` | discarded before the first good set, while the syncer settled. Two or three every time; not a loss |
-| `timestamp_domain` | anything but `global_time` means colour and depth were stamped independently rather than through one drift-corrected clock - see `color_timestamp_ms` / `depth_timestamp_ms` (decision 21) |
+| `timestamp_domain` | anything but `global_time` means the sensors' own timestamps are not on one drift-corrected host clock; `system_time` means each stream was stamped on arrival, independently (decision 21) |
 
 ## The page
 

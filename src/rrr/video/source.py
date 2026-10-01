@@ -1011,14 +1011,18 @@ class LiveSource:
         )[-1]
         if self._timestamp_domain == "global_time":
             logger.info(
-                "frame timestamps are epoch milliseconds (global_time); "
-                "they can be placed against the audio clock"
+                "frame timestamps are epoch milliseconds (global_time), one "
+                "drift-corrected clock for colour and depth"
+            )
+        elif self._timestamp_domain == "system_time":
+            logger.warning(
+                "frame timestamps are system_time: each stream was stamped by the "
+                "host on arrival, so colour and depth are not on one clock"
             )
         else:
             logger.warning(
-                "frame timestamps are in domain %r, not global_time: colour and "
-                "depth were stamped independently, not through one drift-corrected "
-                "clock, so received_monotonic is the axis to compare against audio",
+                "frame timestamps are in domain %r, not mapped to the host's "
+                "clock",
                 self._timestamp_domain,
             )
 

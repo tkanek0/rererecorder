@@ -282,7 +282,7 @@ def test_listing_of_a_missing_root_is_empty(tmp_path) -> None:
     assert listing(str(tmp_path / "nothing")) == []
 
 
-def test_a_manifest_from_before_mispairing_was_retired_reads_back_as_undated() -> None:
+def test_a_manifest_from_before_mispairing_was_retired_reads_back_no_skips() -> None:
     """Old ``skipped``/``skipped_unpaired`` counted skew discards, which no longer
     happen, so neither is read back. See docs/decisions.md 21.
     """

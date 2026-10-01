@@ -22,7 +22,7 @@ from rrr.video.types import MotionCalibration, MotionIntrinsics
 from .conftest import DEPTH_SCALE, HEIGHT, WIDTH
 
 #: The measured baseline of a D455's stereo pair, in metres.
-BASELINE_M = 0.095
+BASELINE_M = 0.09513
 
 
 def _intrinsics(ppx: float) -> Intrinsics:

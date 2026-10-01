@@ -29,8 +29,8 @@ make dserver                    # the page, on http://localhost:8040
 
 Recording from the terminal instead is in
 [docs/features.md](docs/features.md#the-command-line). Running on the host
-(`make server` and `make web`) is fine for developing the page, but it will drop
-frames.
+(`make up`, which starts the control plane and the page side by side) is fine
+for developing the page, but it will drop frames.
 
 ## Where recordings go
 

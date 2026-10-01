@@ -1136,7 +1136,7 @@ else:
         """
         return {
             "detail": (
-                f"no built frontend at {config.STATIC_DIR!r}. Run `make web` for "
+                f"no built frontend at {config.STATIC_DIR!r}. Run `make up` for "
                 "the dev server, or `npm run build` in web/ to build it into this one."
             )
         }

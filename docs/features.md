@@ -137,7 +137,13 @@ they went wrong would let a bad session look fine.
 
 ## The page
 
-One page at `:8040`, served by the same process that records.
+One page at `:8040`, served by the same process that records - that is `make
+dserver`, and the way a real recording is driven.
+
+`make up` splits the two for development instead: the control plane (`rrr.api`)
+on `API_PORT`, vite on `APP_PORT`, both bound to `HOST` so the page can be
+opened from another machine. The page derives the control plane's host from its
+own location, so that works without configuring an address anywhere.
 
 - **Preview** - colour and depth side by side, MJPEG at 10 fps. Depth is shown
   next to colour because the failure worth catching mid-recording is depth going

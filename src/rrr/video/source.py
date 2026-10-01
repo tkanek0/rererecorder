@@ -502,7 +502,7 @@ class LiveSource:
         frame.
 
         Returns:
-            ``"Sensor Name/Option_Name"`` to value. Options that refuse to be
+            ``"Sensor Name/option_name"`` to value. Options that refuse to be
             read are omitted rather than reported as zero.
 
         Raises:
@@ -518,7 +518,7 @@ class LiveSource:
                 continue
             for option in sensor.get_supported_options():
                 try:
-                    key = f"{name}/{str(option).split('.')[-1]}"
+                    key = f"{name}/{_option_name(option)}"
                     snapshot[key] = float(sensor.get_option(option))
                 except RuntimeError:
                     continue

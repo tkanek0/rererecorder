@@ -92,7 +92,7 @@ const micPosition = (angleDeg: number, radius: number) => {
  * component is mounted.
  *
  * Server-sent events rather than polling: the array is already open for the
- * duration of the connection (see `rrr.server.app.audio_levels`), so a plain
+ * duration of the connection (see `rrr.api.app.audio_levels`), so a plain
  * `EventSource` is the whole client. Reconnects on its own if the server
  * restarts; a stale reading just decays to silence-coloured rather than
  * being cleared, which reads better than a flash to empty on every retry.

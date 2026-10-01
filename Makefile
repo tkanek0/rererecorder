@@ -14,7 +14,7 @@ WEB_PORT ?= 5177
 
 # docker/compose.yaml takes these from the environment; see docs/decisions.md 13.
 COMPOSE = UID=$(shell id -u) GID=$(shell id -g) \
-	AUDIO_GID=$(shell getent group audio | cut -d: -f3) RRR_SERVER_PORT=$(PORT) \
+	AUDIO_GID=$(shell getent group audio | cut -d: -f3) RRR_API_PORT=$(PORT) \
 	docker compose -f docker/compose.yaml
 
 .DEFAULT_GOAL := help
@@ -28,7 +28,7 @@ setup:
 	cd web && npm install
 
 server:
-	RRR_SERVER_PORT=$(PORT) uv run python -m rrr.server
+	RRR_API_PORT=$(PORT) uv run python -m rrr.api
 
 web:
 	cd web && VITE_CONTROL_URL=http://localhost:$(PORT) npm run dev -- --port $(WEB_PORT)

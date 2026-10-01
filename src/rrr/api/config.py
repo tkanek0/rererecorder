@@ -1,4 +1,4 @@
-"""Runtime configuration for the server.
+"""Runtime configuration for the API.
 
 Every value can be overridden through the environment, so the same image runs on
 this machine and on a Raspberry Pi without editing anything. What to record
@@ -20,7 +20,7 @@ def _flag(name: str, default: bool) -> bool:
 
 #: Where to listen. Every interface, so the page can be opened from another
 #: machine - a recorder on a Pi is usually driven from a laptop.
-HOST = os.environ.get("RRR_SERVER_HOST", "0.0.0.0")
+HOST = os.environ.get("RRR_API_HOST", "0.0.0.0")
 
 #: Port for the control plane.
 #:
@@ -28,7 +28,7 @@ HOST = os.environ.get("RRR_SERVER_HOST", "0.0.0.0")
 #: are the playgrounds this borrows from) and 8010 belongs to another project.
 #: Pinned rather than auto-selected: a server that silently lands somewhere else
 #: is worse than one that refuses to start.
-PORT = int(os.environ.get("RRR_SERVER_PORT", "8040"))
+PORT = int(os.environ.get("RRR_API_PORT", "8040"))
 
 #: Seconds to wait for open connections before shutting down anyway.
 #:

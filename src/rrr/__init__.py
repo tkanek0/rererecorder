@@ -12,7 +12,7 @@ of failure that looks like corrupted data.
 
 The layer boundaries inside are unchanged and still run one way:
 
-    rrr.timeline  ->  rrr.video, rrr.audio  ->  rrr.recorder  ->  rrr.server
+    rrr.timeline  ->  rrr.video, rrr.audio  ->  rrr.recorder  ->  rrr.api
                                                              ->  rrr.tools
 
 Nothing here is imported eagerly. The subpackages pull in a device SDK, an

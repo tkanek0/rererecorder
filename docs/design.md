@@ -25,7 +25,7 @@ measured `(monotonic, realtime)` pairs rather than as the axis itself.
 
 Everything lives under one package, `rrr`. Dependencies run one way:
 `rrr.timeline` imports nothing but numpy, `rrr.video` and `rrr.audio` import no
-web framework, and nothing below `rrr.server` knows HTTP exists. Nothing in
+web framework, and nothing below `rrr.api` knows HTTP exists. Nothing in
 `rrr` opens a window either - the interface is the page in `web/` - which is
 why OpenCV is the headless build: the full one drags in GTK, dead weight in a
 container and slow to install on a Pi.
@@ -36,7 +36,7 @@ flowchart TD
     V["src/rrr/video/<br/>D455: source, archive<br/><i>pyrealsense2</i>"]
     A["src/rrr/audio/<br/>ReSpeaker: taps, DOA<br/><i>sounddevice, pyusb</i>"]
     R["src/rrr/recorder/<br/>writers, session orchestration"]
-    S["src/rrr/server/<br/>FastAPI, MJPEG, playback"]
+    S["src/rrr/api/<br/>FastAPI, MJPEG, playback"]
     C["src/rrr/tools/<br/>record, inspect, export"]
     W["web/<br/>vite + react"]
     T --> V

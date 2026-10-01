@@ -18,7 +18,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from rrr.recorder import config as recording_config
-from rrr.server import app as server_app
+from rrr.api import app as api_app
 from rrr.timeline import (
     ClockPair,
     Event,
@@ -76,9 +76,9 @@ def client(tmp_path, monkeypatch) -> TestClient:
     """A client whose server writes into a temporary directory."""
     root = str(tmp_path / "sessions")
     os.makedirs(root)
-    monkeypatch.setattr(server_app.state, "sessions_root", root)
-    monkeypatch.setattr(server_app.state, "recorder", FakeRecorder(root))
-    return TestClient(server_app.app)
+    monkeypatch.setattr(api_app.state, "sessions_root", root)
+    monkeypatch.setattr(api_app.state, "recorder", FakeRecorder(root))
+    return TestClient(api_app.app)
 
 
 # -- status ------------------------------------------------------------------
@@ -131,9 +131,9 @@ def test_frame_headers_are_readable_cross_origin(client) -> None:
 def enumerations(monkeypatch) -> list[int]:
     """Count RealSense enumerations, starting from nothing enumerated yet."""
     calls: list[int] = []
-    monkeypatch.setattr(server_app, "list_devices", lambda: calls.append(1) or [])
-    monkeypatch.setattr(server_app.state, "realsense_found", None)
-    monkeypatch.setattr(server_app.state, "realsense_found_after", 0.0)
+    monkeypatch.setattr(api_app, "list_devices", lambda: calls.append(1) or [])
+    monkeypatch.setattr(api_app.state, "realsense_found", None)
+    monkeypatch.setattr(api_app.state, "realsense_found_after", 0.0)
     return calls
 
 
@@ -151,7 +151,7 @@ def test_reconnect_enumerates_again_and_reconnects_the_hub(
 ) -> None:
     reconnects: list[int] = []
     monkeypatch.setattr(
-        server_app.state.hub, "reconnect", lambda: reconnects.append(1)
+        api_app.state.hub, "reconnect", lambda: reconnects.append(1)
     )
     client.get("/api/status")
     response = client.post("/api/devices/realsense/reconnect")
@@ -163,14 +163,14 @@ def test_reconnect_enumerates_again_and_reconnects_the_hub(
 
 def test_reconnecting_the_array_rescans_portaudio(client, monkeypatch) -> None:
     rescans: list[int] = []
-    monkeypatch.setattr(server_app, "rescan", lambda: rescans.append(1))
+    monkeypatch.setattr(api_app, "rescan", lambda: rescans.append(1))
     response = client.post("/api/devices/respeaker/reconnect")
     assert response.status_code == 200
     assert rescans == [1]
 
 
 def test_reconnect_is_refused_while_recording(client) -> None:
-    server_app.state.recorder.recording = True
+    api_app.state.recorder.recording = True
     response = client.post("/api/devices/realsense/reconnect")
     assert response.status_code == 409
 
@@ -195,12 +195,12 @@ def test_the_directory_can_be_moved(client, tmp_path) -> None:
 
     assert body["sessions_dir"] == wanted
     assert os.path.isdir(wanted), "created rather than refused"
-    assert server_app.state.recorder.root == wanted, "the recorder follows"
+    assert api_app.state.recorder.root == wanted, "the recorder follows"
 
 
 def test_moving_the_directory_is_refused_while_recording(client, tmp_path) -> None:
     """Half a session on each disk would be described by neither manifest."""
-    server_app.state.recorder.recording = True
+    api_app.state.recorder.recording = True
     response = client.put(
         "/api/settings", json={"sessions_dir": str(tmp_path / "elsewhere")}
     )
@@ -231,7 +231,7 @@ def test_streams_can_be_narrowed_to_color_only(client) -> None:
 
     assert body["streams"]["depth"] is None
     assert body["streams"]["infrared"] is False
-    assert server_app.state.recorder.streams.depth is None
+    assert api_app.state.recorder.streams.depth is None
 
 
 def test_turning_off_depth_alone_is_refused_when_infrared_is_still_on(client) -> None:
@@ -251,11 +251,11 @@ def test_an_unknown_stream_setting_is_refused(client) -> None:
 def test_motion_can_be_turned_off(client) -> None:
     body = client.put("/api/settings", json={"streams": {"motion": False}}).json()
     assert body["streams"]["motion"] is False
-    assert server_app.state.recorder.streams.motion is False
+    assert api_app.state.recorder.streams.motion is False
 
 
 def test_streams_cannot_change_while_recording(client) -> None:
-    server_app.state.recorder.recording = True
+    api_app.state.recorder.recording = True
     response = client.put("/api/settings", json={"streams": {"depth": False}})
     assert response.status_code == 409
 
@@ -273,7 +273,7 @@ def test_an_unknown_codec_choice_is_refused(client) -> None:
 
 
 def test_codecs_cannot_change_while_recording(client) -> None:
-    server_app.state.recorder.recording = True
+    api_app.state.recorder.recording = True
     response = client.put("/api/settings", json={"codecs": {"color": "raw"}})
     assert response.status_code == 409
 
@@ -287,7 +287,7 @@ def test_an_empty_settings_body_is_refused(client) -> None:
 
 
 def test_sessions_are_listed_newest_first(client, tmp_path) -> None:
-    root = server_app.state.sessions_root
+    root = api_app.state.sessions_root
     for name, offset in (("older", 0.0), ("newer", 100.0)):
         paths = SessionPaths.create(root, name)
         write_manifest(
@@ -335,7 +335,7 @@ def _write_session(root: str, name: str) -> SessionPaths:
 
 def test_detail_reports_an_unreadable_archive_rather_than_failing(client) -> None:
     """A session whose archive is broken still has a manifest worth showing."""
-    _write_session(server_app.state.sessions_root, "broken")
+    _write_session(api_app.state.sessions_root, "broken")
     body = client.get("/api/sessions/broken").json()
 
     assert body["session_id"] == "broken"
@@ -358,7 +358,7 @@ def test_a_session_id_cannot_escape_the_recordings_root(client, tmp_path) -> Non
 
 def test_a_session_can_be_deleted(client) -> None:
     """Offered because a session costs 1.7 GB for 34 seconds."""
-    paths = _write_session(server_app.state.sessions_root, "unwanted")
+    paths = _write_session(api_app.state.sessions_root, "unwanted")
     body = client.request("DELETE", "/api/sessions/unwanted").json()
 
     assert body["deleted"] == "unwanted"
@@ -368,8 +368,8 @@ def test_a_session_can_be_deleted(client) -> None:
 
 def test_deleting_the_running_session_is_refused(client) -> None:
     """Removing the file being written is not a recoverable mistake."""
-    _write_session(server_app.state.sessions_root, "live")
-    recorder = server_app.state.recorder
+    _write_session(api_app.state.sessions_root, "live")
+    recorder = api_app.state.recorder
     recorder.recording = True
     recorder.state = lambda: {  # type: ignore[method-assign]
         "recording": True,
@@ -385,7 +385,7 @@ def test_deleting_the_running_session_is_refused(client) -> None:
     response = client.request("DELETE", "/api/sessions/live")
     assert response.status_code == 409
     assert os.path.isdir(
-        os.path.join(server_app.state.sessions_root, "live")
+        os.path.join(api_app.state.sessions_root, "live")
     ), "still there"
 
 
@@ -403,7 +403,7 @@ def test_a_mark_needs_a_running_recording(client) -> None:
 
 
 def test_a_mark_is_written_and_counted(client) -> None:
-    server_app.state.recorder.recording = True
+    api_app.state.recorder.recording = True
 
     response = client.post(
         "/api/events",
@@ -418,14 +418,14 @@ def test_a_mark_is_written_and_counted(client) -> None:
 
 @pytest.mark.parametrize("label", ["", "   ", None])
 def test_a_mark_without_a_label_is_refused(client, label) -> None:
-    server_app.state.recorder.recording = True
+    api_app.state.recorder.recording = True
     response = client.post("/api/events", json={"label": label})
     assert response.status_code == 400
     assert "label" in response.json()["detail"]
 
 
 def test_mark_data_has_to_be_an_object(client) -> None:
-    server_app.state.recorder.recording = True
+    api_app.state.recorder.recording = True
     response = client.post("/api/events", json={"label": "x", "data": [1, 2]})
     assert response.status_code == 400
 

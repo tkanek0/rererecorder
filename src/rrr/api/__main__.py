@@ -1,6 +1,6 @@
 """Run the control plane.
 
-    uv run python -m rrr.server
+    uv run python -m rrr.api
 """
 
 from __future__ import annotations
@@ -20,11 +20,11 @@ def main() -> None:
         format="%(asctime)s %(levelname)-7s %(name)s: %(message)s",
     )
     uvicorn.run(
-        # The app object itself, not the "server.app:app" import string: the
+        # The app object itself, not the "api.app:app" import string: the
         # string form re-imports by module name, which needs `rrr/` itself -
         # not just the repository root - on sys.path to resolve the bare
-        # `server` package, and nothing arranges that when this runs as
-        # `python -m rrr.server`. Passing the object sidesteps the lookup
+        # `api` package, and nothing arranges that when this runs as
+        # `python -m rrr.api`. Passing the object sidesteps the lookup
         # entirely; only `--reload` or multiple workers need the string form,
         # neither of which this uses.
         app,

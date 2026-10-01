@@ -97,4 +97,4 @@ RUN python -c "import pyrealsense2 as rs; print('librealsense', rs.__version__)"
 EXPOSE 8040
 # The server rather than the CLI: the image is the recorder, and the recorder
 # has a page. `docker run ... python -m rrr.tools.record` still works.
-CMD ["python", "-m", "rrr.server"]
+CMD ["python", "-m", "rrr.api"]

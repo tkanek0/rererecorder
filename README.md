@@ -15,22 +15,33 @@ Depth at 1280x720, colour at 1280x800, both raw infrared images, all at 30 fps,
 all lossless, with nothing dropped - plus the inertial sensor at its own 480 Hz
 rather than sampled once per frame. 54 MB/s, or 195 GB an hour.
 
-## Recording needs the container
+## Running it
 
-The `pyrealsense2` wheel on PyPI is built against V4L2, and V4L2 loses **8.4% of
-depth frames** on this camera. The image here compiles librealsense with the
-RSUSB backend instead, which loses none - the investigation is in
-[docs/frame-loss.md](docs/frame-loss.md).
+Two halves: the control plane (`rrr.api`, on :8040) and the page (vite, on
+:5177). Open the page; it finds the control plane on the same host.
+
+**Natively**, which is how it runs on Windows:
+
+```bash
+uv sync
+uv run python -m rrr.api        # control plane
+npm --prefix web install
+npm --prefix web run dev        # the page, on http://localhost:5177
+```
+
+**On Linux, use the container instead.** The `pyrealsense2` wheel on PyPI is
+built against V4L2 there, and V4L2 loses **8.4% of depth frames** on this
+camera. The image compiles librealsense with the RSUSB backend, which loses
+none - the investigation is in [docs/frame-loss.md](docs/frame-loss.md).
+Running natively on Linux still starts, and will drop frames.
 
 ```bash
 make image                      # build it (compiles librealsense, ~4 min)
-make dserver                    # the page, on http://localhost:8040
+make up                         # both halves; the page on http://localhost:5177
 ```
 
 Recording from the terminal instead is in
-[docs/features.md](docs/features.md#the-command-line). Running on the host
-(`make up`, which starts the control plane and the page side by side) is fine
-for developing the page, but it will drop frames.
+[docs/features.md](docs/features.md#the-command-line).
 
 ## Where recordings go
 

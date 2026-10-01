@@ -30,8 +30,7 @@ import numpy as np
 from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.concurrency import run_in_threadpool
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, StreamingResponse
-from fastapi.staticfiles import StaticFiles
+from fastapi.responses import StreamingResponse
 
 from rrr.audio import AudioTap, dbfs, probe as probe_audio, rescan, rms
 from rrr.recorder import RecorderBusy, SessionRecorder
@@ -1110,33 +1109,3 @@ async def _levels(request: Request, tap: AudioTap):
     finally:
         tap.release()
 
-
-# -- the page ----------------------------------------------------------------
-
-if os.path.isdir(config.STATIC_DIR):
-    app.mount(
-        "/assets",
-        StaticFiles(directory=os.path.join(config.STATIC_DIR, "assets")),
-        name="assets",
-    )
-
-    @app.get("/")
-    def index() -> FileResponse:
-        """Serve the built page."""
-        return FileResponse(os.path.join(config.STATIC_DIR, "index.html"))
-
-else:
-
-    @app.get("/")
-    def no_page() -> dict[str, Any]:
-        """Explain where the page is, when it has not been built.
-
-        Normal during development: vite serves it on its own port and talks to
-        this server across origins.
-        """
-        return {
-            "detail": (
-                f"no built frontend at {config.STATIC_DIR!r}. Run `make up` for "
-                "the dev server, or `npm run build` in web/ to build it into this one."
-            )
-        }

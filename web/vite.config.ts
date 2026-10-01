@@ -3,8 +3,6 @@ import { defineConfig } from 'vite';
 
 export default defineConfig({
   plugins: [react()],
-  // Relative, so the built page works wherever the server mounts it.
-  base: './',
   server: {
     // Listen on every interface: a recorder on a Pi is driven from a laptop.
     host: '0.0.0.0',

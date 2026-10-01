@@ -137,13 +137,14 @@ they went wrong would let a bad session look fine.
 
 ## The page
 
-One page at `:8040`, served by the same process that records - that is `make
-dserver`, and the way a real recording is driven.
+One page, served by vite on `:5177`, talking to the control plane (`rrr.api`)
+on `:8040`. The page derives the control plane's host from its own location, so
+it can be opened from another machine without configuring an address anywhere;
+only the port is told, through `VITE_CONTROL_PORT`.
 
-`make up` splits the two for development instead: the control plane (`rrr.api`)
-on `API_PORT`, vite on `APP_PORT`, both bound to `HOST` so the page can be
-opened from another machine. The page derives the control plane's host from its
-own location, so that works without configuring an address anywhere.
+On Linux, `make up` starts both in containers, bound to `HOST` on `API_PORT` and
+`APP_PORT`. Elsewhere they are started natively, one command each - see the
+README.
 
 - **Preview** - colour and depth side by side, MJPEG at 10 fps. Depth is shown
   next to colour because the failure worth catching mid-recording is depth going
@@ -183,18 +184,18 @@ Reconnect rather than by itself. It is disabled while recording.
 Nothing here needs the server, and the server records through exactly this code.
 
 ```
-uv run python -m rrr.tools.record --seconds 30 --session kitchen   # on the host: V4L2, loses frames
+uv run python -m rrr.tools.record --seconds 30 --session kitchen   # on Linux natively: V4L2, loses frames
 uv run python -m rrr.tools.inspect data/sessions/kitchen          # cross-check a recording
 uv run python -m rrr.tools.export data/sessions/kitchen           # write it out as plain files
 uv run pytest                                                      # no device needed
 ```
 
-Recording in the container - RSUSB, which does not lose frames - is the same
-command through compose; the Makefile's `COMPOSE` line shows the variables it
-needs:
+On Linux, record in the container instead - RSUSB, which does not lose frames.
+It is the same command through compose; the Makefile's `COMPOSE` line shows
+the variables it needs:
 
 ```
-docker compose -f docker/compose.yaml run --rm recorder python -m rrr.tools.record --seconds 30
+docker compose run --rm api python -m rrr.tools.record --seconds 30
 ```
 
 `rrr.tools.inspect` is the one that matters after a recording. It re-reads the files

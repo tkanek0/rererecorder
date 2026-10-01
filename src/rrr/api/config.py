@@ -100,12 +100,7 @@ AUDIO_LEVEL_WINDOW_S = float(os.environ.get("RRR_AUDIO_LEVEL_WINDOW_S", "0.1"))
 
 # -- the frontend ------------------------------------------------------------
 
-#: Built frontend to serve, if it has been built. Vite serves it on its own port
-#: during development, so this being absent is normal rather than an error.
-STATIC_DIR = os.environ.get("RRR_STATIC_DIR", "web/dist")
-
-#: Vite runs on another origin during development, and the page may be opened
-#: from another machine on the LAN.
+#: The page is served by vite, on another origin.
 ALLOW_ORIGINS = os.environ.get("RRR_ALLOW_ORIGINS", "*").split(",")
 
 #: Whether changing the recording directory over HTTP is allowed.

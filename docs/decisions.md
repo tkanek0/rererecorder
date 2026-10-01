@@ -17,15 +17,16 @@ resolution until V4L2 keeps up.
 both raw infrared streams added. The full investigation - and the seven
 hypotheses that turned out wrong - is in [frame-loss.md](frame-loss.md).
 
-**Cost:** the wheel cannot be used, so recording needs the image. `uv sync
+**Cost:** the wheel cannot be used on Linux, so recording there needs the
+image (decision 30). `uv sync
 --no-install-package pyrealsense2` excludes it, and the image fails at build
 time if the import does not work, because a silent fallback to V4L2 would look
 like a working recorder that drops 8% of its frames.
 
 **Version:** 2.58.3, in both the image (`LIBREALSENSE_VERSION`) and the host
-wheel, the series the realsense-playground checkout uses. It is also the
-release that ships a cp312 `manylinux2014_aarch64` wheel, which is what makes a
-Raspberry Pi possible without building librealsense from source there.
+wheel, the series the realsense-playground checkout uses. It also ships a
+cp312 `manylinux2014_aarch64` wheel, but that is V4L2 like the x86 one, so a
+Raspberry Pi would record through the image too.
 
 ---
 
@@ -75,11 +76,11 @@ more bytes without adding information, since the chroma is already subsampled.
 Storing it packed compresses badly, because Y and U alternate byte by byte and a
 predictor has nothing to work with. Measured on real frames:
 
-| Form | ms | KB | Lossless |
-|---|---|---|---|
-| Packed, PNG16 | 30.8 | 870 | yes |
-| **Three planes, PNG** | **27.9** | **761** | **yes** |
-| Packed, zlib | 22.4 | 1161 | yes |
+| Form                  | ms       | KB      | Lossless |
+| --------------------- | -------- | ------- | -------- |
+| Packed, PNG16         | 30.8     | 870     | yes      |
+| **Three planes, PNG** | **27.9** | **761** | **yes**  |
+| Packed, zlib          | 22.4     | 1161    | yes      |
 
 The split and its inverse were checked byte-for-byte on every frame, not
 assumed.
@@ -157,16 +158,20 @@ directions to describe a change that harms neither.
 
 ## 9. Frontend: vite + react, not a single HTML file
 
-**Chosen:** `web/`, built in a Docker stage, served as static files.
+**Chosen:** `web/`, served by vite's dev server - its own node container on
+Linux (decision 30), natively elsewhere.
 
 **Alternatives:** one hand-written HTML file with no build step (chosen first,
-then reversed on request).
+then reversed on request). Building `web/` in a Docker stage and serving the
+static files from the control plane, which is how it first shipped.
 
-**Why:** it matches both playground repositories, and the runtime image needs no
-node - what ships is a few hundred kilobytes of static files, so a Raspberry Pi
-never compiles anything.
+**Why:** it matches both playground repositories. The built-and-served variant
+was dropped with decision 30: it was a second way of serving the page next to
+the dev server, and only the container path used it.
 
-**Cost:** a build step, and `npm ci` in the image build.
+**Cost:** the page needs node wherever it runs, Raspberry Pi included, and a
+dev server is what serves it during a recording. It touches no device, so this
+costs nothing a recording can lose.
 
 ---
 
@@ -229,15 +234,15 @@ keeping the evidence rather than the conclusion.
 The callback was chosen over a frame queue on measurement. Both keep the video
 intact, but the queue lost inertial samples:
 
-| Mode | depth lost | colour lost | video sets | Accel interval, max |
-|---|---|---|---|---|
-| no IMU | 0.0% | 0.0% | 28.92/s | - |
-| **callback** | **0.0%** | **0.0%** | **30.17/s** | **2.5 ms** |
-| frame_queue | 0.0% | 0.0% | 28.83/s | **70.8 ms** |
+| Mode         | depth lost | colour lost | video sets  | Accel interval, max |
+| ------------ | ---------- | ----------- | ----------- | ------------------- |
+| no IMU       | 0.0%       | 0.0%        | 28.92/s     | -                   |
+| **callback** | **0.0%**   | **0.0%**    | **30.17/s** | **2.5 ms**          |
+| frame_queue  | 0.0%       | 0.0%        | 28.83/s     | **70.8 ms**         |
 
 The GIL contention a 960 Hz Python callback looks like it should cause does not
 materialise, because the callback only appends a tuple. (The first attempt at
-this measurement was run on the host and showed 12% loss in *all three* modes,
+this measurement was run on the host and showed 12% loss in _all three_ modes,
 including with no IMU at all - that was the V4L2 backend, not the IMU. Decision
 1 again.)
 
@@ -354,7 +359,7 @@ reaches the recorder, flushed on every write.
 recording, so a mark would race the rewrite); naming conditions in the session
 id (one session per condition, which means restarting the camera between runs
 and losing auto-exposure settling each time); annotating afterwards against
-playback (accurate, but it cannot record what was *done* - only what is visible
+playback (accurate, but it cannot record what was _done_ - only what is visible
 in what was recorded).
 
 **Why it is needed:** a recording of an experiment is unusable without knowing
@@ -445,8 +450,8 @@ identity being substituted for it.
 ## 18. Clear the emitter toggle before every mode, because the firmware insists
 
 **Chosen:** setting the depth projector's mode always writes
-``emitter_on_off = 0`` first, then ``emitter_enabled``, and alternating writes
-``emitter_on_off = 1`` last. Then both options are read back and a disagreement
+`emitter_on_off = 0` first, then `emitter_enabled`, and alternating writes
+`emitter_on_off = 1` last. Then both options are read back and a disagreement
 is logged.
 
 **Alternatives:** the two obvious orderings, both of which this firmware
@@ -462,14 +467,14 @@ emitter_on_off = 0 ; emitter_enabled = 1 ; emitter_on_off = 1   ->  accepted
 
 So it is not "the projector must be on first", which was the obvious guess.
 The toggle has to be written as 0 and then re-armed, with the enable in
-between. Asked for on its own immediately after ``pipeline.start()`` the toggle
+between. Asked for on its own immediately after `pipeline.start()` the toggle
 is also accepted, which is why the bug only appeared when switching modes -
 the first mode of a run worked and the third did not.
 
 **Why it is worth a decision rather than a fix:** the refusal is silent in the
 sense that matters. The option write fails, the log line scrolls past, and the
 recording comes out with the projector solidly on while the session says
-``alternating``. The infrared pair then carries the dot pattern that mode
+`alternating`. The infrared pair then carries the dot pattern that mode
 existed to avoid, and nothing downstream can tell. Hence the read-back: what
 the device reports is recorded, and a mismatch is warned about at the point it
 can still be noticed.
@@ -479,7 +484,7 @@ recording is not yet toggling. The per-frame laser power is in the metadata, so
 this is visible rather than something to correct for.
 
 **Verified:** on 150 constant, off 0 constant, alternating
-``11110101010101...`` over 40 frames.
+`11110101010101...` over 40 frames.
 
 ---
 
@@ -565,7 +570,7 @@ using the SDK's own bundled composite frame.
 calibrated on Linux/RSUSB, where a correctly paired set is 0.03 ms apart and
 5 ms exists only to catch a genuinely stale frame reused for hundreds of
 milliseconds - two regimes two orders of magnitude apart in both directions.
-On Windows (Media Foundation) the *normal* case measured 13 ms mean with
+On Windows (Media Foundation) the _normal_ case measured 13 ms mean with
 roughly 4 ms of jitter, later found to split into two separate causes: most
 of the jitter came from auto-exposure's own frame-to-frame timing variance,
 and a further slow, roughly-linear drift (tens of ppm to a few hundred) came
@@ -623,7 +628,7 @@ thread count from 8 to 12 - the CPU's own compute limit, not something more
 threads fix. Raw removes the compute entirely.
 
 **Cost, and where it does not help:** raw is roughly 3x the bytes of the
-compressed set. For the *full* six-image set that cost is not academic: it
+compressed set. For the _full_ six-image set that cost is not academic: it
 was measured moving the bottleneck rather than removing it. A synthetic
 SQLite/WAL benchmark mirroring `archive.py`'s own write pattern found
 compressed-size blobs insert at 10.2 ms each (`ArchiveWriter` was never
@@ -636,7 +641,7 @@ a minimal `LiveSource` + `ArchiveWriter` wiring with neither `FrameHub` nor
 anything else of this repository's between them - ruling out `FrameHub` as
 the cause for the full set specifically.
 
-Where it *is* the fix: colour alone. Raw colour is about 61 MB/s, comfortably
+Where it _is_ the fix: colour alone. Raw colour is about 61 MB/s, comfortably
 inside what both encoding and SQLite can do, and a colour-only recording
 using it was measured sustaining 29.99 fps with zero dropped frames over a
 full 10-minute, 17,996-frame session - see windows-native.md for what closed
@@ -653,16 +658,16 @@ budget).
 `"raw"`, independently for each) are both now settable, not only through
 `RRR_*` environment variables:
 
-* the CLI gains `--no-color`, `--no-depth`, `--no-infrared` and
+- the CLI gains `--no-color`, `--no-depth`, `--no-infrared` and
   `--color-codec` / `--depth-codec` / `--infrared-codec` (`src/rrr/tools/record.py`);
-* the server's `PUT /api/settings` accepts `streams` (booleans) and `codecs`
+- the server's `PUT /api/settings` accepts `streams` (booleans) and `codecs`
   (`"compressed"`/`"raw"`) alongside the existing `sessions_dir`, refused
   while a recording is running for the same reason moving the directory is -
   a session cannot describe two configurations at once. A stream change
   restarts the shared `FrameHub`, the same way a resolution change would; a
   codec change needs nothing restarted, since the archive is created fresh
   at the start of each recording;
-* the page gained a settings panel to drive both.
+- the page gained a settings panel to drive both.
 
 `SessionRecorder.streams` and `.codecs` are now settable properties
 (mirroring the existing `.root` setter), refusing with `RecorderBusy` while
@@ -723,7 +728,7 @@ and `_resolve_device` matched by name only, so it took whichever came first
 in enumeration order - MME on this machine. Measured directly: MME's
 `inputBufferAdcTime` is unfilled for half of all blocks and, for the rest,
 about 5.3 days from `time.monotonic()`'s origin; WASAPI's is never unfilled,
-offset by a *fixed* ~3.9 s (stable to 5.3 ms over five minutes), and reports
+offset by a _fixed_ ~3.9 s (stable to 5.3 ms over five minutes), and reports
 the array's real 16000 Hz rate where MME and DirectSound report the shared
 mixer's 44100 Hz instead. Ranking by the pair (host API, rate agreement)
 encodes exactly what was measured to matter, rather than either half of it
@@ -777,7 +782,7 @@ actually depends on it.
 
 **Chosen:** `AudioTap._adc_time` collects `now - reported` over the first 20
 valid blocks (`_DOMAIN_CALIBRATION_BLOCKS`, ~0.3 s) instead of deciding from
-one, and uses the *spread* (standard deviation) of that window to tell three
+one, and uses the _spread_ (standard deviation) of that window to tell three
 cases apart: agrees with `time.monotonic()` (use `reported` as-is, decision
 20's original good case); a fixed but different epoch, spread under
 `_DOMAIN_STABILITY_S` (0.25 s) (add the measured mean offset to `reported`
@@ -939,6 +944,44 @@ replugged.
 
 ---
 
+## 30. One way to run per OS: containers on Linux, natively elsewhere
+
+**Chosen:** on Linux, `make up` starts the control plane and the page in two
+containers (`compose.yaml`: `api` on the RSUSB image, `app` on
+`node:24-slim`), and the Makefile offers nothing else that opens a device. On
+Windows, the two halves are started natively with one command each; there is
+no Makefile there.
+
+**Alternatives:**
+
+- the earlier split - the control plane on the host for page work, in the
+  container (`make dserver`) for recording. Two ways on one OS, and the one
+  used every day was the one that drops frames.
+- building librealsense for RSUSB on the Linux host and dropping Docker. Docker
+  shares the host kernel, so the path to the camera is the same libusb one and
+  the result would very likely carry over - but it is unmeasured, every machine
+  needs the build, and the image already exists and is measured.
+- Docker on Windows as well. Docker Desktop runs through WSL2, and the USB
+  devices reach it through `usbipd-win`, whose tunnel was measured to be a
+  throughput ceiling of its own (`docs/windows-native.md`, "WSL2, part 2").
+- marking the PyPI wheel Linux-excluded in `pyproject.toml`, or refusing a V4L2
+  build at start-up, so the native path on Linux cannot open the camera at all.
+  Turned down: `pyproject.toml` stays free of where it is deployed, and a
+  native start on Linux is a documented mistake rather than a guarded one.
+
+**Why:** the backend is chosen per OS - RSUSB on Linux, Media Foundation on
+Windows - and each OS gets one way of starting, so which one is in use is
+never a question. On Linux the container is the only route to RSUSB.
+
+**Cost:** on Linux nothing stops `uv run python -m rrr.api` on the host; it
+starts and drops frames. Windows is not held to zero drops either: it records
+every stream it is asked for, and what it loses lands in the session the way it
+does anywhere else (`docs/windows-native.md`, "The operating conclusion").
+`make up` pulls a node image, and installs `web/node_modules` into the checkout
+from inside it.
+
+---
+
 ## Known limits
 
 **Nothing stops a recording when the disk fills.** At 195 GB an hour this will
@@ -978,7 +1021,7 @@ makes that a first-class choice from the CLI or the page rather than a set of
 environment variables to remember. This is closed as the operating answer for
 now, not because the cause is fully understood: a minimal `LiveSource` +
 `ArchiveWriter` wiring with neither `FrameHub` nor `VideoWriter` involved
-reaches a clean 30 fps for colour alone at the *compressed* codec, where the
+reaches a clean 30 fps for colour alone at the _compressed_ codec, where the
 real recording path through both classes reaches only ~25 fps at that same
 codec - an overhead on the order of the gap between "compressed colour alone"
 (~25 fps, measured through the real classes) and "colour alone, raw" (~30 fps,
@@ -997,11 +1040,11 @@ here.
 applied**, checked in three configurations, all through the real CLI or
 server (no synthetic data):
 
-| configuration | duration | fitted rate | filled |
-|---|---|---|---|
-| audio alone (`--no-video`) | 300.00 s | +1 ppm | 422 samples (26 ms) |
-| audio alone, through the server, polled at 1 Hz like the page | 300.62 s | +4 ppm | 662 samples (41 ms) |
-| audio with the camera recording at the same time (colour+raw) | 301.91 s | +16 ppm | 1,216 samples (76 ms) |
+| configuration                                                 | duration | fitted rate | filled                |
+| ------------------------------------------------------------- | -------- | ----------- | --------------------- |
+| audio alone (`--no-video`)                                    | 300.00 s | +1 ppm      | 422 samples (26 ms)   |
+| audio alone, through the server, polled at 1 Hz like the page | 300.62 s | +4 ppm      | 662 samples (41 ms)   |
+| audio with the camera recording at the same time (colour+raw) | 301.91 s | +16 ppm     | 1,216 samples (76 ms) |
 
 All three land the overwhelming majority of what they fill within the first
 ~0.3-0.4 s of the recording - the calibration window itself (decision 26),

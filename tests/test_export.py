@@ -107,16 +107,20 @@ def session(tmp_path: Path) -> SessionPaths:
     rng = np.random.default_rng(20260907)
 
     with ArchiveWriter(
-        paths.video, calibration=calibration, config=StreamConfig(infrared=True)
+        paths.video,
+        calibration=calibration,
+        config=StreamConfig(infrared=True),
+        clock_anchor=ClockPair(MONO, REAL),
     ) as writer:
         for n in range(FRAMES):
             capture = MONO + n / FPS
-            # Two inertial samples per frame, so both streams have rows.
+            # Two inertial samples per frame, so both streams have rows. Half a
+            # frame later, so a range boundary never falls on one.
             writer.append_motion(
                 [
                     MotionSample(
                         stream=stream,
-                        timestamp_ms=(capture + OFFSET) * 1000.0,
+                        timestamp_ms=(capture + 0.5 / FPS + OFFSET) * 1000.0,
                         x=float(n),
                         y=1.0,
                         z=9.8,

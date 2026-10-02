@@ -6,7 +6,7 @@ Knows nothing about HTTP, JPEG or the audio device. See docs/design.md
 
 from .archive import LEGACY_SUFFIX as ARCHIVE_LEGACY_SUFFIX
 from .archive import SUFFIX as ARCHIVE_SUFFIX
-from .archive import ArchiveSource, ArchiveWriter, WriterStats
+from .archive import ArchiveSource, ArchiveWriter, WriterStats, join_yuyv, split_yuyv
 from .config import (
     DEFAULT_COLOR,
     DEFAULT_COLOR_FORMAT,
@@ -27,8 +27,6 @@ from .types import (
     Motion,
     color_to_bgr,
     color_to_rgb,
-    join_yuyv,
-    split_yuyv,
 )
 
 __all__ = [

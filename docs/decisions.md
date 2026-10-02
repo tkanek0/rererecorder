@@ -86,7 +86,7 @@ The split and its inverse were checked byte-for-byte on every frame, not
 assumed.
 
 **Cost:** three columns instead of one, and a reader has to reassemble them.
-`rrr.video.types.join_yuyv` does, and `rrr.api.preview.to_bgr_from_planes` skips the
+`rrr.video.archive.join_yuyv` does, and `rrr.api.preview.to_bgr_from_planes` skips the
 reassembly for display.
 
 ---

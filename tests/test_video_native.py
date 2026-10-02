@@ -12,9 +12,9 @@ from pathlib import Path
 
 import numpy as np
 import pytest
-
 from rrr.video import ArchiveSource, ArchiveWriter, Calibration, FrameSet, StreamConfig
-from rrr.video.types import color_to_bgr, color_to_rgb, join_yuyv, split_yuyv
+from rrr.video.archive import join_yuyv, split_yuyv
+from rrr.video.types import color_to_bgr, color_to_rgb
 
 #: The camera's real maxima, and the sizes every measurement in this repository
 #: was taken at.

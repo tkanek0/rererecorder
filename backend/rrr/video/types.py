@@ -283,44 +283,6 @@ class Motion:
         }
 
 
-def split_yuyv(color: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """Separate a YUYV image into its three planes.
-
-    Args:
-        color: ``(height, width)`` uint16, one element per pixel, as the SDK
-            delivers YUYV.
-
-    Returns:
-        ``(y, u, v)``: luma at full width, and the two chroma planes at half
-        width, all uint8. See docs/decisions.md 4.
-    """
-    raw = color.view(np.uint8).reshape(color.shape[0], color.shape[1], 2)
-    return (
-        raw[:, :, 0].copy(),
-        raw[:, :, 1][:, 0::2].copy(),
-        raw[:, :, 1][:, 1::2].copy(),
-    )
-
-
-def join_yuyv(y: np.ndarray, u: np.ndarray, v: np.ndarray) -> np.ndarray:
-    """Reassemble a YUYV image from its planes.
-
-    Args:
-        y: Luma, ``(height, width)`` uint8.
-        u: First chroma plane, ``(height, width // 2)`` uint8.
-        v: Second chroma plane, same shape as ``u``.
-
-    Returns:
-        ``(height, width)`` uint16, byte-identical to what was split.
-    """
-    height, width = y.shape
-    raw = np.empty((height, width, 2), np.uint8)
-    raw[:, :, 0] = y
-    raw[:, :, 1][:, 0::2] = u
-    raw[:, :, 1][:, 1::2] = v
-    return raw.reshape(height, width * 2).view(np.uint16)[:, :width]
-
-
 @dataclass(frozen=True)
 class FrameSet:
     """One synchronised set of frames.

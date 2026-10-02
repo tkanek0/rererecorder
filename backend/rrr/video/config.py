@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import os
 from dataclasses import dataclass, replace
 
 #: Width, height and frame rate of one video stream.
@@ -19,9 +18,9 @@ DEFAULT_COLOR: StreamSpec = (1280, 800, 30)
 DEFAULT_COLOR_FORMAT = "yuyv"
 
 #: What the depth projector does while recording. See docs/features.md,
-#: "The projector".
+#: "The projector". ``RRR_EMITTER`` is read by rrr.recorder.config, not here.
 EMITTER_MODES = ("on", "off", "alternating")
-DEFAULT_EMITTER = os.environ.get("RRR_EMITTER", "on")
+DEFAULT_EMITTER = "on"
 
 
 @dataclass(frozen=True)

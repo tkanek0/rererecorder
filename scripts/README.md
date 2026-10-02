@@ -5,7 +5,7 @@ nothing imports them except their tests: the package provides the means -
 reading a session on one clock (`rrr.playback`), cross-checks
 (`rrr.inspection`), the offset measurement (`rrr.offset`), drawing parts
 (`rrr.visualization`) - and each script decides what to do with them and what to
-write out.
+write out. See `docs/decisions.md` 31.
 
 Run them from the repository root, against the installed package:
 

@@ -85,8 +85,14 @@ quantisation, so motion capture is not needed to measure this array.
   Do not add top-level packages - see `docs/decisions.md` 15 - except a device
   adapter that knows nothing of `rrr`: `backend/respeaker_adapter/` reads no
   environment variable, and `rrr.recorder.config` passes its settings in.
-- Packaged with `uv_build` (`module-root = "backend"`) and installed editable by `uv sync`, in the container
-  too; nothing sets `PYTHONPATH` - see `docs/decisions.md` 27.
+- Packaged with `uv_build` (`module-root = "backend"`) and installed editable by
+  `uv sync`, in the container too; nothing sets `PYTHONPATH` - see
+  `docs/decisions.md` 27.
+- The package provides means; `scripts/` decides what to write. A converter's
+  encoder or file layout goes in a thin script, the reading it needs in
+  `rrr.playback` and friends. Services the package itself runs are entry points
+  (`rrr-api`). Run scripts as `uv run python scripts/<name>.py`, and never name
+  one after a standard library module - see `docs/decisions.md` 31.
 - Google-style docstrings, PEP 8, type hints.
 - Commits: one purpose each, imperative one-line English message, no trailers.
   Never commit or push without being asked.

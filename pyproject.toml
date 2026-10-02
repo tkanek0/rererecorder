@@ -29,6 +29,7 @@ module-name = ["rrr", "respeaker_adapter"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 # Scripts are not part of the package; their tests import them by file name.
+# See docs/decisions.md 31.
 pythonpath = ["scripts"]
 addopts = "-q --strict-markers"
 

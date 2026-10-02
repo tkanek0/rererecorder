@@ -345,7 +345,7 @@ import. `rrr` is what the rest of the repository already calls itself - the
 `.rrdb` suffix, the `RRR_` environment prefix.
 
 **Why not `src/`:** (superseded by 27, which packages the project and moves
-it under `src/`.) A `src/` layout earns its keep when the package is built and
+it under `src/`; `tools` is gone since 31.) A `src/` layout earns its keep when the package is built and
 installed, so that tests run against the installed copy rather than the working
 tree. This project is not packaged - there is no `[build-system]`, and both the
 Makefile and the container run it from the checkout with the repository root on
@@ -398,7 +398,8 @@ session - and the rest is procedure.
 **Chosen:** `scripts/export.py` writes a session out as plain files - PNG, CSV,
 WAV - in a flat layout indexed by `manifest.json`. The analysis repository reads
 that. It does not import this package. The layout itself is specified in
-`docs/export-format.md`; this entry keeps why.
+`docs/export-format.md`; this entry keeps why. Since 31 the layout lives
+only in the scripts, never in the `rrr` package.
 
 **Alternatives:** letting the analysis side depend on this repository and use
 `ArchiveSource` directly (no duplication, no second copy of a 200 GB recording,
@@ -864,7 +865,8 @@ still runs the mounted source without a rebuild.
 role next to `frontend/`, and the build backend is `uv_build` with
 `module-root = "backend"`. Still a `src/`-style layout in every respect that
 mattered above: installed editable, never put on the path. `uv_build` rather
-than hatchling because it is uv's own and states the root in one line.
+than hatchling because it is uv's own and states the root in one line. What
+goes in the package, and what in `scripts/`, is 31.
 
 ---
 
@@ -996,6 +998,66 @@ every stream it is asked for, and what it loses lands in the session the way it
 does anywhere else (`docs/windows-native.md`, "The operating conclusion").
 `make up` pulls a node image, and installs `frontend/node_modules` into the checkout
 from inside it.
+
+---
+
+## 31. A package that provides means, and scripts that decide what to write
+
+**Chosen:** the installed code is the means - recording (`rrr.recorder`,
+`rrr.api`), reading a recording on one clock (`rrr.playback`), cross-checks
+(`rrr.inspection`), the offset measurement (`rrr.offset`) and drawing parts
+(`rrr.visualization`). What is done with them and written out lives in
+`scripts/`: `record.py`, `inspect_session.py`, `calibrate.py`, `export.py`,
+`validate_export.py`, `render_gif.py`, `render_mp4.py` and the performance
+checks. Scripts run as `uv run python scripts/<name>.py` against the installed
+package and are imported by nothing but their tests. A service the package
+itself provides is an entry point instead: `rrr-api`. `rrr.tools` is gone.
+
+Device access that knows nothing of the recorder is a separate package beside
+`rrr`: `respeaker_adapter`, which reads no environment variable -
+`rrr.recorder.config` reads `RRR_AUDIO_*` and passes the values in. A
+`realsense_adapter` is meant to follow, out of `rrr.video`.
+
+```mermaid
+flowchart LR
+    subgraph backend/
+        RA[respeaker_adapter]
+        RRR["rrr<br/>recorder, api, playback,<br/>inspection, offset, visualization"]
+    end
+    SC["scripts/<br/>what to write, and where"]
+    EX["export/<br/>docs/export-format.md"]
+    RA --> RRR --> SC --> EX
+```
+
+**Alternatives:** keeping every tool under `rrr.tools`, as before; moving the
+tools to `scripts/` whole, logic included; console entry points for every tool
+under `[project.scripts]`; a uv workspace with `backend/` as a member; naming
+the adapters `respeaker_handler` (a handler is conventionally what receives a
+callback), `respeaker_dev` (`dev` reads as "development") or `respeaker`, which
+PyPI already has from the device's makers.
+
+**Why:** a GIF renderer offered as an importable module was the symptom. The
+three converters - two renderers and the export - turned out to repeat the same
+reading (frame times with a nominal fallback, the audio clock, channel
+selection, the offset), and that reading is what belongs in a package; the
+encoder or the directory layout at the end does not. Moving the tools whole
+would have left that repetition in place and put `sys.path` tricks between them.
+Entry points would need the code inside the package, which is the reverse of
+the point. The workspace solved a problem that putting `pyproject.toml` at the
+root and only the source root in `backend/` (27, amended) does not have.
+
+The export layout is the sharpest case: it is the contract with the analysis
+repository, and it now lives only in `scripts/export.py`,
+`scripts/validate_export.py` and `docs/export-format.md`. The package can change
+without the format noticing, and the validator - importing nothing from `rrr` -
+can be copied to the reader's side.
+
+**Cost:** tests import scripts by file name through pytest's
+`pythonpath = ["scripts"]`, a path setting 27 otherwise avoids; it reaches only
+tests. A script may import a sibling (`export` imports `validate_export`), so no
+script may share a name with a standard library module - hence
+`inspect_session.py`. Every `python -m rrr.tools.*` in notes and shell history
+stopped working at once.
 
 ---
 

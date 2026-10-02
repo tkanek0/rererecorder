@@ -2,7 +2,8 @@
 
     uv run rrr-api
 
-Installed as the ``rrr-api`` command by ``[project.scripts]``.
+Installed as the ``rrr-api`` command by ``[project.scripts]``: a service the
+package provides, unlike the tools in ``scripts/`` - docs/decisions.md 31.
 """
 
 from __future__ import annotations

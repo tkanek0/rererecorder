@@ -25,7 +25,10 @@ The recorder lives under one package, `rrr`; the array is reached through
 `rrr` and reads no environment variable - `rrr.recorder.config` chooses its
 settings and passes them in. Dependencies run one way: `rrr.timeline` imports
 nothing but numpy, `rrr.video` and `respeaker_adapter` import no web
-framework, and nothing below `rrr.api` knows HTTP exists. Nothing in
+framework, and nothing below `rrr.api` knows HTTP exists. The tools that work
+on recordings - record, inspect, calibrate, export, render - are thin scripts in
+`scripts/` on top of the package, and nothing in the package imports them
+(decision 31). Nothing in
 `rrr` opens a window either - the interface is the page in `frontend/` - which is
 why OpenCV is the headless build: the full one drags in GTK, dead weight in a
 container and slow to install on a Pi.

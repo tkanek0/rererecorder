@@ -177,6 +177,7 @@ button, which also enumerates the device again. It is disabled while recording.
 ## The command line
 
 Nothing here needs the server, and the server records through exactly this code.
+Each is a script in `scripts/`, listed in [scripts/README.md](../scripts/README.md).
 
 ```
 uv run python scripts/record.py --seconds 30 --session kitchen     # record

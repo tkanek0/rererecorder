@@ -1,6 +1,8 @@
 """Run the control plane.
 
-    uv run python -m rrr.api
+    uv run rrr-api
+
+Installed as the ``rrr-api`` command by ``[project.scripts]``.
 """
 
 from __future__ import annotations
@@ -30,7 +32,3 @@ def main() -> None:
         # will not stop keeps the camera held.
         timeout_graceful_shutdown=config.SHUTDOWN_TIMEOUT_S,
     )
-
-
-if __name__ == "__main__":
-    main()

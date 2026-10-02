@@ -31,7 +31,7 @@ make up                         # the page on http://localhost:5177
 
 ```bash
 uv sync
-uv run python -m rrr.api        # control plane
+uv run rrr-api                  # control plane
 npm --prefix web install
 npm --prefix web run dev        # the page, on http://localhost:5177
 ```

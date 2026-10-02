@@ -989,7 +989,7 @@ no Makefile there.
 Windows - and each OS gets one way of starting, so which one is in use is
 never a question. On Linux the container is the only route to RSUSB.
 
-**Cost:** on Linux nothing stops `uv run python -m rrr.api` on the host; it
+**Cost:** on Linux nothing stops `uv run rrr-api` on the host; it
 starts and drops frames. Windows is not held to zero drops either: it records
 every stream it is asked for, and what it loses lands in the session the way it
 does anywhere else (`docs/windows-native.md`, "The operating conclusion").

@@ -61,4 +61,4 @@ RUN uv sync --frozen --no-install-package pyrealsense2 --inexact
 RUN python -c "import pyrealsense2 as rs; print('librealsense', rs.__version__)"
 
 EXPOSE 8040
-CMD ["python", "-m", "rrr.api"]
+CMD ["rrr-api"]

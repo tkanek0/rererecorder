@@ -1,27 +1,23 @@
 """Measure the offset between the camera and the array, from a handclap.
 
-    uv run python -m rrr.tools.calibrate data/sessions/2026-09-02_15-28-36
-    uv run python -m rrr.tools.calibrate data/sessions/... --apply
-
-Without ``--apply`` nothing is written and ``calibration.offset_s`` stays
-null. The frame rate bounds the accuracy - see docs/decisions.md 14.
+Nothing here writes: ``scripts/calibrate.py`` reports the measurement and stores
+it only when asked, so ``calibration.offset_s`` stays null until somebody has
+looked at it. The frame rate bounds the accuracy - see docs/decisions.md 14.
 """
 
 from __future__ import annotations
 
-import argparse
-import sys
 import time
 import wave
+from dataclasses import dataclass
 
 import numpy as np
 
 from rrr.timeline import (
     AudioTimeline,
+    SessionManifest,
     SessionPaths,
     SyncCalibration,
-    read_manifest,
-    write_manifest,
 )
 from rrr.video import ArchiveSource
 
@@ -41,125 +37,144 @@ ONSET_GAP_S = 0.5
 SEARCH_S = 0.35
 
 
-def main(argv: list[str] | None = None) -> int:
-    """Measure a session's audio-to-video offset.
+class OffsetError(ValueError):
+    """Raised when a session cannot yield an offset at all."""
+
+
+@dataclass(frozen=True)
+class Clap:
+    """One impulse in the audio, and the movement found for it in the video.
+
+    Attributes:
+        audio_at: Monotonic time of the impulse onset in the audio.
+        frame: Archive index of the frame with the most movement nearby, or
+            None if no frame was found.
+        video_at: That frame's monotonic time, or None.
+        sharpness: How far that movement stands out from the median; near 1
+            is noise.
+    """
+
+    audio_at: float
+    frame: int | None = None
+    video_at: float | None = None
+    sharpness: float | None = None
+
+    @property
+    def offset(self) -> float | None:
+        """Seconds to add to the audio time to reach the video time, or None."""
+        return None if self.video_at is None else self.video_at - self.audio_at
+
+
+@dataclass(frozen=True)
+class OffsetMeasurement:
+    """What a session's claps say about the audio-to-video offset.
+
+    Attributes:
+        claps: Every impulse found, matched or not, in time order.
+        frame_interval_s: One video frame, which bounds a single clap.
+        stream: The video stream movement was looked for in.
+    """
+
+    claps: list[Clap]
+    frame_interval_s: float
+    stream: str
+
+    @property
+    def offsets(self) -> list[float]:
+        """Offsets from the claps that found a movement."""
+        return [clap.offset for clap in self.claps if clap.offset is not None]
+
+    @property
+    def offset_s(self) -> float | None:
+        """Median offset, or None if no clap was matched."""
+        return float(np.median(self.offsets)) if self.offsets else None
+
+    @property
+    def uncertainty_s(self) -> float | None:
+        """Half a frame interval, averaged down over the matched claps."""
+        count = len(self.offsets)
+        return self.frame_interval_s / 2 / float(np.sqrt(count)) if count else None
+
+    @property
+    def spread_s(self) -> float | None:
+        """How far the matched claps disagree, or None with fewer than two."""
+        values = self.offsets
+        return float(max(values) - min(values)) if len(values) > 1 else None
+
+    @property
+    def disagrees(self) -> bool:
+        """Whether the claps disagree by more than two frame intervals."""
+        spread = self.spread_s
+        return spread is not None and spread > self.frame_interval_s * 2
+
+    def to_calibration(self) -> SyncCalibration:
+        """Return the measurement in the form ``session.json`` stores.
+
+        Raises:
+            OffsetError: If no clap was matched, so there is nothing to store.
+        """
+        if self.offset_s is None or self.uncertainty_s is None:
+            raise OffsetError("no clap was matched; there is no offset to store")
+        spread = self.spread_s
+        return SyncCalibration(
+            offset_s=self.offset_s,
+            uncertainty_s=self.uncertainty_s,
+            method="handclap",
+            measured_at=time.time(),
+            note=(
+                f"{len(self.offsets)} clap(s), {self.stream} stream"
+                + (f", {spread * 1000:.0f} ms spread" if spread is not None else "")
+            ),
+        )
+
+
+def measure_offset(
+    paths: SessionPaths, manifest: SessionManifest, stream: str = "ir1"
+) -> OffsetMeasurement:
+    """Measure a session's audio-to-video offset from its handclaps.
+
+    Writes nothing: storing the result is the caller's decision.
 
     Args:
-        argv: Command line arguments, or None to read them from the process.
+        paths: Where the session lives.
+        manifest: Its manifest, already read.
+        stream: Which video stream to look for movement in - ``ir1``, ``ir2``,
+            ``color`` or ``depth``.
 
     Returns:
-        0 if an offset was measured, 1 if not.
+        Every clap and what was found for it. Possibly with none matched.
+
+    Raises:
+        OffsetError: If the session has only one device, no impulse in its
+            audio, or no capture times in its archive.
     """
-    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("directory", help="the session to calibrate")
-    parser.add_argument(
-        "--apply",
-        action="store_true",
-        help="write the result into session.json",
-    )
-    parser.add_argument(
-        "--stream",
-        default="ir1",
-        choices=("ir1", "ir2", "color", "depth"),
-        help="which video stream to look for movement in (default: ir1)",
-    )
-    args = parser.parse_args(argv)
-
-    root, _, session_id = args.directory.rstrip("/").rpartition("/")
-    paths = SessionPaths.resolve(root or ".", session_id)
-    manifest = read_manifest(paths)
-
     if manifest.audio is None or manifest.video is None:
-        print(
-            "this session has only one device; there is no offset to measure",
-            file=sys.stderr,
+        raise OffsetError(
+            "this session has only one device; there is no offset to measure"
         )
-        return 1
-
-    claps = _find_claps(paths)
-    if not claps:
-        print(
+    impulses = _find_claps(paths)
+    if not impulses:
+        raise OffsetError(
             "no impulse found in the audio. Clap once or twice, close to the "
-            "array and in view of the camera, and record a few seconds",
-            file=sys.stderr,
+            "array and in view of the camera, and record a few seconds"
         )
-        return 1
-
-    print(f"session {manifest.session_id}")
-    print(f"  impulses        {len(claps)} found in the audio")
-
-    offsets = []
+    claps = []
     with ArchiveSource(paths.video) as archive:
         times = archive.frame_times()
         if not times:
-            print("  the archive stores no capture times", file=sys.stderr)
-            return 1
-        for n, audio_at in enumerate(claps, start=1):
-            found = _find_movement(archive, times, audio_at, args.stream)
+            raise OffsetError("the archive stores no capture times")
+        for audio_at in impulses:
+            found = _find_movement(archive, times, audio_at, stream)
             if found is None:
-                print(f"  clap {n}          audio {audio_at:.3f} s - no movement found")
-                continue
-            index, video_at, sharpness = found
-            # SyncCalibration's sign: added to an audio time, gives video time.
-            offset = video_at - audio_at
-            offsets.append(offset)
-            # Capped: a still scene has a zero median and an unbounded ratio.
-            print(
-                f"  clap {n}          audio {audio_at:.3f} s, video {video_at:.3f} s "
-                f"(frame {index}) -> {offset * 1000:+.1f} ms"
-                f"   [movement {min(sharpness, 999.0):.0f}x the median]"
-            )
-
-    if not offsets:
-        print(
-            "impulses were found but no matching movement was. Was the clap in "
-            "shot?",
-            file=sys.stderr,
-        )
-        return 1
-
-    values = np.array(offsets)
-    median = float(np.median(values))
-    spread = float(np.max(values) - np.min(values)) if len(values) > 1 else None
-    # One frame interval bounds a single clap; several claps average it down.
-    interval = 1.0 / (manifest.video.fps or 30.0)
-    uncertainty = interval / 2 / np.sqrt(len(values))
-
-    print()
-    print(f"  offset          {median * 1000:+.1f} ms")
-    print(
-        f"  uncertainty     +/- {uncertainty * 1000:.1f} ms "
-        f"(half a frame over sqrt({len(values)}) claps)"
+                claps.append(Clap(audio_at))
+            else:
+                index, video_at, sharpness = found
+                claps.append(Clap(audio_at, index, video_at, sharpness))
+    return OffsetMeasurement(
+        claps=claps,
+        frame_interval_s=1.0 / (manifest.video.fps or 30.0),
+        stream=stream,
     )
-    if spread is not None:
-        print(f"  spread          {spread * 1000:.1f} ms across the claps")
-        if spread > interval * 2:
-            print(
-                "  WARNING         the claps disagree by more than two frame "
-                "intervals; something other than a clap may have been detected"
-            )
-    print(
-        "\n  Add the offset to an audio time to reach the video time of the same "
-        "instant;\n  negative means the audio's clock reads later."
-    )
-
-    if not args.apply:
-        print("\n  Not written. Pass --apply to store it in session.json.")
-        return 0
-
-    manifest.calibration = SyncCalibration(
-        offset_s=median,
-        uncertainty_s=float(uncertainty),
-        method="handclap",
-        measured_at=time.time(),
-        note=(
-            f"{len(values)} clap(s), {args.stream} stream"
-            + (f", {spread * 1000:.0f} ms spread" if spread is not None else "")
-        ),
-    )
-    write_manifest(paths, manifest)
-    print(f"\n  Written to {paths.manifest}")
-    return 0
 
 
 # -- the audio side -----------------------------------------------------------
@@ -294,7 +309,3 @@ def _pick(frames, stream: str) -> np.ndarray | None:
         height, width = frames.color.shape
         return frames.color.view(np.uint8).reshape(height, width, 2)[:, :, 0]
     return frames.color.mean(axis=2)
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())

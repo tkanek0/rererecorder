@@ -6,13 +6,13 @@ assertions allow one frame interval, which is all the video can resolve.
 
 from __future__ import annotations
 
-import json
 import wave
 from pathlib import Path
 
+import calibrate
 import numpy as np
 import pytest
-
+from rrr.offset import handclap
 from rrr.timeline import (
     AudioClockPoint,
     AudioClockWriter,
@@ -24,7 +24,6 @@ from rrr.timeline import (
     read_manifest,
     write_manifest,
 )
-from rrr.tools import calibrate
 from rrr.video import ArchiveWriter, Calibration, Extrinsics, Intrinsics, StreamConfig
 
 RATE = 16_000
@@ -151,7 +150,7 @@ def session(tmp_path: Path, calibration: Calibration) -> SessionPaths:
 
 def test_the_audio_impulse_is_located(session: SessionPaths) -> None:
     """To well under a video frame: this half is not the limiting one."""
-    claps = calibrate._find_claps(session)
+    claps = handclap._find_claps(session)
 
     assert len(claps) == 1
     expected = MONO + MOVEMENT_FRAME / FPS + PLANTED_OFFSET_S
@@ -162,9 +161,9 @@ def test_the_video_movement_is_located(session: SessionPaths) -> None:
     """To within one frame, which is all the video can say."""
     from rrr.video import ArchiveSource
 
-    claps = calibrate._find_claps(session)
+    claps = handclap._find_claps(session)
     with ArchiveSource(session.video) as archive:
-        found = calibrate._find_movement(
+        found = handclap._find_movement(
             archive, archive.frame_times(), claps[0], "ir1"
         )
 
@@ -180,7 +179,7 @@ def test_a_still_recording_yields_no_movement(session: SessionPaths) -> None:
     from rrr.video import ArchiveSource
 
     with ArchiveSource(session.video) as archive:
-        found = calibrate._find_movement(
+        found = handclap._find_movement(
             archive, archive.frame_times(), MONO + 1.0, "ir1"
         )
 

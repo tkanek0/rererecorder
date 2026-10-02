@@ -294,8 +294,8 @@ takes to reach the array's converter against how long light takes to reach the
 camera's shutter timestamp.
 
 ```
-uv run python -m rrr.tools.calibrate data/sessions/<name>          # measure
-uv run python -m rrr.tools.calibrate data/sessions/<name> --apply  # and record it
+uv run python scripts/calibrate.py data/sessions/<name>          # measure
+uv run python scripts/calibrate.py data/sessions/<name> --apply  # and record it
 ```
 
 That measures *when*. **Where** is a separate question, and it is not measured
@@ -414,7 +414,7 @@ without a WAV is an error, not a silent omission.
 
 ## Not yet
 
-- **The offset between the two devices is unmeasured** until `rrr.tools.calibrate`
+- **The offset between the two devices is unmeasured** until `scripts/calibrate.py`
   runs on a session (see [Aligning the two devices](#aligning-the-two-devices)).
 - **A Raspberry Pi.** The image is built to be portable but has not run on one,
   and lossless at 54 MB/s will not fit there.

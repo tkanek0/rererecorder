@@ -82,7 +82,7 @@ export const SessionList = ({
                   <td className={lost > 0 ? 'value bad' : 'value good'}>{lost}</td>
                   <td>{session.audio ? duration(session.audio.seconds) : '-'}</td>
                   <td>
-                    {/* Null until tools.calibrate measures it; never shown as 0. */}
+                    {/* Null until scripts/calibrate.py measures it; never shown as 0. */}
                     {session.calibration.offset_s === null
                       ? 'unmeasured'
                       : `${(session.calibration.offset_s * 1000).toFixed(1)} ms`}

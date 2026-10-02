@@ -291,7 +291,7 @@ def _report(manifest: SessionManifest, directory: str) -> None:
     if manifest.calibration.measured:
         print(f"  offset          {manifest.calibration.offset_s * 1000:+.1f} ms")
     elif video is not None and audio is not None:
-        print("  offset          not measured - run tools.calibrate to align")
+        print("  offset          not measured - run scripts/calibrate.py to align")
 
     for error in manifest.errors:
         print(f"  error           {error}")

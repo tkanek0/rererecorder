@@ -301,7 +301,7 @@ machine where they share one - a Raspberry Pi, for instance.
 
 ## 14. Measure the device offset from a handclap, and say how well
 
-**Chosen:** `backend/rrr/tools/calibrate.py`. Detect the impulse in the audio, find the
+**Chosen:** `rrr.offset`, run as `scripts/calibrate.py`. Detect the impulse in the audio, find the
 peak frame-to-frame difference in the video around it, take the difference.
 Write nothing without `--apply`.
 

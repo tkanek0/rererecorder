@@ -38,10 +38,11 @@ flowchart TD
     R["backend/rrr/recorder/<br/>writers, session orchestration"]
     S["backend/rrr/api/<br/>FastAPI, MJPEG, player"]
     P["backend/rrr/playback/<br/>a recording on one clock"]
-    C["backend/rrr/tools/<br/>record, calibrate"]
+    C["backend/rrr/tools/<br/>record"]
+    O["backend/rrr/offset/<br/>handclap offset"]
     N["backend/rrr/inspection/<br/>cross-checks"]
     Z["backend/rrr/visualization/<br/>strips, compass"]
-    X["scripts/<br/>render_gif, render_mp4, export,<br/>inspect_session"]
+    X["scripts/<br/>render_gif, render_mp4, export,<br/>inspect_session, calibrate"]
     W["frontend/<br/>vite + react"]
     T --> V
     V --> R
@@ -51,6 +52,8 @@ flowchart TD
     V --> P
     V --> N
     N --> X
+    V --> O
+    O --> X
     P --> Z
     P --> X
     Z --> X
@@ -118,7 +121,8 @@ it. The two tracks share a clock, but the residual between a microphone and a
 shutter - how long a sound takes to reach the converter, how long light takes to
 reach a timestamp - is not derivable from either device's documentation. Showing
 zero would assert an alignment nobody has established. The page displays
-"unmeasured", and `backend/rrr/tools/calibrate.py` is what will fill it in.
+"unmeasured", and `scripts/calibrate.py` (measuring with `rrr.offset`) is what
+will fill it in.
 
 `rig` is the same shape of refusal, for space rather than time. A direction
 from the array is a bearing in the array's own frame, and turning it into a ray

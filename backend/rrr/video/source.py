@@ -16,8 +16,6 @@ from typing import Protocol
 import numpy as np
 import pyrealsense2 as rs
 
-from rrr.timeline import ClockPair, read_clocks
-
 from .config import StreamConfig
 from .types import (
     Calibration,
@@ -861,21 +859,22 @@ class LiveSource:
                     ) from exc
                 continue
 
-            # Both host clocks per set, since NTP slews the offset between them.
-            clock = read_clocks()
-            last_frame_at = clock.monotonic
-            frame_set = self._assemble(composite, clock)
+            # The axis the audio is also on; the SDK's own timestamps are
+            # kept beside it, unconverted.
+            received = time.monotonic()
+            last_frame_at = received
+            frame_set = self._assemble(composite, received)
             if frame_set is not None:
                 yield frame_set
 
     def _assemble(
-        self, composite: rs.composite_frame, clock: ClockPair
+        self, composite: rs.composite_frame, received: float
     ) -> FrameSet | None:
         """Turn one SDK composite frame into a FrameSet.
 
         Args:
             composite: What ``wait_for_frames`` returned.
-            clock: Both host clocks, read when it returned.
+            received: ``time.monotonic()`` when it returned.
 
         Returns:
             The frame set, or None if an enabled stream was missing or every
@@ -955,7 +954,7 @@ class LiveSource:
             depth_timestamp_ms=(
                 float(frames["depth"].get_timestamp()) if "depth" in frames else None
             ),
-            received_monotonic=clock.monotonic,
+            received_monotonic=received,
             color=color,
             depth=depth,
             calibration=self.calibration,

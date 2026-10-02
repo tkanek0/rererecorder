@@ -357,7 +357,7 @@ def test_samples_carry_the_clock_so_they_can_be_placed(tmp_path, native, make_fr
     with ArchiveSource(path) as archive:
         sample = next(archive.motion_samples())
 
-    assert sample.clock is not None
+    assert sample.capture_monotonic is not None
     assert sample.capture_monotonic == pytest.approx(
         sample.timestamp_ms / 1000.0 - OFFSET, abs=1e-6
     )

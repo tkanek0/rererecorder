@@ -11,8 +11,6 @@ from dataclasses import dataclass
 import cv2
 import numpy as np
 
-from rrr.timeline import ClockPair
-
 
 @dataclass(frozen=True)
 class Intrinsics:
@@ -243,9 +241,10 @@ class MotionSample:
         x: Acceleration in m/s^2, or angular velocity in rad/s.
         y: The same, second axis.
         z: The same, third axis.
-        clock: Host clocks for converting ``timestamp_ms`` onto the monotonic
-            axis. Attached on read-back from the archive's anchor, not per
-            sample.
+        capture_monotonic: When this sample was taken, on the axis everything
+            else uses, or None if nothing has placed it there. Filled in on
+            read-back by whoever holds the host clocks the sensor's timestamp
+            was anchored to - the archive - rather than by the device.
     """
 
     stream: str
@@ -253,18 +252,7 @@ class MotionSample:
     x: float
     y: float
     z: float
-    clock: ClockPair | None = None
-
-    @property
-    def capture_monotonic(self) -> float | None:
-        """When this sample was taken, on the axis everything else uses.
-
-        Returns:
-            The instant, or None if no clock pair is attached.
-        """
-        if self.clock is None:
-            return None
-        return self.clock.epoch_ms_to_monotonic(self.timestamp_ms)
+    capture_monotonic: float | None = None
 
     @property
     def values(self) -> tuple[float, float, float]:

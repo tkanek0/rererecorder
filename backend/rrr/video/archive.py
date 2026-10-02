@@ -961,8 +961,8 @@ class ArchiveSource:
         """Yield every inertial sample, oldest first.
 
         Yields:
-            The samples, each carrying the archive's clock anchor so that
-            ``capture_monotonic`` works.
+            The samples, each with ``capture_monotonic`` placed through the
+            archive's clock anchor, or None if it has none.
 
         Raises:
             StreamError: If the archive is not open.
@@ -973,6 +973,11 @@ class ArchiveSource:
         if self._connection is None:
             raise StreamError("open the archive before reading samples")
         anchor = self.clock_anchor
+
+        def place(timestamp_ms: float) -> float | None:
+            if anchor is None:
+                return None
+            return anchor.epoch_ms_to_monotonic(timestamp_ms)
 
         if "imu" in self._tables:
             rows = self._connection.execute(
@@ -985,7 +990,7 @@ class ArchiveSource:
                     x=x,
                     y=y,
                     z=z,
-                    clock=anchor,
+                    capture_monotonic=place(timestamp_ms),
                 )
             return
 
@@ -997,9 +1002,13 @@ class ArchiveSource:
         )
         for timestamp_ms, ax, ay, az, gx, gy, gz in rows:
             if ax is not None:
-                yield MotionSample("accel", timestamp_ms, ax, ay, az, clock=anchor)
+                yield MotionSample(
+                    "accel", timestamp_ms, ax, ay, az, place(timestamp_ms)
+                )
             if gx is not None:
-                yield MotionSample("gyro", timestamp_ms, gx, gy, gz, clock=anchor)
+                yield MotionSample(
+                    "gyro", timestamp_ms, gx, gy, gz, place(timestamp_ms)
+                )
 
     def motion_rate(self) -> dict[str, float]:
         """Measured sample rate of each inertial stream, in Hz.

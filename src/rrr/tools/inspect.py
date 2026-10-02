@@ -241,8 +241,10 @@ def _check_video(
                     "cannot be placed against the audio"
                 )
                 return None
+            metadata_sql = "metadata" if "metadata" in columns else "NULL"
             rows = connection.execute(
-                f"SELECT idx, {monotonic_sql} FROM frames ORDER BY idx"
+                f"SELECT idx, {monotonic_sql}, {metadata_sql} FROM frames "
+                "ORDER BY idx"
             ).fetchall()
     except sqlite3.Error as error:
         check.fail(f"the archive cannot be read: {error}")
@@ -276,9 +278,42 @@ def _check_video(
     if np.any(gaps <= 0):
         check.fail("frame capture times are not increasing")
 
+    counters: dict[str, list[int]] = {"color": [], "depth": []}
+    for row in rows:
+        if not row[2]:
+            continue
+        for stream, fields in json.loads(row[2]).items():
+            if stream in counters and "frame_counter" in fields:
+                counters[stream].append(int(fields["frame_counter"]))
+    missing: dict[str, dict[str, int]] = {}
+    for stream, numbers in counters.items():
+        if not numbers:
+            continue
+        count = count_missing(numbers)
+        missing[stream] = count
+        if count["missing"]:
+            check.fail(
+                f"{count['missing']} of the {count['span']} {stream} frames the "
+                f"camera numbered never reached the recorder"
+            )
+        if count["restarts"]:
+            check.fail(
+                f"the {stream} frame counter restarted {count['restarts']} times: "
+                f"the stream restarted mid-recording, losing an uncounted number "
+                f"of frames at each"
+            )
+    if not missing:
+        # Without UVC metadata the SDK's counter is the host's own, and gapless
+        # by construction: docs/windows-native.md, "The actual fix".
+        check.note(
+            "no device frame counters, so frames lost before the recorder are "
+            "not counted"
+        )
+
     span = float(monotonic[-1] - monotonic[0])
     fps = (len(rows) - 1) / span if span > 0 else None
     return {
+        "missing": missing,
         "frames": len(rows),
         "span_s": span,
         "fps": fps,
@@ -289,6 +324,35 @@ def _check_video(
             "min": float(np.min(gaps)) * 1000.0,
             "max": float(np.max(gaps)) * 1000.0,
         },
+    }
+
+
+def count_missing(numbers: list[int]) -> dict[str, int]:
+    """Count the frames a camera numbered but never delivered.
+
+    Args:
+        numbers: One stream's ``frame_counter`` per recorded set, in order.
+            A set may repeat the previous frame (decision 21), which is not a
+            loss.
+
+    Returns:
+        ``span`` (frames numbered), ``delivered`` (distinct frames),
+        ``missing`` and ``restarts``. A counter going backwards is a restarted
+        stream; the runs between restarts are counted separately, and what was
+        lost across a restart is not knowable from the counter.
+    """
+    runs: list[list[int]] = [[numbers[0]]]
+    for number in numbers[1:]:
+        if number < runs[-1][-1]:
+            runs.append([])
+        runs[-1].append(number)
+    span = sum(run[-1] - run[0] + 1 for run in runs)
+    delivered = sum(len(set(run)) for run in runs)
+    return {
+        "span": span,
+        "delivered": delivered,
+        "missing": span - delivered,
+        "restarts": len(runs) - 1,
     }
 
 
@@ -591,6 +655,11 @@ def _print(manifest, audio, video, imu, overlap, doa, marks, check: Check) -> No
             f"  frame interval  {gap['median']:.1f} ms median, "
             f"{gap['min']:.1f} min, {gap['max']:.1f} max"
         )
+        for stream, count in video["missing"].items():
+            print(
+                f"  {stream:<6}          {count['delivered']} of {count['span']} "
+                f"numbered frames, MISSING {count['missing']}"
+            )
 
     if imu is not None:
         rates = ", ".join(

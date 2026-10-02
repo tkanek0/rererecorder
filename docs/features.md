@@ -219,6 +219,13 @@ The two length figures come from different numbers - the WAV header's
 `frames / rate`, and a line fitted to measured clock points - so their agreeing
 means something. Its exit status is 1 if any check disagreed.
 
+Frames lost before the recorder are counted from the camera's own
+`frame_counter`, per stream, the way [frame-loss.md](frame-loss.md) counted them:
+a gap is a frame the camera produced and never delivered, and a counter that
+goes back to zero is a stream that restarted mid-recording. Both fail the
+check. Without UVC metadata the counter is the host's own and proves nothing,
+so the losses are reported as not counted rather than as zero.
+
 ## Reading a recording
 
 ```python

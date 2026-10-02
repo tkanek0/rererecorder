@@ -25,6 +25,8 @@ from .types import (
     FrameSet,
     Intrinsics,
     Motion,
+    color_to_bgr,
+    color_to_rgb,
     join_yuyv,
     split_yuyv,
 )
@@ -52,6 +54,8 @@ __all__ = [
     "StreamError",
     "StreamSpec",
     "WriterStats",
+    "color_to_bgr",
+    "color_to_rgb",
     "join_yuyv",
     "list_devices",
     "split_yuyv",

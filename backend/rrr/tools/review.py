@@ -1,17 +1,14 @@
 """Reading a raw session for presentation copies.
 
 Shared by the review renderers (``render_mp4``, ``render_gif``). The archive and
-WAV remain the measurements; these helpers only decide which channel to show,
-how to place it on the video clock, and how to turn a colour frame into BGR.
+WAV remain the measurements; these helpers only decide which channel to show
+and how to place it on the video clock.
 """
 
 from __future__ import annotations
 
 import wave
 from typing import Any
-
-import cv2
-import numpy as np
 
 from rrr.timeline import AudioClockPoint, AudioTimeline, Rig
 
@@ -99,18 +96,3 @@ def audio_timeline(
         start = first_monotonic if first_monotonic is not None else fallback_start
         return AudioTimeline([AudioClockPoint(sample=0, monotonic=start)], rate), False
 
-
-def bgr(frames: Any) -> np.ndarray:
-    """Convert either recorded colour representation into encoder-ready BGR.
-
-    Args:
-        frames: A frame set whose colour image is present.
-
-    Returns:
-        ``(height, width, 3)`` uint8 BGR.
-    """
-    if frames.color_format == "yuyv":
-        height, width = frames.color.shape
-        packed = frames.color.view(np.uint8).reshape(height, width, 2)
-        return cv2.cvtColor(packed, cv2.COLOR_YUV2BGR_YUY2)
-    return cv2.cvtColor(frames.color, cv2.COLOR_RGB2BGR)

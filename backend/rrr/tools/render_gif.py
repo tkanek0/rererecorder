@@ -28,8 +28,8 @@ import cv2
 import numpy as np
 
 from rrr.timeline import AudioTimeline, SessionError, SessionPaths, read_manifest
-from rrr.tools.review import audio_timeline, bgr, describe_audio
-from rrr.video import ArchiveSource, StreamError
+from rrr.tools.review import audio_timeline, describe_audio
+from rrr.video import ArchiveSource, StreamError, color_to_bgr
 
 DEFAULT_OUTPUT = "video.gif"
 # GIF frame delays are stored in hundredths of a second.
@@ -291,9 +291,9 @@ def _compose(
 ) -> np.ndarray:
     """Build one GIF frame: the scaled colour image and the requested strips."""
     frames = archive.frame_at(index, only="color")
-    if frames is None or frames.color is None:
+    image = color_to_bgr(frames) if frames is not None else None
+    if image is None:
         raise ValueError(f"frame {index} has no colour image")
-    image = bgr(frames)
     height = max(round(image.shape[0] * width / image.shape[1]), 1)
     image = cv2.resize(image, (width, height), interpolation=cv2.INTER_AREA)
     if audio is None:

@@ -12,7 +12,7 @@ from typing import Literal
 import cv2
 import numpy as np
 
-from rrr.video import FrameSet
+from rrr.video import FrameSet, color_to_bgr
 
 #: Which preview a request is asking for.
 Kind = Literal["color", "depth", "ir1", "ir2"]
@@ -70,28 +70,6 @@ def colorize_depth(
     return coloured
 
 
-def to_bgr(frames: FrameSet) -> np.ndarray | None:
-    """Convert a set's colour image to BGR, whatever format it arrived in.
-
-    Args:
-        frames: The set to read.
-
-    Returns:
-        ``(height, width, 3)`` uint8 BGR, or None if colour is disabled.
-    """
-    if frames.color is None:
-        return None
-    if frames.color_format == "yuyv":
-        # Packed YUYV straight to BGR in one call; cvtColor needs the byte
-        # pair as a channel axis, so reshape the uint16 view to two channels.
-        height, width = frames.color.shape
-        return cv2.cvtColor(
-            frames.color.view(np.uint8).reshape(height, width, 2),
-            cv2.COLOR_YUV2BGR_YUY2,
-        )
-    return cv2.cvtColor(frames.color, cv2.COLOR_RGB2BGR)
-
-
 def to_bgr_from_planes(
     y: np.ndarray, u: np.ndarray, v: np.ndarray
 ) -> np.ndarray:
@@ -108,7 +86,7 @@ def to_bgr_from_planes(
     height, width = y.shape
     yuv = np.empty((height, width, 3), np.uint8)
     yuv[:, :, 0] = y
-    # 4:2:2: repeat each chroma sample, not interpolate, to match to_bgr.
+    # 4:2:2: repeat each chroma sample, not interpolate, to match color_to_bgr.
     yuv[:, :, 1] = np.repeat(u, 2, axis=1)
     yuv[:, :, 2] = np.repeat(v, 2, axis=1)
     return cv2.cvtColor(yuv, cv2.COLOR_YUV2BGR)
@@ -136,7 +114,7 @@ def render(
         depth come back as BGR; infrared stays single-channel.
     """
     if kind == "color":
-        return to_bgr(frames)
+        return color_to_bgr(frames)
     if kind == "depth":
         if frames.depth is None:
             return None

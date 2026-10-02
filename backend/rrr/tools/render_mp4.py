@@ -34,8 +34,8 @@ from rrr.timeline import (
     SessionPaths,
     read_manifest,
 )
-from rrr.tools.review import audio_timeline, bgr, describe_audio
-from rrr.video import ArchiveSource, StreamError
+from rrr.tools.review import audio_timeline, describe_audio
+from rrr.video import ArchiveSource, StreamError, color_to_bgr
 
 VIDEO_TIME_BASE = Fraction(1, 90_000)
 AUDIO_FRAME_SAMPLES = 1_024
@@ -252,9 +252,9 @@ def _encode(
 ) -> None:
     """Encode and mux both tracks into one temporary MP4."""
     first = archive.frame_at(times[0][0], only="color")
-    if first is None or first.color is None:
+    first_image = color_to_bgr(first) if first is not None else None
+    if first_image is None:
         raise ValueError("the archive has no colour frames")
-    first_image = bgr(first)
     height, width = first_image.shape[:2]
     if width % 2 or height % 2:
         raise ValueError("H.264 requires an even colour frame width and height")
@@ -282,9 +282,9 @@ def _encode(
         previous_pts = -1
         for position, (index, stamp) in enumerate(times):
             frames = first if position == 0 else archive.frame_at(index, only="color")
-            if frames is None or frames.color is None:
+            image = color_to_bgr(frames) if frames is not None else None
+            if image is None:
                 raise ValueError(f"frame {index} has no colour image")
-            image = bgr(frames)
             _draw_direction(image, stamp, directions, doa_mode)
             frame = av.VideoFrame.from_ndarray(image, format="bgr24")
             pts = max(previous_pts + 1, round((stamp - start) / float(VIDEO_TIME_BASE)))

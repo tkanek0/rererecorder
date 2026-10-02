@@ -38,7 +38,7 @@ from rrr.timeline import (
     read_events,
     read_manifest,
 )
-from rrr.video import ArchiveSource, StreamError
+from rrr.video import ArchiveSource, StreamError, color_to_rgb
 
 logger = logging.getLogger(__name__)
 
@@ -411,7 +411,7 @@ def _write_frames(
                 metadata_count += 1
 
                 planes = {
-                    "color": (_rgb(frames), frames.color_timestamp_ms),
+                    "color": (color_to_rgb(frames), frames.color_timestamp_ms),
                     "ir_left": (
                         frames.infrared[0] if frames.infrared else None,
                         frames.depth_timestamp_ms,
@@ -507,26 +507,6 @@ def _write_frames(
         streams |= _write_motion(archive, destination, time_range)
 
     return streams, time_range
-
-
-def _rgb(frames: Any) -> np.ndarray | None:
-    """Convert a frame set's colour image to RGB, whatever it arrived as.
-
-    Args:
-        frames: The set to read.
-
-    Returns:
-        ``(height, width, 3)`` uint8 RGB, or None if colour was not recorded.
-    """
-    if frames.color is None:
-        return None
-    if frames.color_format != "yuyv":
-        return frames.color
-    height, width = frames.color.shape
-    return cv2.cvtColor(
-        frames.color.view(np.uint8).reshape(height, width, 2),
-        cv2.COLOR_YUV2RGB_YUY2,
-    )
 
 
 def _write_motion(

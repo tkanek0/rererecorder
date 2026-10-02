@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+import cv2
 import numpy as np
 
 from rrr.timeline import ClockPair
@@ -380,3 +381,49 @@ class FrameSet:
     timestamp_domain: str = "unknown"
     color_format: str = "rgb8"
     infrared: tuple[np.ndarray, np.ndarray] | None = None
+
+
+def color_to_bgr(frames: FrameSet) -> np.ndarray | None:
+    """Convert a set's colour image to BGR, whatever format it was recorded in.
+
+    Args:
+        frames: The set to read.
+
+    Returns:
+        ``(height, width, 3)`` uint8 BGR, or None if colour is disabled.
+    """
+    if frames.color is None:
+        return None
+    if frames.color_format == "yuyv":
+        return cv2.cvtColor(_yuyv_pairs(frames.color), cv2.COLOR_YUV2BGR_YUY2)
+    return cv2.cvtColor(frames.color, cv2.COLOR_RGB2BGR)
+
+
+def color_to_rgb(frames: FrameSet) -> np.ndarray | None:
+    """Convert a set's colour image to RGB, whatever format it was recorded in.
+
+    Args:
+        frames: The set to read.
+
+    Returns:
+        ``(height, width, 3)`` uint8 RGB - the recorded array itself when it
+        already was RGB - or None if colour is disabled.
+    """
+    if frames.color is None:
+        return None
+    if frames.color_format == "yuyv":
+        return cv2.cvtColor(_yuyv_pairs(frames.color), cv2.COLOR_YUV2RGB_YUY2)
+    return frames.color
+
+
+def _yuyv_pairs(color: np.ndarray) -> np.ndarray:
+    """View packed YUYV as the two-channel byte pairs ``cvtColor`` expects.
+
+    Args:
+        color: ``(height, width)`` uint16, one element per pixel.
+
+    Returns:
+        ``(height, width, 2)`` uint8, sharing memory with ``color``.
+    """
+    height, width = color.shape
+    return color.view(np.uint8).reshape(height, width, 2)

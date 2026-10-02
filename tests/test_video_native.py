@@ -14,7 +14,7 @@ import numpy as np
 import pytest
 
 from rrr.video import ArchiveSource, ArchiveWriter, Calibration, FrameSet, StreamConfig
-from rrr.video.types import join_yuyv, split_yuyv
+from rrr.video.types import color_to_bgr, color_to_rgb, join_yuyv, split_yuyv
 
 #: The camera's real maxima, and the sizes every measurement in this repository
 #: was taken at.
@@ -226,6 +226,25 @@ def test_the_split_separates_luma_from_chroma() -> None:
     assert y.tolist() == [[1, 3]]
     assert u.tolist() == [[2]]
     assert v.tolist() == [[4]]
+
+
+def test_colour_conversions_agree_across_recorded_formats(
+    make_frames: Callable[..., FrameSet],
+) -> None:
+    """YUYV and RGB recordings of the same grey come out the same, in either order."""
+    # Y=128 with neutral chroma: grey 130, since YUYV is BT.601 video range.
+    yuyv = np.full((2, 4), 0x8080, dtype=np.uint16)
+    rgb = np.full((2, 4, 3), 130, dtype=np.uint8)
+    from_yuyv = make_frames(color=yuyv, color_format="yuyv")
+    from_rgb = make_frames(color=rgb)
+
+    assert color_to_rgb(from_rgb) is rgb
+    for convert in (color_to_bgr, color_to_rgb):
+        a, b = convert(from_yuyv), convert(from_rgb)
+        assert a is not None and b is not None
+        assert a.shape == (2, 4, 3) and np.abs(a.astype(int) - b).max() <= 1
+    assert color_to_bgr(make_frames(color=None)) is None
+    assert color_to_rgb(make_frames(color=None)) is None
 
 
 # -- what counts as a lost frame ----------------------------------------------

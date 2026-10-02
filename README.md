@@ -58,6 +58,7 @@ What a session directory holds is in [docs/design.md](docs/design.md#a-session-i
 | [design.md](docs/design.md) | the one idea, module boundaries, what a session is |
 | [features.md](docs/features.md) | what it records, what it reports, how to drive it, and what is not done yet |
 | [decisions.md](docs/decisions.md) | each choice, the alternatives, and the measurement that decided it |
+| [export-format.md](docs/export-format.md) | the neutral layout a recording leaves this repository in |
 | [frame-loss.md](docs/frame-loss.md) | the frame-loss investigation on Linux |
 | [windows-native.md](docs/windows-native.md) | the investigation on Windows, natively and under WSL2 |
 

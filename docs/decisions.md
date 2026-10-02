@@ -397,7 +397,8 @@ session - and the rest is procedure.
 
 **Chosen:** `scripts/export.py` writes a session out as plain files - PNG, CSV,
 WAV - in a flat layout indexed by `manifest.json`. The analysis repository reads
-that. It does not import this package.
+that. It does not import this package. The layout itself is specified in
+`docs/export-format.md`; this entry keeps why.
 
 **Alternatives:** letting the analysis side depend on this repository and use
 `ArchiveSource` directly (no duplication, no second copy of a 200 GB recording,

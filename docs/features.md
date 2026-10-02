@@ -341,29 +341,12 @@ By default the export goes inside the session, so a recording and what was made
 from it are kept, moved and deleted together. `-o` names the export directory
 itself, not a parent to put one in.
 
-```
-data/sessions/x/export/
-    manifest.json     the index: every stream, what it holds, where it is
-    calibration.json  every sensor, every transform, and what is still unknown
-    color/            index.csv + data/<sample>.png
-    ir_left/          index.csv + data/<sample>.png
-    ir_right/         index.csv + data/<sample>.png
-    depth/            index.csv + data/<sample>.png   16-bit, raw z16
-    frame_metadata/   index.jsonl
-    imu_accel/        index.csv
-    imu_gyro/         index.csv
-    audio/            audio.wav + clock.csv + clock_fit.json
-    doa/              index.csv
-    events/           index.csv
-    derived/          empty: where whatever is computed from this goes
-```
-
-Times are integer nanoseconds on `CLOCK_MONOTONIC`; image indexes also keep
-each sensor's own timestamp and its domain. Images are named by a zero-padded
-sample id. `frame_metadata/index.jsonl` keeps the variable firmware fields keyed
-by frame-set id. Colour is written as RGB, depth as raw z16 with its scale. The
-measured device offset is written down and not applied, and anything unknown is
-named in `notes`.
+The layout - every file, column and key, and what a reader may rely on - is in
+[export-format.md](export-format.md). In short: one directory per role
+(`color`, `ir_left`, `depth`, `imu_accel`, `audio`, ...) indexed by
+`manifest.json`, times in integer nanoseconds on `CLOCK_MONOTONIC`, colour as
+RGB and depth as raw z16, and the measured device offset written down but not
+applied.
 
 `--start` and `--end` choose image-frame positions. Their half-open host-clock
 interval is applied to audio, IMU, DOA and marks too; `--stride` only decimates

@@ -3,7 +3,7 @@
     uv run python scripts/validate_export.py data/sessions/<session>/export
 
 Together with ``scripts/export.py``, which writes the layout, this is where the
-export format is defined; docs/features.md "Exporting" describes it. Deliberately
+export format is defined; docs/export-format.md describes it. Deliberately
 imports nothing from ``rrr``: it checks what an outside consumer sees, and can
 be copied to one as it is.
 """

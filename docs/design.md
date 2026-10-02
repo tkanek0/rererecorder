@@ -148,7 +148,7 @@ flat, manifest-indexed layout, and that is the boundary: the analysis repository
 reads the export and never imports this package. The layout lives only in that
 script and in `scripts/validate_export.py`, which imports nothing from `rrr`;
 the package supplies the reading (`rrr.playback`) and not the format. See
-decisions 17.
+[export-format.md](export-format.md) and decisions 17.
 
 ## Reading it back
 

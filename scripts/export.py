@@ -8,8 +8,8 @@ Writes the recording as plain files - PNG, CSV, a WAV - so a consumer needs
 a filesystem and nothing else. The session is read through ``rrr.playback``;
 the layout is decided here and nowhere in ``rrr``. This file and
 ``scripts/validate_export.py``, which checks every export before it is
-published, define the format together; docs/features.md "Exporting" describes
-it and docs/decisions.md 17 says why.
+published, define the format together; docs/export-format.md describes it and
+docs/decisions.md 17 says why.
 """
 
 from __future__ import annotations

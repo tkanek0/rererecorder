@@ -51,8 +51,8 @@ Agreed with the user:
   analysis repository. It does **not** import this package. `video.rrdb` is a
   performance-driven internal format and stays that way.
   `scripts/export.py` writes it and `scripts/validate_export.py` checks it; the
-  `rrr` package knows nothing of the layout. The layout and its four principles
-  are in `docs/decisions.md` 17.
+  `rrr` package knows nothing of the layout. The layout is specified in
+  `docs/export-format.md`, and why it looks that way in `docs/decisions.md` 17.
 - **Lab prototyping only.** No field site yet, so site-level anchoring, capacity
   profiles for long field sessions and redaction are all deferred.
 

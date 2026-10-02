@@ -4,15 +4,16 @@ A presentation copy, not a measurement; see docs/features.md "MP4 review copies"
 
 Usage::
 
-    uv run python -m rrr.tools.render_mp4 data/sessions/walk-01
-    uv run python -m rrr.tools.render_mp4 data/sessions/walk-01 -o /tmp/walk-01.mp4
+    uv run python scripts/render_mp4.py data/sessions/walk-01
+    uv run python scripts/render_mp4.py data/sessions/walk-01 -o /tmp/walk-01.mp4
+
+The session is read through ``rrr.playback`` and the compass is drawn by
+``rrr.visualization``; this script encodes and muxes the movie.
 """
 
 from __future__ import annotations
 
 import argparse
-import bisect
-import math
 import os
 import tempfile
 from dataclasses import dataclass
@@ -20,13 +21,12 @@ from fractions import Fraction
 from pathlib import Path
 
 import av
-import cv2
 import numpy as np
-
 from rrr.playback import (
     AudioSelection,
     Direction,
     audio_timeline,
+    direction_at,
     frame_times,
     in_colour_camera,
     read_directions,
@@ -42,6 +42,7 @@ from rrr.timeline import (
     read_manifest,
 )
 from rrr.video import ArchiveSource, Extrinsics, StreamError, color_to_bgr
+from rrr.visualization import draw_compass
 
 VIDEO_TIME_BASE = Fraction(1, 90_000)
 AUDIO_FRAME_SAMPLES = 1_024
@@ -333,35 +334,9 @@ def _draw_direction(
     mode: str,
 ) -> None:
     """Draw the freshest non-stale DOA reading as a top-down compass."""
-    if not readings:
-        return
-    position = bisect.bisect_right(readings, stamp, key=lambda reading: reading.time) - 1
-    if position < 0:
-        return
-    reading = readings[position]
-    if stamp - reading.time > DOA_STALE_S:
-        return
-    radius = max(28, min(image.shape[:2]) // 14)
-    centre = (image.shape[1] - radius - 18, radius + 18)
-    colour = (40, 220, 40) if reading.voice else (160, 160, 160)
-    cv2.circle(image, centre, radius, (240, 240, 240), 2, cv2.LINE_AA)
-    radians = math.radians(reading.angle)
-    tip = (
-        round(centre[0] + radius * 0.82 * math.sin(radians)),
-        round(centre[1] - radius * 0.82 * math.cos(radians)),
-    )
-    cv2.arrowedLine(image, centre, tip, colour, 3, cv2.LINE_AA, tipLength=0.25)
-    label = f"DOA {reading.angle:.0f} deg {'camera' if mode.startswith('colour') else 'array'}"
-    cv2.putText(
-        image,
-        label,
-        (12, image.shape[0] - 16),
-        cv2.FONT_HERSHEY_SIMPLEX,
-        max(0.45, image.shape[1] / 1800.0),
-        colour,
-        2,
-        cv2.LINE_AA,
-    )
+    reading = direction_at(readings, stamp, DOA_STALE_S)
+    if reading is not None:
+        draw_compass(image, reading, camera=mode.startswith("colour"))
 
 
 if __name__ == "__main__":

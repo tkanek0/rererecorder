@@ -5,10 +5,13 @@ copies".
 
 Usage::
 
-    uv run python -m rrr.tools.render_gif data/sessions/walk-01
-    uv run python -m rrr.tools.render_gif data/sessions/walk-01 --volume
-    uv run python -m rrr.tools.render_gif data/sessions/walk-01 --volume --waveform \\
+    uv run python scripts/render_gif.py data/sessions/walk-01
+    uv run python scripts/render_gif.py data/sessions/walk-01 --volume
+    uv run python scripts/render_gif.py data/sessions/walk-01 --volume --waveform \\
         -o /tmp/walk-01.gif
+
+The session is read through ``rrr.playback`` and the strips are drawn by
+``rrr.visualization``; this script lays them out and encodes the GIF.
 """
 
 from __future__ import annotations
@@ -25,30 +28,21 @@ import av
 import av.filter
 import cv2
 import numpy as np
-
 from rrr.playback import audio_timeline, frame_times, read_mono, select_audio
 from rrr.timeline import AudioTimeline, SessionError, SessionPaths, read_manifest
 from rrr.video import ArchiveSource, StreamError, color_to_bgr
+from rrr.visualization import (
+    BACKGROUND,
+    PAD,
+    loudness_profile,
+    volume_strip,
+    waveform_scale,
+    waveform_strip,
+)
 
 DEFAULT_OUTPUT = "video.gif"
 # GIF frame delays are stored in hundredths of a second.
 GIF_TIME_BASE = Fraction(1, 100)
-PAD = 4
-VOLUME_HEIGHT = 30
-WAVEFORM_HEIGHT = 70
-BACKGROUND = (16, 16, 16)
-# BGR.
-PLAYED = (210, 180, 150)
-UNPLAYED = (110, 90, 70)
-PLAYHEAD = (60, 60, 255)
-WAVE = (140, 220, 120)
-AXIS = (50, 50, 50)
-LABEL = (190, 190, 190)
-FONT = cv2.FONT_HERSHEY_SIMPLEX
-FONT_SCALE = 0.35
-# Amplitude that fills the waveform strip; a high percentile so that one click
-# does not flatten the rest of the recording.
-WAVEFORM_PERCENTILE = 99.95
 
 
 @dataclass(frozen=True)
@@ -228,8 +222,8 @@ def render(
                 offset=offset or 0.0,
                 label=description.label,
                 channels=description.selected,
-                loudness=_column_rms(samples, width),
-                scale=_waveform_scale(samples),
+                loudness=loudness_profile(samples, width),
+                scale=waveform_scale(samples),
             )
 
         selected = times[::stride]
@@ -284,87 +278,28 @@ def _compose(
     strips: list[np.ndarray] = []
     sample = audio.sample_at(stamp)
     if volume:
-        strips.append(_volume_strip(audio, width, sample))
+        progress = sample / max(len(audio.samples), 1)
+        strips.append(volume_strip(audio.loudness, width, progress))
     if waveform:
-        strips.append(_waveform_strip(audio, width, sample, window_s, stamp - start))
+        label = f"ch {'+'.join(map(str, audio.channels))}, last {window_s:g} s"
+        strips.append(
+            waveform_strip(
+                audio.samples,
+                audio.rate,
+                audio.scale,
+                width,
+                sample,
+                window_s,
+                label=label,
+                elapsed=stamp - start,
+            )
+        )
     rows = [image]
     for strip in strips:
         rows.append(np.full((PAD, width, 3), BACKGROUND, dtype=np.uint8))
         rows.append(strip)
     rows.append(np.full((PAD, width, 3), BACKGROUND, dtype=np.uint8))
     return np.vstack(rows)
-
-
-def _volume_strip(audio: _Audio, width: int, sample: int) -> np.ndarray:
-    """Draw the whole recording's loudness with a playhead at ``sample``."""
-    strip = np.full((VOLUME_HEIGHT, width, 3), BACKGROUND, dtype=np.uint8)
-    head = int(np.clip(sample / max(len(audio.samples), 1), 0.0, 1.0) * (width - 1))
-    for x, value in enumerate(audio.loudness):
-        top = VOLUME_HEIGHT - 1 - round(value * (VOLUME_HEIGHT - 1))
-        strip[top:, x] = PLAYED if x <= head else UNPLAYED
-    cv2.line(strip, (head, 0), (head, VOLUME_HEIGHT - 1), PLAYHEAD, 2)
-    return strip
-
-
-def _column_rms(samples: np.ndarray, width: int) -> np.ndarray:
-    """RMS of ``width`` equal slices, scaled so the loudest is 1."""
-    rms = np.array(
-        [
-            float(np.sqrt(np.mean(np.square(part, dtype=np.float64)))) if len(part) else 0.0
-            for part in np.array_split(samples, width)
-        ]
-    )
-    peak = rms.max() if len(rms) else 0.0
-    return rms / peak if peak > 0 else rms
-
-
-def _waveform_strip(
-    audio: _Audio, width: int, sample: int, window_s: float, elapsed: float
-) -> np.ndarray:
-    """Draw the ``window_s`` seconds ending at ``sample`` as a min/max envelope."""
-    scale = audio.scale
-    length = max(round(window_s * audio.rate), 1)
-    window = np.zeros(length, dtype=np.float32)
-    first = sample - length
-    source = audio.samples[max(first, 0) : max(min(sample, len(audio.samples)), 0)]
-    if len(source):
-        window[max(-first, 0) : max(-first, 0) + len(source)] = source
-
-    strip = np.full((WAVEFORM_HEIGHT, width, 3), BACKGROUND, dtype=np.uint8)
-    middle = (WAVEFORM_HEIGHT - 1) / 2
-    cv2.line(strip, (0, round(middle)), (width - 1, round(middle)), AXIS, 1)
-    for x, part in enumerate(np.array_split(window, width)):
-        if not len(part):
-            continue
-        high = float(np.clip(part.max() / scale, -1.0, 1.0))
-        low = float(np.clip(part.min() / scale, -1.0, 1.0))
-        cv2.line(
-            strip,
-            (x, round(middle - high * middle)),
-            (x, round(middle - low * middle)),
-            WAVE,
-            1,
-        )
-    cv2.putText(
-        strip,
-        f"ch {'+'.join(map(str, audio.channels))}, last {window_s:g} s",
-        (PAD, 11),
-        FONT,
-        FONT_SCALE,
-        LABEL,
-        1,
-        cv2.LINE_AA,
-    )
-    cv2.putText(
-        strip, f"t={elapsed:5.1f} s", (width - 62, 11), FONT, FONT_SCALE, LABEL, 1, cv2.LINE_AA
-    )
-    return strip
-
-
-def _waveform_scale(samples: np.ndarray) -> float:
-    """The amplitude that fills the waveform strip, shared by every frame."""
-    value = float(np.percentile(np.abs(samples), WAVEFORM_PERCENTILE)) if len(samples) else 0.0
-    return value if value > 0 else 1.0
 
 
 def _encode(output: Path, images: Any, delay: int, colours: int) -> None:

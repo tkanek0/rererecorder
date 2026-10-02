@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import bisect
 import json
 import math
 from dataclasses import dataclass
@@ -85,3 +86,23 @@ def in_colour_camera(
         bearing = math.degrees(math.atan2(float(ray[0]), float(ray[2]))) % 360.0
         corrected.append(Direction(reading.time, bearing, reading.voice))
     return corrected
+
+
+def direction_at(
+    readings: list[Direction], stamp: float, stale_s: float
+) -> Direction | None:
+    """Return the latest reading at or before an instant, unless it is stale.
+
+    Args:
+        readings: Readings in time order.
+        stamp: Video-clock time to look at.
+        stale_s: How old a reading may be and still count.
+
+    Returns:
+        The reading, or None if there is none recent enough.
+    """
+    position = bisect.bisect_right(readings, stamp, key=lambda r: r.time) - 1
+    if position < 0:
+        return None
+    reading = readings[position]
+    return reading if stamp - reading.time <= stale_s else None

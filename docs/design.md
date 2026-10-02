@@ -39,6 +39,8 @@ flowchart TD
     S["backend/rrr/api/<br/>FastAPI, MJPEG, player"]
     P["backend/rrr/playback/<br/>a recording on one clock"]
     C["backend/rrr/tools/<br/>record, inspect, export"]
+    Z["backend/rrr/visualization/<br/>strips, compass"]
+    X["scripts/<br/>render_gif, render_mp4"]
     W["frontend/<br/>vite + react"]
     T --> V
     V --> R
@@ -47,6 +49,9 @@ flowchart TD
     R --> C
     V --> P
     P --> C
+    P --> Z
+    P --> X
+    Z --> X
     S --> W
 ```
 
@@ -94,7 +99,7 @@ data/sessions/2026-09-02_15-28-36/
     doa.jsonl           the array's direction estimate
     events.jsonl        marks made by whoever was recording
     export/             derived: rrr.tools.export's neutral copy
-    review.mp4          derived: rrr.tools.render_mp4's review movie
+    review.mp4          derived: scripts/render_mp4.py's review movie
 ```
 
 The derived entries are written only when asked for, and nothing reads them

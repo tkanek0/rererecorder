@@ -884,7 +884,7 @@ property of the machine rather than of the code. `data` rather than `var`
 matches the name the container already used.
 
 What is derived from a session lives inside it: `rrr.tools.export` writes to
-`<session>/export/` and `rrr.tools.render_mp4` to `<session>/review.mp4` unless
+`<session>/export/` and `scripts/render_mp4.py` to `<session>/review.mp4` unless
 told otherwise, rather than to `export/<id>/` and `mp4/<id>.mp4` beside the
 code. A recording and what was made from it are then kept, moved and deleted
 together, and a session's reported size - the page's list and the figure shown

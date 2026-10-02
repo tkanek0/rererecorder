@@ -7,17 +7,10 @@ from pathlib import Path
 import av
 import numpy as np
 import pytest
-
+from render_gif import DEFAULT_OUTPUT, main, render
 from rrr.timeline import SessionPaths
-from rrr.tools.render_gif import (
-    DEFAULT_OUTPUT,
-    PAD,
-    PLAYHEAD,
-    VOLUME_HEIGHT,
-    WAVEFORM_HEIGHT,
-    main,
-    render,
-)
+from rrr.visualization import PAD, PLAYHEAD, VOLUME_HEIGHT, WAVEFORM_HEIGHT
+
 from tests.test_render_mp4 import FRAMES, session  # noqa: F401 - the fixture
 
 WIDTH = 32

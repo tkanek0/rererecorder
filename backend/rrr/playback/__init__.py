@@ -16,7 +16,7 @@ from .audio import (
     sample_range,
     select_audio,
 )
-from .direction import Direction, in_colour_camera, read_directions
+from .direction import Direction, direction_at, in_colour_camera, read_directions
 from .frames import TimeRange, frame_times
 
 __all__ = [
@@ -25,6 +25,7 @@ __all__ = [
     "TimeRange",
     "audio_timeline",
     "crop_clock_points",
+    "direction_at",
     "frame_times",
     "in_colour_camera",
     "read_directions",

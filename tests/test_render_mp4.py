@@ -7,6 +7,7 @@ from pathlib import Path
 import av
 import numpy as np
 import pytest
+from render_mp4 import _directions, main, render
 from rrr.playback import Direction
 from rrr.timeline import (
     AudioClockPoint,
@@ -20,7 +21,6 @@ from rrr.timeline import (
     read_manifest,
     write_manifest,
 )
-from rrr.tools.render_mp4 import _directions, main, render
 from rrr.video import (
     ArchiveWriter,
     Calibration,

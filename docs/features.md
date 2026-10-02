@@ -182,7 +182,7 @@ Nothing here needs the server, and the server records through exactly this code.
 uv run python -m rrr.tools.record --seconds 30 --session kitchen   # record
 uv run python -m rrr.tools.inspect data/sessions/kitchen          # cross-check a recording
 uv run python -m rrr.tools.export data/sessions/kitchen           # write it out as plain files
-uv run python -m rrr.tools.render_mp4 data/sessions/kitchen       # a review movie
+uv run python scripts/render_mp4.py data/sessions/kitchen         # a review movie
 uv run pytest                                                      # no device needed
 ```
 
@@ -379,7 +379,7 @@ The raw session remains the measurement, but a colour-and-sound review copy can
 be made without exporting every stream first:
 
 ```bash
-uv run python -m rrr.tools.render_mp4 data/sessions/walk-01   # data/sessions/walk-01/review.mp4
+uv run python scripts/render_mp4.py data/sessions/walk-01   # data/sessions/walk-01/review.mp4
 ```
 
 The movie keeps the recorded frame timestamps, maps the WAV through
@@ -399,8 +399,8 @@ A GIF is the same presentation copy in a form that goes into a slide or a
 message:
 
 ```bash
-uv run python -m rrr.tools.render_gif data/sessions/walk-01                       # ./video.gif
-uv run python -m rrr.tools.render_gif data/sessions/walk-01 --volume --waveform -o walk-01.gif
+uv run python scripts/render_gif.py data/sessions/walk-01                         # ./video.gif
+uv run python scripts/render_gif.py data/sessions/walk-01 --volume --waveform -o walk-01.gif
 ```
 
 Every `--stride`-th colour frame (default 15) is kept, scaled to `--width`, and

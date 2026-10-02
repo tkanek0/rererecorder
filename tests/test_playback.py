@@ -7,6 +7,7 @@ from rrr.playback import (
     Direction,
     TimeRange,
     crop_clock_points,
+    direction_at,
     in_colour_camera,
     sample_range,
 )
@@ -72,3 +73,11 @@ def test_directions_stay_in_the_array_frame_while_the_rig_is_unset() -> None:
     turned = in_colour_camera(readings, measured, Extrinsics.identity())
     assert turned is not None
     assert [r.angle for r in turned] == [pytest.approx(90.0), pytest.approx(0.0)]
+
+
+def test_the_direction_shown_is_the_latest_one_still_fresh() -> None:
+    readings = [Direction(1.0, 10.0, False), Direction(2.0, 20.0, True)]
+    assert direction_at(readings, 0.9, 0.5) is None
+    assert direction_at(readings, 1.4, 0.5) == readings[0]
+    assert direction_at(readings, 1.6, 0.5) is None
+    assert direction_at(readings, 2.0, 0.5) == readings[1]

@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import os
 from dataclasses import dataclass
+from typing import Self
 
 import numpy as np
 
@@ -68,11 +69,12 @@ class AudioClockWriter:
             path: File to create. Overwritten if it exists.
         """
         os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
+        # Held open across appends until close(), so not a with block.
         self._handle = open(path, "w", encoding="utf-8")
         self._path = path
         self._count = 0
 
-    def __enter__(self) -> AudioClockWriter:
+    def __enter__(self) -> Self:
         """Return the open writer."""
         return self
 

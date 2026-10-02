@@ -7,11 +7,11 @@ the repair. See docs/features.md "The array".
 
 from __future__ import annotations
 
+import contextlib
 import json
 import logging
 import os
 import threading
-import time
 import wave
 from dataclasses import dataclass
 
@@ -167,26 +167,27 @@ class AudioWriter:
         self._tap.acquire()
         if self._doa is not None:
             self._doa.acquire()
-        directions = None
         try:
             os.makedirs(os.path.dirname(os.path.abspath(self._wav_path)), exist_ok=True)
             with (
                 wave.open(self._wav_path, "wb") as out,
                 AudioClockWriter(self._clock_path) as clock,
+                contextlib.ExitStack() as optional,
             ):
                 out.setnchannels(self._tap.channels)
                 out.setsampwidth(2)
                 out.setframerate(self._tap.rate)
+                directions = None
                 if self._doa is not None and self._doa_path is not None:
-                    directions = open(self._doa_path, "w", encoding="utf-8")
+                    directions = optional.enter_context(
+                        open(self._doa_path, "w", encoding="utf-8")
+                    )
                 self._pump(out, clock, directions)
         except Exception as error:  # noqa: BLE001 - reported through stats
             logger.exception("audio recording failed")
             with self._lock:
                 self._stats.error = str(error)
         finally:
-            if directions is not None:
-                directions.close()
             self._tap.release()
             if self._doa is not None:
                 self._doa.release()

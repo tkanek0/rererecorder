@@ -207,9 +207,10 @@ def test_zlib_depth_without_a_shape_is_refused(written_native, tmp_path) -> None
 
     from realsense_adapter import StreamError
 
-    with ArchiveSource(path) as archive:
-        with pytest.raises(StreamError, match="shape is unknown"):
-            next(archive.frames())
+    with ArchiveSource(path) as archive, pytest.raises(
+        StreamError, match="shape is unknown"
+    ):
+        next(archive.frames())
 
 
 # -- the split itself ---------------------------------------------------------

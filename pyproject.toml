@@ -26,6 +26,23 @@ build-backend = "uv_build"
 module-root = "backend"
 module-name = ["rrr", "respeaker_adapter", "realsense_adapter"]
 
+[tool.ruff.lint]
+# Fixed here, so a ruff upgrade cannot change what is checked.
+select = [
+    "F", # Pyflakes
+    "E", # pycodestyle errors
+    "W", # pycodestyle warnings
+    "I", # isort
+]
+ignore = [
+    "E402", # Module level import not at top of file
+    "E501", # Line too long
+    "E741", # Ambiguous variable name
+]
+unfixable = [
+    "F401", # Unused import
+]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 # Scripts are not part of the package; their tests import them by file name.

@@ -10,7 +10,6 @@ import time
 from collections.abc import Callable
 
 import pytest
-
 from respeaker_adapter.doa import DoaTap
 from respeaker_adapter.tuning import DeviceNotFound
 

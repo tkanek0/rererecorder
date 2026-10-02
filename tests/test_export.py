@@ -542,7 +542,10 @@ def test_the_validator_runs_without_rrr(session, tmp_path) -> None:
         "import sys; sys.modules['rrr'] = None;"  # any import of rrr now fails
     )
     result = subprocess.run(
-        [sys.executable, "-c", blocker + code], capture_output=True, text=True
+        [sys.executable, "-c", blocker + code],
+        capture_output=True,
+        text=True,
+        check=False,  # the status is asserted below, with stderr to explain it
     )
     assert result.returncode == 0, result.stderr
     assert result.stdout.strip() == "OK"

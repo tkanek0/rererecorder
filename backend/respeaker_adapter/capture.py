@@ -21,6 +21,7 @@ import sys
 import threading
 import time
 from dataclasses import dataclass
+from typing import Self
 
 import numpy as np
 
@@ -266,7 +267,7 @@ class AudioTap:
         if thread is not None:
             thread.join(timeout)
 
-    def __enter__(self) -> AudioTap:
+    def __enter__(self) -> Self:
         """Acquire the tap for the duration of a ``with`` block."""
         self.acquire()
         return self

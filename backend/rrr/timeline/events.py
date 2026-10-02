@@ -11,7 +11,7 @@ import json
 import os
 import time
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Self
 
 #: Suffix of the sidecar this module writes.
 SUFFIX = ".jsonl"
@@ -93,11 +93,12 @@ class EventWriter:
             path: File to create. Overwritten if it exists.
         """
         os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
+        # Held open across appends until close(), so not a with block.
         self._handle = open(path, "w", encoding="utf-8")
         self._path = path
         self._count = 0
 
-    def __enter__(self) -> EventWriter:
+    def __enter__(self) -> Self:
         """Return the open writer."""
         return self
 

@@ -10,10 +10,9 @@ import json
 import os
 
 import pytest
-
+from rrr.inspection.checks import Check, _check_events
 from rrr.timeline import SessionPaths
 from rrr.timeline.events import Event, EventWriter, read_events
-from rrr.inspection.checks import Check, _check_events
 
 
 def test_a_mark_stamps_both_clocks() -> None:

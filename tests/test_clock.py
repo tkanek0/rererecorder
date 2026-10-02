@@ -9,7 +9,6 @@ from __future__ import annotations
 import time
 
 import pytest
-
 from rrr.timeline.clock import ClockPair, ClockTrack, read_clocks
 
 #: Monotonic near an uptime, realtime near now: an offset too large for a

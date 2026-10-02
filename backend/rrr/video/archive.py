@@ -19,7 +19,7 @@ import zlib
 from collections.abc import Iterator
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Self
 
 import cv2
 import numpy as np
@@ -467,7 +467,7 @@ class ArchiveWriter:
         )
         self._thread.start()
 
-    def __enter__(self) -> ArchiveWriter:
+    def __enter__(self) -> Self:
         """Return the open writer."""
         return self
 
@@ -801,7 +801,7 @@ class ArchiveSource:
         self._tables: set[str] = set()
         self._codecs: dict[str, str] = {}
 
-    def __enter__(self) -> ArchiveSource:
+    def __enter__(self) -> Self:
         """Open the archive."""
         self.open()
         return self

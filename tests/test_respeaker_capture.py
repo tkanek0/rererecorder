@@ -11,10 +11,10 @@ import subprocess
 import sys
 import time
 from dataclasses import dataclass
+from typing import Self
 
 import numpy as np
 import pytest
-
 from respeaker_adapter.capture import (
     _DOMAIN_CALIBRATION_BLOCKS,
     AudioTap,
@@ -460,7 +460,7 @@ class _FakeInputStream:
     def __init__(self, **_: object) -> None:
         pass
 
-    def __enter__(self) -> _FakeInputStream:
+    def __enter__(self) -> Self:
         return self
 
     def __exit__(self, *exc: object) -> None:

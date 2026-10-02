@@ -9,6 +9,7 @@ import threading
 import time
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass
+from typing import Self
 
 import pytest
 from realsense_adapter import StreamError
@@ -44,7 +45,7 @@ class FakeSource:
         self._factory = factory
         self._closed = threading.Event()
 
-    def __enter__(self) -> FakeSource:
+    def __enter__(self) -> Self:
         self._factory.opens += 1
         if self._factory.fail_open:
             raise StreamError("no RealSense device connected")

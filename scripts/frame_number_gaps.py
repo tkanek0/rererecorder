@@ -17,6 +17,7 @@ import argparse
 import collections
 import sys
 import time
+from itertools import pairwise
 
 from realsense_adapter import LiveSource, StreamError
 from rrr.recorder import config
@@ -68,7 +69,7 @@ def _report(name: str, sequence: list[int]) -> bool:
         return True
     gaps = [
         (a, b)
-        for a, b in zip(sequence, sequence[1:])
+        for a, b in pairwise(sequence)
         if b - a not in (0, 1)
     ]
     print(

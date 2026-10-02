@@ -11,7 +11,7 @@ import logging
 import threading
 import time
 from collections.abc import Iterator
-from typing import Protocol
+from typing import Any, Protocol, Self
 
 import numpy as np
 import pyrealsense2 as rs
@@ -62,7 +62,7 @@ class FrameSource(Protocol):
 
     calibration: Calibration
 
-    def __enter__(self) -> FrameSource:
+    def __enter__(self) -> Self:
         """Open the source."""
         ...
 
@@ -207,7 +207,7 @@ class LiveSource:
 
     # -- lifecycle ---------------------------------------------------------
 
-    def __enter__(self) -> LiveSource:
+    def __enter__(self) -> Self:
         """Open the device and start streaming."""
         self.open()
         return self
@@ -281,7 +281,7 @@ class LiveSource:
 
         try:
             profile = pipeline.start(rs_config)
-        except RuntimeError as exc:
+        except RuntimeError as exc:  # noqa: BLE001 - closing must not raise
             raise StreamError(f"could not start the pipeline: {exc}") from exc
 
         self._pipeline = pipeline
@@ -637,7 +637,7 @@ class LiveSource:
         try:
             sensor.stop()
             sensor.close()
-        except RuntimeError as exc:  # noqa: BLE001 - closing must not raise
+        except RuntimeError as exc:
             logger.warning("could not stop the inertial sensor: %s", exc)
 
     def _on_motion(self, frame: rs.frame) -> None:

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import pytest
-
 from rrr.recorder.config import codec_for
 
 

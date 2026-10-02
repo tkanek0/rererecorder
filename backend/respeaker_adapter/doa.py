@@ -12,6 +12,7 @@ import threading
 import time
 from collections import deque
 from dataclasses import dataclass
+from typing import Self
 
 from . import config
 from .tuning import AccessDenied, DeviceNotFound, Tuning, find
@@ -145,7 +146,7 @@ class DoaTap:
         if thread is not None:
             thread.join(timeout)
 
-    def __enter__(self) -> DoaTap:
+    def __enter__(self) -> Self:
         """Acquire the tap for the duration of a ``with`` block."""
         self.acquire()
         return self

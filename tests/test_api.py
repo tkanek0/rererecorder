@@ -10,9 +10,8 @@ import os
 
 import pytest
 from fastapi.testclient import TestClient
-
-from rrr.recorder import config as recording_config
 from rrr.api import app as api_app
+from rrr.recorder import config as recording_config
 from rrr.timeline import (
     ClockPair,
     Event,

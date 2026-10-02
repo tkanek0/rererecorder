@@ -15,7 +15,6 @@ from dataclasses import dataclass
 
 import numpy as np
 import pytest
-
 from respeaker_adapter.types import BlockStamp, Chunk
 from rrr.recorder.audio_writer import AudioWriter
 from rrr.timeline import AudioTimeline

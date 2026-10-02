@@ -12,8 +12,8 @@ import re
 from dataclasses import dataclass, field, replace
 
 from .audio_clock import SUFFIX as AUDIO_CLOCK_SUFFIX
-from .events import SUFFIX as EVENTS_SUFFIX
 from .clock import ClockPair, ClockTrack
+from .events import SUFFIX as EVENTS_SUFFIX
 
 #: Bumped when the layout changes in a way a reader must know about.
 FORMAT_VERSION = 1

@@ -7,9 +7,10 @@ name it.
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import numpy as np
 import pytest
-
 from rrr.timeline.audio_clock import (
     AudioClockPoint,
     AudioClockWriter,
@@ -214,7 +215,7 @@ def test_writer_omits_the_common_zero_filled_case(tmp_path) -> None:
     path = str(tmp_path / "audio.clock.jsonl")
     with AudioClockWriter(path) as writer:
         writer.append(AudioClockPoint(sample=0, monotonic=START))
-    assert "filled" not in open(path, encoding="utf-8").read()
+    assert "filled" not in Path(path).read_text(encoding="utf-8")
 
 
 def test_points_are_sorted_by_position() -> None:

@@ -11,7 +11,7 @@ from __future__ import annotations
 import logging
 import threading
 import time
-from typing import Any
+from typing import Any, Self
 
 from realsense_adapter import FrameSource, LiveSource, StreamConfig
 from respeaker_adapter import AudioTap, DoaTap
@@ -26,7 +26,6 @@ from rrr.timeline import (
     SessionManifest,
     SessionPaths,
     VideoTrack,
-    read_clocks,
     write_manifest,
 )
 from rrr.video import FrameHub
@@ -302,7 +301,7 @@ class SessionRecorder:
         if self._doa is not None:
             self._doa.shutdown()
 
-    def __enter__(self) -> SessionRecorder:
+    def __enter__(self) -> Self:
         """Return the recorder."""
         return self
 

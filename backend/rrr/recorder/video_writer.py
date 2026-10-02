@@ -144,7 +144,7 @@ class VideoWriter:
                 options=self._read_options(),
                 codecs=self._codecs,
             )
-        except Exception:
+        except Exception:  # noqa: BLE001 - a nicety, not the data
             self._hub.release()
             raise
 
@@ -266,6 +266,6 @@ class VideoWriter:
             return {}
         try:
             return reader()
-        except Exception:  # noqa: BLE001 - a nicety, not the data
+        except Exception:
             logger.warning("could not read the sensor options", exc_info=True)
             return {}

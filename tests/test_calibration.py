@@ -8,16 +8,9 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
-
-from rrr.video import (
-    ArchiveSource,
-    ArchiveWriter,
-    Calibration,
-    Extrinsics,
-    Intrinsics,
-    StreamConfig,
-)
-from rrr.video.types import MotionCalibration, MotionIntrinsics
+from realsense_adapter import Calibration, Extrinsics, Intrinsics, StreamConfig
+from realsense_adapter.types import MotionCalibration, MotionIntrinsics
+from rrr.video import ArchiveSource, ArchiveWriter
 
 from .conftest import DEPTH_SCALE, HEIGHT, WIDTH
 
@@ -163,7 +156,7 @@ def test_the_emitter_read_back_compares_like_with_like() -> None:
     """The read-back keys must match the names it is compared against, or every
     mode warns and a real refusal is lost among them."""
     rs = pytest.importorskip("pyrealsense2")
-    from rrr.video.source import _option_name
+    from realsense_adapter.source import _option_name
 
     assert _option_name(rs.option.emitter_enabled) == "emitter_enabled"
     assert _option_name(rs.option.emitter_on_off) == "emitter_on_off"

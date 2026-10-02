@@ -8,9 +8,10 @@ from dataclasses import replace
 
 import inspect_session as inspect_cli
 import numpy as np
+from realsense_adapter import Calibration, FrameSet, StreamConfig
 from rrr.inspection.checks import Check, _check_video, count_missing
 from rrr.timeline import SessionManifest, SessionPaths, VideoTrack
-from rrr.video import ArchiveWriter, Calibration, FrameSet, StreamConfig
+from rrr.video import ArchiveWriter
 
 from .conftest import HEIGHT, WIDTH
 from .test_render_mp4 import FRAMES, session  # noqa: F401 - the fixture

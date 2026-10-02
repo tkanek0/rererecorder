@@ -7,6 +7,13 @@ from pathlib import Path
 import av
 import numpy as np
 import pytest
+from realsense_adapter import (
+    Calibration,
+    Extrinsics,
+    FrameSet,
+    Intrinsics,
+    StreamConfig,
+)
 from render_mp4 import _directions, main, render
 from rrr.playback import Direction
 from rrr.timeline import (
@@ -21,14 +28,7 @@ from rrr.timeline import (
     read_manifest,
     write_manifest,
 )
-from rrr.video import (
-    ArchiveWriter,
-    Calibration,
-    Extrinsics,
-    FrameSet,
-    Intrinsics,
-    StreamConfig,
-)
+from rrr.video import ArchiveWriter
 
 RATE = 8_000
 FPS = 10.0

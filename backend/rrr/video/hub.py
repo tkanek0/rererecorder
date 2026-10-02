@@ -14,8 +14,13 @@ import threading
 import time
 from collections.abc import Callable
 
-from .source import FrameSource, StreamError
-from .types import Calibration, DeviceInfo, FrameSet
+from realsense_adapter import (
+    Calibration,
+    DeviceInfo,
+    FrameSet,
+    FrameSource,
+    StreamError,
+)
 
 logger = logging.getLogger(__name__)
 

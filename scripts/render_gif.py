@@ -28,9 +28,10 @@ import av
 import av.filter
 import cv2
 import numpy as np
+from realsense_adapter import StreamError, color_to_bgr
 from rrr.playback import audio_timeline, frame_times, read_mono, select_audio
 from rrr.timeline import AudioTimeline, SessionError, SessionPaths, read_manifest
-from rrr.video import ArchiveSource, StreamError, color_to_bgr
+from rrr.video import ArchiveSource
 from rrr.visualization import (
     BACKGROUND,
     PAD,

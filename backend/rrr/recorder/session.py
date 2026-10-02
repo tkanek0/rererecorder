@@ -13,6 +13,7 @@ import threading
 import time
 from typing import Any
 
+from realsense_adapter import FrameSource, LiveSource, StreamConfig
 from respeaker_adapter import AudioTap, DoaTap
 
 from rrr.timeline import (
@@ -28,7 +29,7 @@ from rrr.timeline import (
     read_clocks,
     write_manifest,
 )
-from rrr.video import FrameHub, FrameSource, LiveSource, StreamConfig
+from rrr.video import FrameHub
 
 from . import config
 from .audio_writer import AudioWriter

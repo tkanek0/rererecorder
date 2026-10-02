@@ -11,9 +11,9 @@ from collections.abc import Callable
 
 import numpy as np
 import pytest
-
+from realsense_adapter import Calibration, FrameSet, StreamConfig
 from rrr.recorder.video_writer import VideoWriter
-from rrr.video import ArchiveSource, Calibration, FrameSet, StreamConfig
+from rrr.video import ArchiveSource
 
 from .conftest import HEIGHT, WIDTH
 

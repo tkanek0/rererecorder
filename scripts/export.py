@@ -27,6 +27,7 @@ import wave
 from typing import Any, Self
 
 import cv2
+from realsense_adapter import StreamError, color_to_rgb
 from rrr.playback import TimeRange, crop_clock_points, sample_range
 from rrr.timeline import (
     AudioTimeline,
@@ -36,7 +37,7 @@ from rrr.timeline import (
     read_events,
     read_manifest,
 )
-from rrr.video import ArchiveSource, StreamError, color_to_rgb
+from rrr.video import ArchiveSource
 from validate_export import FORMAT_NAME, FORMAT_VERSION, validate_export
 
 logger = logging.getLogger(__name__)

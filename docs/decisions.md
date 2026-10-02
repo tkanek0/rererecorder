@@ -1015,17 +1015,22 @@ itself provides is an entry point instead: `rrr-api`. `rrr.tools` is gone.
 
 Device access that knows nothing of the recorder is a separate package beside
 `rrr`: `respeaker_adapter`, which reads no environment variable -
-`rrr.recorder.config` reads `RRR_AUDIO_*` and passes the values in. A
-`realsense_adapter` is meant to follow, out of `rrr.video`.
+`rrr.recorder.config` reads `RRR_AUDIO_*` and passes the values in. Likewise
+`realsense_adapter`, out of `rrr.video`: the live source, the stream
+configuration and the frame types, with `RRR_EMITTER` left to
+`rrr.recorder.config`. What stays in `rrr.video` is the recorder's own - the
+shared pipeline and the `.rrdb` archive, including its YUYV plane split.
 
 ```mermaid
 flowchart LR
     subgraph backend/
+        RS[realsense_adapter]
         RA[respeaker_adapter]
         RRR["rrr<br/>recorder, api, playback,<br/>inspection, offset, visualization"]
     end
     SC["scripts/<br/>what to write, and where"]
     EX["export/<br/>docs/export-format.md"]
+    RS --> RRR
     RA --> RRR --> SC --> EX
 ```
 

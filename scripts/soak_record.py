@@ -20,9 +20,10 @@ import argparse
 import sys
 
 import record
+from realsense_adapter import StreamError
 from rrr.recorder import config
 from rrr.timeline import SessionError, SessionPaths, read_manifest
-from rrr.video import ArchiveSource, StreamError
+from rrr.video import ArchiveSource
 
 
 def main(argv: list[str] | None = None) -> int:

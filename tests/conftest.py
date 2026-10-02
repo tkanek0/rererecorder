@@ -10,8 +10,7 @@ from collections.abc import Callable
 
 import numpy as np
 import pytest
-
-from rrr.video import Calibration, Extrinsics, FrameSet, Intrinsics, Motion
+from realsense_adapter import Calibration, Extrinsics, FrameSet, Intrinsics, Motion
 
 #: The D455 at its native depth resolution, measured on the device.
 WIDTH, HEIGHT = 848, 480

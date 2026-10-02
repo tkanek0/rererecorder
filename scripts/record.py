@@ -16,9 +16,9 @@ import signal
 import sys
 import time
 
+from realsense_adapter import StreamConfig
 from rrr.recorder import SessionRecorder, config
 from rrr.timeline import SessionManifest
-from rrr.video import StreamConfig
 
 
 def main(argv: list[str] | None = None) -> int:

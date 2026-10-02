@@ -18,8 +18,8 @@ import collections
 import sys
 import time
 
+from realsense_adapter import LiveSource, StreamError
 from rrr.recorder import config
-from rrr.video import LiveSource, StreamError
 
 
 def _apply_auto_exposure(source: LiveSource, mode: str) -> None:

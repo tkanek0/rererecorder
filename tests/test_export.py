@@ -19,6 +19,14 @@ import cv2
 import export as exporter
 import numpy as np
 import pytest
+from realsense_adapter import (
+    Calibration,
+    Extrinsics,
+    FrameSet,
+    Intrinsics,
+    StreamConfig,
+)
+from realsense_adapter.types import MotionSample
 from rrr.timeline import (
     AudioClockPoint,
     AudioClockWriter,
@@ -33,15 +41,7 @@ from rrr.timeline import (
     VideoTrack,
     write_manifest,
 )
-from rrr.video import (
-    ArchiveWriter,
-    Calibration,
-    Extrinsics,
-    FrameSet,
-    Intrinsics,
-    StreamConfig,
-)
-from rrr.video.types import MotionSample
+from rrr.video import ArchiveWriter
 
 RATE = 16_000
 CHANNELS = 6
@@ -68,7 +68,7 @@ def _intrinsics() -> Intrinsics:
 
 
 def _calibration() -> Calibration:
-    from rrr.video.types import MotionCalibration, MotionIntrinsics
+    from realsense_adapter.types import MotionCalibration, MotionIntrinsics
 
     return Calibration(
         color=_intrinsics(),

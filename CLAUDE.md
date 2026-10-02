@@ -83,8 +83,9 @@ quantisation, so motion capture is not needed to measure this array.
 
 - The recorder lives under `backend/rrr/`. Import as `from rrr.video import ArchiveSource`.
   Do not add top-level packages - see `docs/decisions.md` 15 - except a device
-  adapter that knows nothing of `rrr`: `backend/respeaker_adapter/` reads no
-  environment variable, and `rrr.recorder.config` passes its settings in.
+  adapter that knows nothing of `rrr`: `backend/realsense_adapter/` and
+  `backend/respeaker_adapter/` read no environment variable, and
+  `rrr.recorder.config` passes their settings in.
 - Packaged with `uv_build` (`module-root = "backend"`) and installed editable by
   `uv sync`, in the container too; nothing sets `PYTHONPATH` - see
   `docs/decisions.md` 27.

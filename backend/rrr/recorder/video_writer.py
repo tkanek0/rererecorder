@@ -10,7 +10,9 @@ import logging
 import threading
 from dataclasses import dataclass
 
-from rrr.video import ArchiveWriter, FrameHub, FrameSet, StreamConfig
+from realsense_adapter import FrameSet, StreamConfig
+
+from rrr.video import ArchiveWriter, FrameHub
 
 logger = logging.getLogger(__name__)
 

@@ -3,8 +3,9 @@
 Layers run one way: ``rrr.timeline`` -> ``rrr.video`` -> ``rrr.recorder`` ->
 ``rrr.api``. Reading a recording back also starts at
 ``rrr.video``: ``rrr.inspection``, ``rrr.offset``, and ``rrr.playback`` ->
-``rrr.visualization``. The array is reached through the separate
-``respeaker_adapter`` package, which knows nothing of ``rrr``. Nothing is
+``rrr.visualization``. The devices are reached through the separate
+``realsense_adapter`` and ``respeaker_adapter`` packages, which know nothing of
+``rrr``. Nothing is
 imported eagerly, so ``import rrr`` needs no device SDK or web framework. See
 docs/decisions.md 15 and docs/design.md "Module boundaries".
 """

@@ -8,9 +8,9 @@ import math
 from dataclasses import dataclass
 
 import numpy as np
+from realsense_adapter import Extrinsics
 
 from rrr.timeline import Rig
-from rrr.video import Extrinsics
 
 
 @dataclass(frozen=True)

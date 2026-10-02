@@ -24,8 +24,16 @@ from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.concurrency import run_in_threadpool
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
+from realsense_adapter import (
+    DeviceInfo,
+    LiveSource,
+    StreamConfig,
+    StreamError,
+    list_devices,
+)
+from respeaker_adapter import AudioTap, dbfs, rescan, rms
+from respeaker_adapter import probe as probe_audio
 
-from respeaker_adapter import AudioTap, dbfs, probe as probe_audio, rescan, rms
 from rrr.recorder import RecorderBusy, SessionRecorder
 from rrr.recorder import config as recording_config
 from rrr.timeline import (
@@ -35,15 +43,7 @@ from rrr.timeline import (
     read_events,
     read_manifest,
 )
-from rrr.video import (
-    ArchiveSource,
-    DeviceInfo,
-    FrameHub,
-    LiveSource,
-    StreamConfig,
-    StreamError,
-    list_devices,
-)
+from rrr.video import ArchiveSource, FrameHub
 
 from . import config, preview
 
@@ -758,7 +758,7 @@ def _apply_streams(raw: Any) -> None:
 
     Raises:
         HTTPException: 400 for an unknown key, or a combination
-            :class:`~rrr.video.StreamConfig` refuses (e.g. infrared without
+            :class:`~realsense_adapter.StreamConfig` refuses (e.g. infrared without
             depth).
 
     Restarts the hub, since streams are settled at pipeline start.

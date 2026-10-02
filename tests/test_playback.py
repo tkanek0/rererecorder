@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import pytest
+from realsense_adapter import Extrinsics
 from rrr.playback import (
     Direction,
     TimeRange,
@@ -12,7 +13,6 @@ from rrr.playback import (
     sample_range,
 )
 from rrr.timeline import AudioClockPoint, AudioTimeline, Rig
-from rrr.video import Extrinsics
 
 RATE = 16_000
 TIMES = [(10, 100.0), (11, 100.5), (12, 101.0), (13, 101.5)]

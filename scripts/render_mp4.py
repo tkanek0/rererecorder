@@ -22,6 +22,7 @@ from pathlib import Path
 
 import av
 import numpy as np
+from realsense_adapter import Extrinsics, StreamError, color_to_bgr
 from rrr.playback import (
     AudioSelection,
     Direction,
@@ -41,7 +42,7 @@ from rrr.timeline import (
     SessionPaths,
     read_manifest,
 )
-from rrr.video import ArchiveSource, Extrinsics, StreamError, color_to_bgr
+from rrr.video import ArchiveSource
 from rrr.visualization import draw_compass
 
 VIDEO_TIME_BASE = Fraction(1, 90_000)

@@ -6,15 +6,19 @@ word "lossless". See docs/decisions.md 3-5.
 
 from __future__ import annotations
 
+import os
 import sqlite3
+import subprocess
+import sys
 from collections.abc import Callable
 from pathlib import Path
 
 import numpy as np
 import pytest
-from rrr.video import ArchiveSource, ArchiveWriter, Calibration, FrameSet, StreamConfig
+from realsense_adapter import Calibration, FrameSet, StreamConfig
+from realsense_adapter.types import color_to_bgr, color_to_rgb
+from rrr.video import ArchiveSource, ArchiveWriter
 from rrr.video.archive import join_yuyv, split_yuyv
-from rrr.video.types import color_to_bgr, color_to_rgb
 
 #: The camera's real maxima, and the sizes every measurement in this repository
 #: was taken at.
@@ -25,7 +29,7 @@ COLOR_W, COLOR_H = 1280, 800
 @pytest.fixture
 def native(intrinsics) -> Calibration:
     """Calibration for an unaligned recording at the sensors' own sizes."""
-    from rrr.video import Extrinsics, Intrinsics
+    from realsense_adapter import Extrinsics, Intrinsics
 
     depth = Intrinsics(
         width=DEPTH_W, height=DEPTH_H, fx=653.36, fy=653.36,
@@ -201,7 +205,7 @@ def test_zlib_depth_without_a_shape_is_refused(written_native, tmp_path) -> None
             (json.dumps(raw),),
         )
 
-    from rrr.video import StreamError
+    from realsense_adapter import StreamError
 
     with ArchiveSource(path) as archive:
         with pytest.raises(StreamError, match="shape is unknown"):
@@ -255,7 +259,7 @@ def test_startup_discards_are_counted_apart_from_losses() -> None:
 
     See docs/frame-loss.md, "What is still discarded, on purpose".
     """
-    from rrr.video import LiveSource
+    from realsense_adapter import LiveSource
 
     source = LiveSource(StreamConfig())
 
@@ -277,7 +281,7 @@ def test_startup_discards_are_counted_apart_from_losses() -> None:
 
 def _imu_burst(count: int, *, start_ms: float = 1_788_000_000_000.0) -> list:
     """Samples at the rates a D455 actually produces: 482 and 478 Hz."""
-    from rrr.video.types import MotionSample
+    from realsense_adapter.types import MotionSample
 
     samples = []
     for n in range(count):
@@ -407,3 +411,14 @@ def test_an_archive_without_inertial_data_says_so(written_native) -> None:
     with ArchiveSource(path) as archive:
         assert list(archive.motion_samples()) == []
         assert archive.motion_rate() == {}
+
+
+def test_the_adapter_imports_nothing_from_rrr_and_ignores_the_environment() -> None:
+    """The camera stays usable without the recorder; rrr passes settings in."""
+    code = (
+        "import sys, realsense_adapter as a;"
+        "assert not [m for m in sys.modules if m == 'rrr' or m.startswith('rrr.')];"
+        "assert a.DEFAULT_EMITTER == 'on' and a.StreamConfig().emitter == 'on'"
+    )
+    env = {**os.environ, "RRR_EMITTER": "off"}
+    subprocess.run([sys.executable, "-c", code], check=True, env=env)

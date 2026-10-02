@@ -11,8 +11,7 @@ from typing import Literal
 
 import cv2
 import numpy as np
-
-from rrr.video import FrameSet, color_to_bgr
+from realsense_adapter import FrameSet, color_to_bgr
 
 #: Which preview a request is asking for.
 Kind = Literal["color", "depth", "ir1", "ir2"]

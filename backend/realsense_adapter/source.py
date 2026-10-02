@@ -1,7 +1,7 @@
 """Where frames come from.
 
 ``FrameSource`` hides from consumers whether frames come from a live camera
-(``LiveSource``) or a recording (``ArchiveSource``).
+(``LiveSource``) or a recording (``rrr.video.ArchiveSource``).
 """
 
 from __future__ import annotations

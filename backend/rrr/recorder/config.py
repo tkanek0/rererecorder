@@ -4,9 +4,7 @@ from __future__ import annotations
 
 import os
 
-from respeaker_adapter import config as respeaker
-
-from rrr.video import (
+from realsense_adapter import (
     DEFAULT_COLOR,
     DEFAULT_COLOR_FORMAT,
     DEFAULT_DEPTH,
@@ -14,6 +12,7 @@ from rrr.video import (
     StreamConfig,
     StreamSpec,
 )
+from respeaker_adapter import config as respeaker
 
 
 def _flag(name: str, default: bool) -> bool:

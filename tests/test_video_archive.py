@@ -12,17 +12,9 @@ from pathlib import Path
 
 import numpy as np
 import pytest
-
+from realsense_adapter import Calibration, DeviceInfo, FrameSet, Motion, StreamConfig
 from rrr.timeline import ClockPair
-from rrr.video import (
-    ArchiveSource,
-    ArchiveWriter,
-    Calibration,
-    DeviceInfo,
-    FrameSet,
-    Motion,
-    StreamConfig,
-)
+from rrr.video import ArchiveSource, ArchiveWriter
 
 from .conftest import ARRIVAL_LAG_S, FPS, HEIGHT, MONO, OFFSET, REAL, WIDTH
 

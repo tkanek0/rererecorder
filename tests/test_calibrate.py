@@ -12,6 +12,7 @@ from pathlib import Path
 import calibrate
 import numpy as np
 import pytest
+from realsense_adapter import Calibration, Extrinsics, Intrinsics, StreamConfig
 from rrr.offset import handclap
 from rrr.timeline import (
     AudioClockPoint,
@@ -24,7 +25,7 @@ from rrr.timeline import (
     read_manifest,
     write_manifest,
 )
-from rrr.video import ArchiveWriter, Calibration, Extrinsics, Intrinsics, StreamConfig
+from rrr.video import ArchiveWriter
 
 RATE = 16_000
 CHANNELS = 6
@@ -63,7 +64,7 @@ def calibration() -> Calibration:
 @pytest.fixture
 def session(tmp_path: Path, calibration: Calibration) -> SessionPaths:
     """150 still frames but one, and an impulse PLANTED_OFFSET_S later."""
-    from rrr.video import FrameSet
+    from realsense_adapter import FrameSet
 
     paths = SessionPaths.create(str(tmp_path), "planted")
     frames_total = 150

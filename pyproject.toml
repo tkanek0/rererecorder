@@ -24,7 +24,7 @@ build-backend = "uv_build"
 # The source root is named after its role, next to frontend/ - docs/decisions.md 27.
 [tool.uv.build-backend]
 module-root = "backend"
-module-name = ["rrr", "respeaker_adapter"]
+module-name = ["rrr", "respeaker_adapter", "realsense_adapter"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

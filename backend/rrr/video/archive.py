@@ -23,12 +23,7 @@ from typing import Any
 
 import cv2
 import numpy as np
-
-from rrr.timeline import ClockPair, read_clocks
-
-from .config import StreamConfig
-from .source import StreamError
-from .types import (
+from realsense_adapter import (
     Calibration,
     DeviceInfo,
     Extrinsics,
@@ -38,7 +33,11 @@ from .types import (
     MotionCalibration,
     MotionIntrinsics,
     MotionSample,
+    StreamConfig,
+    StreamError,
 )
+
+from rrr.timeline import ClockPair, read_clocks
 
 logger = logging.getLogger(__name__)
 

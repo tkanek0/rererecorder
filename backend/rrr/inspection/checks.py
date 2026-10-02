@@ -13,6 +13,7 @@ import wave
 from dataclasses import dataclass
 
 import numpy as np
+from realsense_adapter import StreamError
 
 from rrr.timeline import (
     AudioTimeline,
@@ -20,7 +21,7 @@ from rrr.timeline import (
     SessionPaths,
     read_events,
 )
-from rrr.video import ArchiveSource, StreamError
+from rrr.video import ArchiveSource
 
 #: How far the header's and the clock points' audio lengths may differ, in
 #: milliseconds. One 16 ms block; past that they describe different recordings.

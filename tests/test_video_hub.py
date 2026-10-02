@@ -11,8 +11,8 @@ from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 
 import pytest
-
-from rrr.video import FrameHub, StreamError
+from realsense_adapter import StreamError
+from rrr.video import FrameHub
 
 
 def _wait_until(ready: Callable[[], bool], timeout: float = 2.0) -> bool:

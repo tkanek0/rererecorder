@@ -13,7 +13,6 @@ Every feature here exists to make a research claim measurable downstream.
 
 | Path | Role |
 |---|---|
-| `../multimodal-spatial-awareness` | The analysis repository that consumes these recordings |
 | `../digital-garden/SpatialAIxHCI/proposals/multimodal_spatial_awareness_proposal.md` | The proposal this serves |
 | `../digital-garden/SpatialAIxHCI/survey/datasets.md` | Why public datasets are not enough, and what self-recorded data has to supply |
 | `../digital-garden/SpatialAIxHCI/devlog/` | What was built, what it measured, and what it does **not** establish |
@@ -44,11 +43,11 @@ Agreed with the user:
 - **Moving rig**, not a fixed installation - partly to measure what the ReSpeaker
   can actually do while in motion.
 - **ReSpeaker stays** for now. Measuring its limits *is* a deliverable.
-- **Monocular SLAM** is what the analysis side will implement. The infrared pair
-  and depth are recorded as **reference data for validating monocular SLAM**, not
-  as its input.
-- **A neutral export format**, converted here, is how recordings reach the
-  analysis repository. It does **not** import this package. `video.rrdb` is a
+- **Monocular SLAM** is done outside this repository. The infrared pair and depth
+  are recorded as **reference data for validating monocular SLAM**, not as its
+  input.
+- **A neutral export format**, converted here, is how recordings leave this
+  repository. Nothing that reads it imports this package. `video.rrdb` is a
   performance-driven internal format and stays that way.
   `scripts/export.py` writes it and `scripts/validate_export.py` checks it; the
   `rrr` package knows nothing of the layout. The layout is specified in
@@ -59,8 +58,8 @@ Agreed with the user:
 ## What the array can and cannot do
 
 Worth knowing before designing any experiment on it, and worth stating in any
-write-up. The ReSpeaker is measurably weaker than the Aria array the analysis
-side has been working with:
+write-up. The ReSpeaker is measurably weaker than the Aria array in the AEA
+dataset:
 
 | | Aria (AEA) | ReSpeaker USB Mic Array |
 |---|---|---|
@@ -72,8 +71,8 @@ side has been working with:
 | geometry | three-dimensional | **planar** - weak in elevation and front/back |
 
 One consolation: the smaller aperture makes the far-field (plane wave)
-approximation valid closer in, which is a problem the analysis side hit on Aria
-with near-field sources.
+approximation valid closer in, which is a problem on Aria with near-field
+sources.
 
 The practical consequence is that **hand-measured ground truth is good enough**.
 A source placed to 10 cm at 2 m is a 2.9 degree reference against a 13 degree
@@ -132,7 +131,7 @@ extrinsics and the device's own correction), `RRR_EMITTER=on|off|alternating`,
 `scripts/export.py`, and the page's Reconnect buttons. A failed device is never
 retried automatically - see `docs/decisions.md` 29.
 
-Not built, and deliberately so: pose. Monocular SLAM belongs to the analysis
+Not built, and deliberately so: pose. Monocular SLAM belongs outside this
 repository - the export carries what it needs. This repository measures and
 records; it does not estimate.
 

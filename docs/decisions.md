@@ -335,7 +335,7 @@ unmeasured - which is the honest state, not a defect.
 
 **Alternatives:** leaving `audio/`, `video/`, `timeline/`, `recorder/`,
 `server/` and `tools/` at the top level, as they were; a `src/rrr/` layout with
-a build backend, as the sibling `multimodal-spatial-awareness` repository uses.
+a build backend.
 
 **Why:** recordings made here are meant to be read by other repositories, and
 those six names are ones any other project might also define. `import video` in
@@ -350,9 +350,7 @@ installed, so that tests run against the installed copy rather than the working
 tree. This project is not packaged - there is no `[build-system]`, and both the
 Makefile and the container run it from the checkout with the repository root on
 `PYTHONPATH`. Adding `src/` would mean adding a build backend and reordering the
-image's `uv sync` around the source copy, for no benefit here. The sibling
-repository packages itself and so keeps `src/msa/`; the layouts differ because
-the answer to "is this installed?" differs.
+image's `uv sync` around the source copy, for no benefit here.
 
 **Cost:** every import statement, the Makefile, the Dockerfile's `CMD` and the
 documentation changed at once. Mechanical, and cheapest before anything outside
@@ -396,19 +394,18 @@ session - and the rest is procedure.
 ## 17. Export to a flat directory, rather than being imported
 
 **Chosen:** `scripts/export.py` writes a session out as plain files - PNG, CSV,
-WAV - in a flat layout indexed by `manifest.json`. The analysis repository reads
-that. It does not import this package. The layout itself is specified in
+WAV - in a flat layout indexed by `manifest.json`. Whatever consumes a recording
+reads that, and does not import this package. The layout itself is specified in
 `docs/export-format.md`; this entry keeps why. Since 31 the layout lives
 only in the scripts, never in the `rrr` package.
 
-**Alternatives:** letting the analysis side depend on this repository and use
+**Alternatives:** letting a consumer depend on this repository and use
 `ArchiveSource` directly (no duplication, no second copy of a 200 GB recording,
-but it couples two repositories that have opposite jobs and different release
-rhythms - and `video.rrdb` is shaped for writing 54 MB/s, which is a constraint
-the analysis side should never have to think about); ROS 2 bags, which every
-SLAM tool reads but which drags rosbag into a repository that otherwise needs
-numpy and torch; VRS, which the analysis side already reads for AEA but which
-puts an SDK back in the middle.
+but it couples code with opposite jobs and different release rhythms - and
+`video.rrdb` is shaped for writing 54 MB/s, which is a constraint a reader
+should never have to think about); ROS 2 bags, which every SLAM tool reads but
+which drag rosbag into whatever reads them; VRS, which AEA uses but which puts
+an SDK back in the middle.
 
 **Why flat and role-named:** the alternative shape is EuRoC's `cam0`, `cam1`,
 `imu0`. Removing a camera from a rig renumbers every later one, so an old
@@ -852,9 +849,8 @@ without a build backend and putting `src` on `PYTHONPATH`.
 **Why:** 15 turned `src/` down because the project was not installed, and a
 `src/` layout that is only put on the path buys nothing. Installing it is what
 changes that answer: an import can no longer resolve against whatever happens to
-be the working directory, and the layout now matches the sibling
-`multimodal-spatial-awareness` repository. The path-only variant was rejected
-for exactly the reason 15 gave.
+be the working directory. The path-only variant was rejected for exactly the
+reason 15 gave.
 
 **Cost:** the image installs in two steps - dependencies before the source is
 copied, so that layer survives a code change, then the project itself. The
@@ -1051,8 +1047,8 @@ Entry points would need the code inside the package, which is the reverse of
 the point. The workspace solved a problem that putting `pyproject.toml` at the
 root and only the source root in `backend/` (27, amended) does not have.
 
-The export layout is the sharpest case: it is the contract with the analysis
-repository, and it now lives only in `scripts/export.py`,
+The export layout is the sharpest case: it is the contract with whatever reads a
+recording, and it now lives only in `scripts/export.py`,
 `scripts/validate_export.py` and `docs/export-format.md`. The package can change
 without the format noticing, and the validator - importing nothing from `rrr` -
 can be copied to the reader's side.

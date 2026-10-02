@@ -1,8 +1,8 @@
 # Export format
 
 The neutral layout a recording is converted to before it leaves this
-repository. The analysis repository reads this and nothing else; it never
-imports `rrr`, and `rrr` knows nothing of this layout either.
+repository. A consumer reads this and nothing else; it never imports `rrr`, and
+`rrr` knows nothing of this layout either.
 
 | | |
 |---|---|
@@ -24,7 +24,7 @@ flowchart LR
     E["scripts/export.py<br/>decides the layout"]
     X["export/<br/>this format"]
     V["scripts/validate_export.py"]
-    A["analysis repository"]
+    A["consumer"]
     S --> P --> E --> X
     X --> V
     X --> A

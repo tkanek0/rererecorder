@@ -26,7 +26,7 @@ also why no script may be named after a standard library module:
 | `record.py` | Records a session from the terminal, through the same recorder the server uses. |
 | `inspect_session.py` | Re-reads a session and makes its files argue with each other. |
 | `calibrate.py` | Measures the audio-to-video offset from handclaps; `--apply` stores it. |
-| `export.py` | Writes a session as the neutral layout the analysis repository reads. |
+| `export.py` | Writes a session as the neutral layout that consumers outside this repository read. |
 | `validate_export.py` | Checks an export. Imports nothing from `rrr`, so it can be copied to a consumer. |
 | `render_mp4.py` | A review movie with sound and the array's direction. |
 | `render_gif.py` | A short GIF, optionally with loudness and waveform strips. |

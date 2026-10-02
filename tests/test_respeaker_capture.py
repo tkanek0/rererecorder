@@ -6,13 +6,16 @@ Importing still loads PortAudio, so a missing libportaudio2 fails at import.
 
 from __future__ import annotations
 
+import os
+import subprocess
+import sys
 import time
 from dataclasses import dataclass
 
 import numpy as np
 import pytest
 
-from rrr.audio.capture import (
+from respeaker_adapter.capture import (
     _DOMAIN_CALIBRATION_BLOCKS,
     AudioTap,
     DeviceNotFound,
@@ -371,8 +374,8 @@ _WINDOWS_DEVICES = [
 
 
 def _patch_devices(monkeypatch, devices: list[dict], hostapis: list[dict]) -> None:
-    monkeypatch.setattr("rrr.audio.capture.sd.query_devices", lambda: devices)
-    monkeypatch.setattr("rrr.audio.capture.sd.query_hostapis", lambda: hostapis)
+    monkeypatch.setattr("respeaker_adapter.capture.sd.query_devices", lambda: devices)
+    monkeypatch.setattr("respeaker_adapter.capture.sd.query_hostapis", lambda: hostapis)
 
 
 def test_wasapi_is_preferred_when_it_reports_the_right_rate(monkeypatch) -> None:
@@ -473,8 +476,8 @@ def failing_tap(monkeypatch):
         attempts.append(time.monotonic())
         raise DeviceNotFound("no capture device whose name contains 'ReSpeaker'")
 
-    monkeypatch.setattr("rrr.audio.capture._resolve_device", resolve)
-    monkeypatch.setattr("rrr.audio.capture.sd.InputStream", _FakeInputStream)
+    monkeypatch.setattr("respeaker_adapter.capture._resolve_device", resolve)
+    monkeypatch.setattr("respeaker_adapter.capture.sd.InputStream", _FakeInputStream)
     made = _fresh_tap()
     yield made, attempts
     made.shutdown()
@@ -506,8 +509,19 @@ def test_reconnect_opens_again(failing_tap, monkeypatch) -> None:
     tap.acquire()
     assert _wait_until(lambda: tap.failed)
 
-    monkeypatch.setattr("rrr.audio.capture._resolve_device", lambda *_: 0)
+    monkeypatch.setattr("respeaker_adapter.capture._resolve_device", lambda *_: 0)
     tap.reconnect()
     assert not tap.failed
     assert tap.error is None
     assert _wait_until(lambda: tap.active)
+
+
+def test_package_imports_nothing_from_rrr_and_ignores_the_environment() -> None:
+    """The adapter stays usable without the recorder; rrr passes settings in."""
+    code = (
+        "import sys, respeaker_adapter, respeaker_adapter.config as c;"
+        "assert not [m for m in sys.modules if m == 'rrr' or m.startswith('rrr.')];"
+        "assert c.DEVICE_NAME == 'ReSpeaker' and c.BLOCK_SIZE == 256"
+    )
+    env = {**os.environ, "RRR_AUDIO_DEVICE": "elsewhere", "RRR_AUDIO_BLOCK_SIZE": "1"}
+    subprocess.run([sys.executable, "-c", code], check=True, env=env)

@@ -45,7 +45,7 @@ const codecChoiceOf = (codec: string | undefined): CodecChoice =>
 
 /**
  * Each microphone's angle on the circle, in the chip's DOA convention.
- * Unverified, like `src/rrr/audio/config.py` MIC_ANGLES: the rotation is a guess.
+ * Unverified, like `backend/respeaker_adapter/config.py` MIC_ANGLES: the rotation is a guess.
  */
 const MIC_LAYOUT: { key: keyof Omit<AudioLevels, 'mix'>; angleDeg: number }[] = [
   { key: 'mic1', angleDeg: 45 },

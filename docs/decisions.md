@@ -530,7 +530,7 @@ costs nothing.
 
 ## 20. Fall back to the callback clock for the rest of a recording once the domain is known bad
 
-**Chosen:** in `backend/rrr/audio/capture.py`'s `_adc_time`, once the one-time check
+**Chosen:** in `backend/respeaker_adapter/capture.py`'s `_adc_time`, once the one-time check
 finds `inputBufferAdcTime` on a different clock than `time.monotonic()`, set
 a flag and use the `now - expected_lag` fallback for every later block in
 that recording, not just the one being checked.
@@ -712,7 +712,7 @@ real cost for doing so on this machine - see decision 22 and
 
 ## 24. Rank a matching-name capture device by host API and rate, not just by name
 
-**Chosen:** `backend/rrr/audio/capture.py`'s `_resolve_device` gathers every input
+**Chosen:** `backend/respeaker_adapter/capture.py`'s `_resolve_device` gathers every input
 device whose name matches (as before), then picks among them in order: a
 host API named `Windows WASAPI` whose `default_samplerate` agrees with the
 requested rate; failing that, any device whose `default_samplerate` agrees;

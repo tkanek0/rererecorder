@@ -1,8 +1,10 @@
-"""Device layer: getting audio and a direction off a ReSpeaker USB Mic Array.
+"""Getting audio and a direction off a ReSpeaker USB Mic Array.
 
 Derived from respeaker-playground, but each capture block is stamped with
-PortAudio's ``inputBufferAdcTime`` (see :mod:`rrr.audio.capture`). Knows nothing
-about HTTP or the camera.
+PortAudio's ``inputBufferAdcTime`` (see :mod:`respeaker_adapter.capture`).
+Knows nothing about HTTP, the camera or ``rrr``, and reads no environment
+variable: every setting is an argument, defaulting to
+:mod:`respeaker_adapter.config`.
 """
 
 from .capture import (

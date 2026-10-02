@@ -1,6 +1,8 @@
-"""Runtime configuration for the array, each value overridable from the environment."""
+"""Facts about the array, and the defaults a caller may override by argument.
 
-import os
+Nothing here reads the environment: the application that uses this package
+decides how its settings are chosen and passes them in.
+"""
 
 # -- the device --------------------------------------------------------------
 
@@ -10,7 +12,7 @@ USB_VENDOR_ID = 0x2886
 USB_PRODUCT_ID = 0x0018
 
 #: Substring matched against PortAudio's device names, for the same reason.
-DEVICE_NAME = os.environ.get("RRR_AUDIO_DEVICE", "ReSpeaker")
+DEVICE_NAME = "ReSpeaker"
 
 #: The array's only capture rate.
 SAMPLE_RATE = 16000
@@ -41,10 +43,10 @@ SPEED_OF_SOUND = 343.0
 # -- capture -----------------------------------------------------------------
 
 #: Frames per callback: 16 ms.
-BLOCK_SIZE = int(os.environ.get("RRR_AUDIO_BLOCK_SIZE", "256"))
+BLOCK_SIZE = 256
 
 #: Seconds of audio kept in memory for analysis.
-WINDOW_S = float(os.environ.get("RRR_AUDIO_WINDOW_S", "10"))
+WINDOW_S = 10.0
 
 #: How long capture keeps running after the last consumer goes away, so one-shot
 #: reads do not reopen the device each time.
@@ -54,7 +56,7 @@ IDLE_SHUTDOWN_S = 10.0
 
 #: How often the chip is polled for its angle. A poll is two control transfers,
 #: measured at 48 ms (p95 64 ms) while capturing; 15 Hz clears that.
-DOA_POLL_HZ = float(os.environ.get("RRR_AUDIO_DOA_POLL_HZ", "15"))
+DOA_POLL_HZ = 15.0
 
 #: Seconds of angle history kept in memory.
-DOA_HISTORY_S = float(os.environ.get("RRR_AUDIO_DOA_HISTORY_S", "30"))
+DOA_HISTORY_S = 30.0

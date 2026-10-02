@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import os
 
+from respeaker_adapter import config as respeaker
+
 from rrr.video import (
     DEFAULT_COLOR,
     DEFAULT_COLOR_FORMAT,
@@ -110,3 +112,13 @@ def codec_for(stream: str, choice: str) -> str:
 RECORD_VIDEO = _flag("RRR_VIDEO", True)
 RECORD_AUDIO = _flag("RRR_AUDIO", True)
 RECORD_DOA = _flag("RRR_DOA", True)
+
+#: How the array is opened. respeaker_adapter reads no environment, so its
+#: settings are chosen here and passed in.
+AUDIO_DEVICE = os.environ.get("RRR_AUDIO_DEVICE", respeaker.DEVICE_NAME)
+AUDIO_BLOCK_SIZE = int(os.environ.get("RRR_AUDIO_BLOCK_SIZE", respeaker.BLOCK_SIZE))
+AUDIO_WINDOW_S = float(os.environ.get("RRR_AUDIO_WINDOW_S", respeaker.WINDOW_S))
+DOA_POLL_HZ = float(os.environ.get("RRR_AUDIO_DOA_POLL_HZ", respeaker.DOA_POLL_HZ))
+DOA_HISTORY_S = float(
+    os.environ.get("RRR_AUDIO_DOA_HISTORY_S", respeaker.DOA_HISTORY_S)
+)

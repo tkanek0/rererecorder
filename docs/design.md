@@ -20,9 +20,12 @@ measured `(monotonic, realtime)` pairs rather than as the axis itself.
 
 ## Module boundaries
 
-Everything lives under one package, `rrr`. Dependencies run one way:
-`rrr.timeline` imports nothing but numpy, `rrr.video` and `rrr.audio` import no
-web framework, and nothing below `rrr.api` knows HTTP exists. Nothing in
+The recorder lives under one package, `rrr`; the array is reached through
+`respeaker_adapter`, a separate package beside it that imports nothing from
+`rrr` and reads no environment variable - `rrr.recorder.config` chooses its
+settings and passes them in. Dependencies run one way: `rrr.timeline` imports
+nothing but numpy, `rrr.video` and `respeaker_adapter` import no web
+framework, and nothing below `rrr.api` knows HTTP exists. Nothing in
 `rrr` opens a window either - the interface is the page in `frontend/` - which is
 why OpenCV is the headless build: the full one drags in GTK, dead weight in a
 container and slow to install on a Pi.
@@ -31,13 +34,12 @@ container and slow to install on a Pi.
 flowchart TD
     T["backend/rrr/timeline/<br/>clocks, session manifest<br/><i>numpy only</i>"]
     V["backend/rrr/video/<br/>D455: source, archive<br/><i>pyrealsense2</i>"]
-    A["backend/rrr/audio/<br/>ReSpeaker: taps, DOA<br/><i>sounddevice, pyusb</i>"]
+    A["backend/respeaker_adapter/<br/>ReSpeaker: taps, DOA<br/><i>sounddevice, pyusb</i>"]
     R["backend/rrr/recorder/<br/>writers, session orchestration"]
     S["backend/rrr/api/<br/>FastAPI, MJPEG, playback"]
     C["backend/rrr/tools/<br/>record, inspect, export"]
     W["frontend/<br/>vite + react"]
     T --> V
-    T --> A
     V --> R
     A --> R
     R --> S

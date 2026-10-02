@@ -163,7 +163,7 @@ below.
 
 ### The array is one PortAudio device name, but four different host APIs
 
-`rrr.audio.capture._resolve_device` matched only by name, and on this machine
+`respeaker_adapter.capture._resolve_device` matched only by name, and on this machine
 that name resolves through all four of Windows' host APIs at once:
 
 ```
@@ -280,7 +280,7 @@ explain a flagged number rather than silence the check that found it.
 `doa read failed: No backend available` was seen throughout this
 investigation's own test recordings, with the array physically attached -
 unlike the `server-preview-test` run in the appendix below, where the same
-message meant the array was simply not plugged in. `backend/rrr/audio/doa.py`'s
+message meant the array was simply not plugged in. `backend/respeaker_adapter/doa.py`'s
 `pyusb` backend needs a libusb-compatible driver (WinUSB, or Zadig) bound to
 the array's control interface, which this machine does not have installed.
 Not investigated further here: it was out of scope for what this session set
@@ -718,7 +718,7 @@ attempt) whose `audio.clock.jsonl` showed silence-fills recurring almost
 exactly once a second throughout a 30 s clip (68,173 samples / 4.26 s
 filled, audio clock fitted at +4062 ppm, frame timestamps non-monotonic) -
 timed directly: `list_devices()` costs 200-240 ms on this machine,
-`rrr.audio.capture.probe()` (the array's equivalent check) costs under 1 ms.
+`respeaker_adapter.capture.probe()` (the array's equivalent check) costs under 1 ms.
 Once a second, that is enough contention to show up as loss in both tracks.
 **Fixed:** `_realsense_device()` only calls `list_devices()` while the hub is
 idle (nobody previewing or recording); while active it reuses `hub.device`,

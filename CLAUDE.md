@@ -80,8 +80,10 @@ quantisation, so motion capture is not needed to measure this array.
 
 ## Conventions
 
-- Everything lives under `backend/rrr/`. Import as `from rrr.video import ArchiveSource`.
-  Do not add top-level packages - see `docs/decisions.md` 15.
+- The recorder lives under `backend/rrr/`. Import as `from rrr.video import ArchiveSource`.
+  Do not add top-level packages - see `docs/decisions.md` 15 - except a device
+  adapter that knows nothing of `rrr`: `backend/respeaker_adapter/` reads no
+  environment variable, and `rrr.recorder.config` passes its settings in.
 - Packaged with `uv_build` (`module-root = "backend"`) and installed editable by `uv sync`, in the container
   too; nothing sets `PYTHONPATH` - see `docs/decisions.md` 27.
 - Google-style docstrings, PEP 8, type hints.
@@ -103,7 +105,7 @@ anything new - an unmeasured extrinsic is null, not identity.
 Two values are currently *asserted* rather than measured, and both should be
 treated as unknown until something measures them:
 
-- `backend/rrr/audio/config.py` `MIC_ANGLES` - the file says "NOT YET VERIFIED", and
+- `backend/respeaker_adapter/config.py` `MIC_ANGLES` - the file says "NOT YET VERIFIED", and
   nothing in the repository reads it.
 - The rigid transform between the camera and the array. `session.json` has a
   `rig` block for it, filled in by hand, and it ships `"unset"`. It is required

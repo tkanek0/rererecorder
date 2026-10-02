@@ -11,8 +11,8 @@ from collections.abc import Callable
 
 import pytest
 
-from rrr.audio.doa import DoaTap
-from rrr.audio.tuning import DeviceNotFound
+from respeaker_adapter.doa import DoaTap
+from respeaker_adapter.tuning import DeviceNotFound
 
 
 def _wait_until(ready: Callable[[], bool], timeout: float = 2.0) -> bool:
@@ -44,7 +44,7 @@ def failing(monkeypatch):
         attempts.append(time.monotonic())
         raise DeviceNotFound("no ReSpeaker on the bus")
 
-    monkeypatch.setattr("rrr.audio.doa.find", find)
+    monkeypatch.setattr("respeaker_adapter.doa.find", find)
     tap = DoaTap(poll_hz=100.0)
     yield tap, attempts
     tap.shutdown()
@@ -78,7 +78,7 @@ def test_a_read_that_fails_is_not_retried(monkeypatch) -> None:
 
     opens = []
     monkeypatch.setattr(
-        "rrr.audio.doa.find", lambda: opens.append(1) or Breaking()
+        "respeaker_adapter.doa.find", lambda: opens.append(1) or Breaking()
     )
     tap = DoaTap(poll_hz=100.0)
     try:
@@ -96,7 +96,7 @@ def test_reconnect_polls_again(failing, monkeypatch) -> None:
     tap.acquire()
     assert _wait_until(lambda: tap.failed)
 
-    monkeypatch.setattr("rrr.audio.doa.find", FakeTuning)
+    monkeypatch.setattr("respeaker_adapter.doa.find", FakeTuning)
     tap.reconnect()
     assert not tap.failed
     reading = tap.latest(timeout=1.0)

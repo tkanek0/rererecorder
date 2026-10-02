@@ -25,7 +25,7 @@ from fastapi.concurrency import run_in_threadpool
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 
-from rrr.audio import AudioTap, dbfs, probe as probe_audio, rescan, rms
+from respeaker_adapter import AudioTap, dbfs, probe as probe_audio, rescan, rms
 from rrr.recorder import RecorderBusy, SessionRecorder
 from rrr.recorder import config as recording_config
 from rrr.timeline import (
@@ -209,7 +209,7 @@ def _respeaker_device() -> dict[str, Any]:
 
     ``failed`` covers both the audio and the direction taps.
     """
-    found = probe_audio()
+    found = probe_audio(recording_config.AUDIO_DEVICE)
     tap = state.recorder.tap
     doa = state.recorder.doa
     failures = [t.error for t in (tap, doa) if t is not None and t.failed]

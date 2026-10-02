@@ -1,6 +1,6 @@
 """The shapes audio travels in, and the conventions that go with them.
 
-Kept apart from :mod:`rrr.audio.capture` so offline work imports neither
+Kept apart from :mod:`respeaker_adapter.capture` so offline work imports neither
 PortAudio nor a device. Samples are float32 in [-1, 1], ``(n, channels)``,
 oldest first. Times are ``CLOCK_MONOTONIC``, from ``inputBufferAdcTime``.
 """

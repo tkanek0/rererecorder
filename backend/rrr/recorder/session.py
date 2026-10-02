@@ -13,7 +13,8 @@ import threading
 import time
 from typing import Any
 
-from rrr.audio import AudioTap, DoaTap
+from respeaker_adapter import AudioTap, DoaTap
+
 from rrr.timeline import (
     EVENTS_NAME,
     AudioTimeline,
@@ -29,6 +30,7 @@ from rrr.timeline import (
 )
 from rrr.video import FrameHub, FrameSource, LiveSource, StreamConfig
 
+from . import config
 from .audio_writer import AudioWriter
 from .video_writer import VideoWriter
 
@@ -95,8 +97,8 @@ class SessionRecorder:
 
         # Taps passed in belong to the caller; only taps made here are closed.
         self._owns_taps = tap is None and doa is None
-        self._tap = tap or (AudioTap() if record_audio else None)
-        self._doa = doa or (DoaTap() if record_audio and record_doa else None)
+        self._tap = tap or (_make_audio_tap() if record_audio else None)
+        self._doa = doa or (_make_doa_tap() if record_audio and record_doa else None)
 
         self._lock = threading.Lock()
         self._stop = threading.Event()
@@ -552,3 +554,17 @@ def _summary(manifest: SessionManifest) -> str:
     if manifest.duration_s is not None:
         parts.append(f"over {manifest.duration_s:.1f} s")
     return "; ".join(parts) or "nothing recorded"
+
+
+def _make_audio_tap() -> AudioTap:
+    """Open-on-demand audio tap with this application's configured settings."""
+    return AudioTap(
+        device=config.AUDIO_DEVICE,
+        block_size=config.AUDIO_BLOCK_SIZE,
+        window_s=config.AUDIO_WINDOW_S,
+    )
+
+
+def _make_doa_tap() -> DoaTap:
+    """Open-on-demand direction tap with this application's configured settings."""
+    return DoaTap(poll_hz=config.DOA_POLL_HZ, history_s=config.DOA_HISTORY_S)

@@ -38,7 +38,7 @@ class Reading:
 class DoaTap:
     """Poll the array's direction estimate, and keep a short trail of it.
 
-    Reference counted like :class:`rrr.audio.capture.AudioTap`. A missing or
+    Reference counted like :class:`respeaker_adapter.capture.AudioTap`. A missing or
     refused device is reported through :attr:`error`, not raised, and not
     retried until :meth:`reconnect` (docs/decisions.md 29).
     """

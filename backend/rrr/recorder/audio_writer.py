@@ -16,8 +16,8 @@ import wave
 from dataclasses import dataclass
 
 import numpy as np
+from respeaker_adapter import AudioTap, BlockStamp, DoaTap
 
-from rrr.audio import AudioTap, BlockStamp, DoaTap
 from rrr.timeline import AudioClockPoint, AudioClockWriter
 
 logger = logging.getLogger(__name__)

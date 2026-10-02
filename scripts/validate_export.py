@@ -236,8 +236,17 @@ def _validate_audio(
     if actual != expected:
         problems.append(f"stream {name} WAV says {actual}, manifest says {expected}")
     clock = entry.get("clock")
+    if clock is None:
+        # Exported without a clock, which the manifest's notes say; then it
+        # cannot claim clock points either.
+        if entry.get("clock_points"):
+            problems.append(
+                f"stream {name} has no audio clock but says "
+                f"{entry.get('clock_points')} clock points"
+            )
+        return
     if not isinstance(clock, str):
-        problems.append(f"stream {name} has no audio clock")
+        problems.append(f"stream {name} has an invalid audio clock entry")
         return
     rows = _read_csv(os.path.join(directory, clock), problems, f"{name} clock")
     if rows is None:

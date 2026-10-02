@@ -352,6 +352,30 @@ def test_the_audio_is_copied_whole_with_its_time_mapping(session, tmp_path) -> N
     assert fit["points"] == len(clock)
 
 
+def test_audio_without_a_usable_clock_still_exports(session, tmp_path) -> None:
+    """The WAV goes out; the missing clock is null and noted, never a dangling name."""
+    Path(session.audio_clock).write_text("", encoding="utf-8")
+
+    out, manifest = _export(session, tmp_path)
+
+    entry = manifest["streams"]["audio"]
+    assert entry["clock"] is None and entry["clock_points"] == 0
+    assert "fit" not in entry
+    assert not (out / "audio" / "clock.csv").exists()
+    assert (out / "audio" / "audio.wav").exists()
+    assert any("no usable clock" in note for note in manifest["notes"])
+    assert exporter.validate_export(str(out)) == []
+
+
+def test_a_trimmed_export_still_needs_the_audio_clock(session, tmp_path) -> None:
+    """Without a clock there is no way to know which samples a range covers."""
+    from rrr.timeline import SessionError
+
+    Path(session.audio_clock).write_text("", encoding="utf-8")
+    with pytest.raises(SessionError, match="audio clock"):
+        _export(session, tmp_path, start=1, end=3)
+
+
 def test_a_mark_keeps_its_label_and_its_extras(session, tmp_path) -> None:
     out, _ = _export(session, tmp_path)
 

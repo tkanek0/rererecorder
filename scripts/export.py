@@ -266,6 +266,11 @@ def _export_into(
         ),
     }
 
+    if "audio" in streams and streams["audio"]["clock"] is None:
+        notes.append(
+            "the audio has no usable clock, so its samples cannot be placed on "
+            "CLOCK_MONOTONIC; audio.clock is null"
+        )
     if not manifest.calibration.measured:
         notes.append(
             "the offset between the array and the camera is unmeasured, so "
@@ -638,7 +643,9 @@ def _write_audio(
         "file": "audio/audio.wav",
         "rate": rate,
         "channels": channels,
-        "clock": "audio/clock.csv",
+        # Null until a usable clock is written, so the manifest never names a
+        # file that is not there.
+        "clock": None,
     }
 
     points = 0
@@ -670,6 +677,7 @@ def _write_audio(
             if time_range.selected
             else list(timeline.points)
         )
+        entry["clock"] = "audio/clock.csv"
         with open(
             os.path.join(folder, "clock.csv"), "w", encoding="utf-8", newline=""
         ) as handle:

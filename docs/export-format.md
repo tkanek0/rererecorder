@@ -100,7 +100,7 @@ Every entry has a `kind`; paths are relative to the export directory.
 | `image` | `color`, `ir_left`, `ir_right`, `depth` | `index`, `data`, `count`, `encoding` (`png`, `jpeg`, `png16`), `pixel` (`rgb8`, `y8`, `z16`) |
 | `metadata` | `frame_metadata` | `index` (JSONL), `count`, `key` (`"group_id"`) |
 | `samples` | `imu_accel`, `imu_gyro`, `doa` | `index`, `count`, `columns`; `units` for inertial, `source` for DOA |
-| `audio` | `audio` | `file`, `rate`, `channels`, `samples`, `source_samples` (`start`, `end` in the original WAV), `clock`, `clock_points`, `fit` (absent without a usable clock) |
+| `audio` | `audio` | `file`, `rate`, `channels`, `samples`, `source_samples` (`start`, `end` in the original WAV), `clock` (null without a usable clock), `clock_points`, `fit` (absent without a usable clock) |
 | `marks` | `events` | `index`, `count`, `columns`, `note` |
 
 ### Index columns
@@ -131,7 +131,10 @@ Every entry has a `kind`; paths are relative to the export directory.
 - `audio/audio.wav` keeps every channel, int16, uncompressed, with dropped audio
   already replaced by silence. `clock.csv` places sample numbers on the
   monotonic clock (`filled` is the silence inserted before that point), and
-  `clock_fit.json` is the straight-line fit through it.
+  `clock_fit.json` is the straight-line fit through it. A recording whose clock
+  sidecar is empty or unreadable is still exported whole: `clock` is null,
+  `clock_points` is 0, there is no `fit`, and `notes` says the samples cannot be
+  placed in time. A reader must check `clock` before relying on audio times.
 
 ## `calibration.json`
 
@@ -172,5 +175,6 @@ from the files alone:
 - image `sample_id`s are contiguous from zero, filenames are unique, every file
   exists, and the first decodes with the dtype `pixel` implies and the size
   `calibration.json` gives
-- the WAV's rate, channels and length match the entry, and its clock points
-  are increasing, never go backwards in time, and stay inside the file
+- the WAV's rate, channels and length match the entry; and when `clock` is not
+  null, its clock points are increasing, never go backwards in time, and stay
+  inside the file - when it is null, no clock points may be claimed

@@ -80,9 +80,9 @@ quantisation, so motion capture is not needed to measure this array.
 
 ## Conventions
 
-- Everything lives under `src/rrr/`. Import as `from rrr.video import ArchiveSource`.
+- Everything lives under `backend/rrr/`. Import as `from rrr.video import ArchiveSource`.
   Do not add top-level packages - see `docs/decisions.md` 15.
-- Packaged with hatchling and installed editable by `uv sync`, in the container
+- Packaged with `uv_build` (`module-root = "backend"`) and installed editable by `uv sync`, in the container
   too; nothing sets `PYTHONPATH` - see `docs/decisions.md` 27.
 - Google-style docstrings, PEP 8, type hints.
 - Commits: one purpose each, imperative one-line English message, no trailers.
@@ -92,7 +92,7 @@ quantisation, so motion capture is not needed to measure this array.
 
 **Measure it, then write down what it cost.** Every decision in
 `docs/decisions.md` names the alternatives and the measurement that settled it,
-and `src/rrr/tools/inspect.py` re-reads a recording and makes the files argue with
+and `backend/rrr/tools/inspect.py` re-reads a recording and makes the files argue with
 each other rather than repeating what the recorder believed.
 
 The other half of that habit is refusing to claim what has not been measured:
@@ -103,7 +103,7 @@ anything new - an unmeasured extrinsic is null, not identity.
 Two values are currently *asserted* rather than measured, and both should be
 treated as unknown until something measures them:
 
-- `src/rrr/audio/config.py` `MIC_ANGLES` - the file says "NOT YET VERIFIED", and
+- `backend/rrr/audio/config.py` `MIC_ANGLES` - the file says "NOT YET VERIFIED", and
   nothing in the repository reads it.
 - The rigid transform between the camera and the array. `session.json` has a
   `rig` block for it, filled in by hand, and it ships `"unset"`. It is required

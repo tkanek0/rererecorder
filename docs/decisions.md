@@ -248,7 +248,7 @@ including with no IMU at all - that was the V4L2 backend, not the IMU. Decision
 
 **Cost:** the `motion` table is replaced by `imu`, which moves the format to
 version 3, and about 30 KB/s - 0.06% of the video. The samples start up to 0.7 s
-before the first frame and have gaps while the sensor settles; `src/rrr/tools/inspect`
+before the first frame and have gaps while the sensor settles; `backend/rrr/tools/inspect`
 looks for gaps only inside the video's own span for that reason.
 
 `FrameSet.motion` still exists, holding the newest buffered sample of each
@@ -301,7 +301,7 @@ machine where they share one - a Raspberry Pi, for instance.
 
 ## 14. Measure the device offset from a handclap, and say how well
 
-**Chosen:** `src/rrr/tools/calibrate.py`. Detect the impulse in the audio, find the
+**Chosen:** `backend/rrr/tools/calibrate.py`. Detect the impulse in the audio, find the
 peak frame-to-frame difference in the video around it, take the difference.
 Write nothing without `--apply`.
 
@@ -501,7 +501,7 @@ this is visible rather than something to correct for.
 ## 19. Scale the encoder thread count with the CPU, not a fixed number
 
 **Chosen:** `DEFAULT_WORKERS = min(8, max(4, os.cpu_count() or 4))` in
-`src/rrr/video/archive.py`, replacing a hard-coded `workers: int = 4`.
+`backend/rrr/video/archive.py`, replacing a hard-coded `workers: int = 4`.
 
 **Alternatives:** keep 4 everywhere; switch to `ProcessPoolExecutor` for true
 parallelism instead of tuning the thread count.
@@ -530,7 +530,7 @@ costs nothing.
 
 ## 20. Fall back to the callback clock for the rest of a recording once the domain is known bad
 
-**Chosen:** in `src/rrr/audio/capture.py`'s `_adc_time`, once the one-time check
+**Chosen:** in `backend/rrr/audio/capture.py`'s `_adc_time`, once the one-time check
 finds `inputBufferAdcTime` on a different clock than `time.monotonic()`, set
 a flag and use the `now - expected_lag` fallback for every later block in
 that recording, not just the one being checked.
@@ -669,7 +669,7 @@ budget).
 `RRR_*` environment variables:
 
 - the CLI gains `--no-color`, `--no-depth`, `--no-infrared` and
-  `--color-codec` / `--depth-codec` / `--infrared-codec` (`src/rrr/tools/record.py`);
+  `--color-codec` / `--depth-codec` / `--infrared-codec` (`backend/rrr/tools/record.py`);
 - the server's `PUT /api/settings` accepts `streams` (booleans) and `codecs`
   (`"compressed"`/`"raw"`) alongside the existing `sessions_dir`, refused
   while a recording is running for the same reason moving the directory is -
@@ -712,7 +712,7 @@ real cost for doing so on this machine - see decision 22 and
 
 ## 24. Rank a matching-name capture device by host API and rate, not just by name
 
-**Chosen:** `src/rrr/audio/capture.py`'s `_resolve_device` gathers every input
+**Chosen:** `backend/rrr/audio/capture.py`'s `_resolve_device` gathers every input
 device whose name matches (as before), then picks among them in order: a
 host API named `Windows WASAPI` whose `default_samplerate` agrees with the
 requested rate; failing that, any device whose `default_samplerate` agrees;
@@ -858,6 +858,12 @@ for exactly the reason 15 gave.
 copied, so that layer survives a code change, then the project itself. The
 install is editable, so the development bind mount of the checkout over `/app`
 still runs the mounted source without a rebuild.
+
+**Amended (2026-10-02):** the source root is now `backend/`, named for its
+role next to `frontend/`, and the build backend is `uv_build` with
+`module-root = "backend"`. Still a `src/`-style layout in every respect that
+mattered above: installed editable, never put on the path. `uv_build` rather
+than hatchling because it is uv's own and states the root in one line.
 
 ---
 

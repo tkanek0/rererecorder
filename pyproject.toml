@@ -15,11 +15,13 @@ dependencies = [
 ]
 
 [build-system]
-requires = ["hatchling"]
-build-backend = "hatchling.build"
+requires = ["uv_build>=0.12.16,<0.13"]
+build-backend = "uv_build"
 
-[tool.hatch.build.targets.wheel]
-packages = ["src/rrr"]
+# The source root is named after its role, next to frontend/ - docs/decisions.md 27.
+[tool.uv.build-backend]
+module-root = "backend"
+module-name = "rrr"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

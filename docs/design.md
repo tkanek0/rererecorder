@@ -29,12 +29,12 @@ container and slow to install on a Pi.
 
 ```mermaid
 flowchart TD
-    T["src/rrr/timeline/<br/>clocks, session manifest<br/><i>numpy only</i>"]
-    V["src/rrr/video/<br/>D455: source, archive<br/><i>pyrealsense2</i>"]
-    A["src/rrr/audio/<br/>ReSpeaker: taps, DOA<br/><i>sounddevice, pyusb</i>"]
-    R["src/rrr/recorder/<br/>writers, session orchestration"]
-    S["src/rrr/api/<br/>FastAPI, MJPEG, playback"]
-    C["src/rrr/tools/<br/>record, inspect, export"]
+    T["backend/rrr/timeline/<br/>clocks, session manifest<br/><i>numpy only</i>"]
+    V["backend/rrr/video/<br/>D455: source, archive<br/><i>pyrealsense2</i>"]
+    A["backend/rrr/audio/<br/>ReSpeaker: taps, DOA<br/><i>sounddevice, pyusb</i>"]
+    R["backend/rrr/recorder/<br/>writers, session orchestration"]
+    S["backend/rrr/api/<br/>FastAPI, MJPEG, playback"]
+    C["backend/rrr/tools/<br/>record, inspect, export"]
     W["web/<br/>vite + react"]
     T --> V
     T --> A
@@ -45,7 +45,7 @@ flowchart TD
     S --> W
 ```
 
-`src/rrr/timeline/` being the base, and importing nothing that needs a device, is the
+`backend/rrr/timeline/` being the base, and importing nothing that needs a device, is the
 point: it holds the arithmetic everything else depends on, so all of it can be
 tested without a camera attached. If that arithmetic is wrong, nothing
 downstream can detect it.
@@ -106,7 +106,7 @@ it. The two tracks share a clock, but the residual between a microphone and a
 shutter - how long a sound takes to reach the converter, how long light takes to
 reach a timestamp - is not derivable from either device's documentation. Showing
 zero would assert an alignment nobody has established. The page displays
-"unmeasured", and `src/rrr/tools/calibrate.py` is what will fill it in.
+"unmeasured", and `backend/rrr/tools/calibrate.py` is what will fill it in.
 
 `rig` is the same shape of refusal, for space rather than time. A direction
 from the array is a bearing in the array's own frame, and turning it into a ray

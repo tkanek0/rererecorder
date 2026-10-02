@@ -537,7 +537,7 @@ class LiveSource:
                 the option name is not one the SDK knows, or that sensor does
                 not support it.
 
-        A diagnostic escape hatch (``tests/perf/frame_number_gaps.py``);
+        A diagnostic escape hatch (``scripts/frame_number_gaps.py``);
         ordinary recording configures everything through ``StreamConfig``.
         """
         if self._pipeline is None:
@@ -734,7 +734,7 @@ class LiveSource:
     def frame_numbers(self) -> dict[str, int]:
         """The most recently delivered set's ``frame_number``, per stream.
 
-        For diagnosis only (``tests/perf/frame_number_gaps.py``); not carried
+        For diagnosis only (``scripts/frame_number_gaps.py``); not carried
         on ``FrameSet`` or written to the archive.
         """
         return dict(self._last_numbers)

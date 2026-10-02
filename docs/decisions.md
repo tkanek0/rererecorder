@@ -208,7 +208,7 @@ For long recordings the slower drive is the steadier one.
 **Since 28:** recordings go to the checkout's `data/`, which on this machine
 links to `/mnt/dataspace01/rererecorder` - `/dev/sdb1`, a second drive of the
 same model as `/dev/sdc1` above (Samsung 860 QVO 2TB). Measured on both, one
-after the other, with `tests/perf/sqlite_write_benchmark.py --frames 3600`,
+after the other, with `scripts/sqlite_write_benchmark.py --frames 3600`,
 timed until the WAL is checkpointed and the file fsynced: 190 MB/s (2.2 GB of
 600 KB rows) and 200 MB/s (6.6 GB of 1.8 MB rows) on each, within 1% of each
 other and of the 198 MB/s above. Not measured: anything past 6.6 GB, which is

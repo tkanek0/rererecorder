@@ -4,11 +4,11 @@ Checks that a stream/codec combination holds the requested fps with nothing
 dropped (the check behind docs/decisions.md 21-23). Every `rrr.tools.record`
 flag is forwarded verbatim:
 
-    uv run python tests/perf/soak_record.py --session soak-color-raw \\
+    uv run python scripts/soak_record.py --session soak-color-raw \\
         --seconds 600 --no-depth --no-infrared --color-codec raw
 
     # the full six-image set, compressed - the worst case
-    uv run python tests/perf/soak_record.py --session soak-full-compressed \\
+    uv run python scripts/soak_record.py --session soak-full-compressed \\
         --seconds 60
 
 Needs a live device. Not part of `pytest`.

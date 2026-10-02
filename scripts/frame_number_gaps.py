@@ -5,8 +5,8 @@ device-reported loss) through `LiveSource`, as the recorder uses it. See
 docs/decisions.md 21. Run with AE both on and off if colour/depth timing is in
 question:
 
-    uv run python tests/perf/frame_number_gaps.py --seconds 60
-    uv run python tests/perf/frame_number_gaps.py --seconds 60 --auto-exposure off
+    uv run python scripts/frame_number_gaps.py --seconds 60
+    uv run python scripts/frame_number_gaps.py --seconds 60 --auto-exposure off
 
 Needs a live device. Not part of `pytest`.
 """

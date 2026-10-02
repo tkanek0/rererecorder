@@ -7,7 +7,7 @@ from pathlib import Path
 import av
 import numpy as np
 import pytest
-
+from rrr.playback import Direction
 from rrr.timeline import (
     AudioClockPoint,
     AudioClockWriter,
@@ -20,7 +20,7 @@ from rrr.timeline import (
     read_manifest,
     write_manifest,
 )
-from rrr.tools.render_mp4 import _Direction, _directions, main, render
+from rrr.tools.render_mp4 import _directions, main, render
 from rrr.video import (
     ArchiveWriter,
     Calibration,
@@ -154,7 +154,7 @@ def test_direction_falls_back_to_array_coordinates(tmp_path: Path) -> None:
     readings, mode = _directions(
         str(path), 0.25, Rig(), Extrinsics.identity(), enabled=True
     )
-    assert readings == [_Direction(time=10.25, angle=90.0, voice=True)]
+    assert readings == [Direction(time=10.25, angle=90.0, voice=True)]
     assert mode == "array coordinates (rig unset)"
 
 

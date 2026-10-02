@@ -15,22 +15,20 @@ import argparse
 import csv
 import json
 import logging
-import math
 import os
 import shutil
 import sys
 import tempfile
 import time
 import wave
-from dataclasses import dataclass
 from itertools import pairwise
 from typing import Any, Self
 
 import cv2
 import numpy as np
 
+from rrr.playback import TimeRange, crop_clock_points, sample_range
 from rrr.timeline import (
-    AudioClockPoint,
     AudioTimeline,
     SessionError,
     SessionManifest,
@@ -54,32 +52,6 @@ IMAGE_STREAMS = ("color", "ir_left", "ir_right", "depth")
 
 class ExportValidationError(OSError):
     """Raised when a completed export contradicts its own manifest."""
-
-
-@dataclass(frozen=True)
-class _TimeRange:
-    """Half-open interval on the recording's monotonic clock."""
-
-    start: float | None = None
-    end: float | None = None
-
-    @property
-    def selected(self) -> bool:
-        """Return whether either side of the recording was trimmed."""
-        return self.start is not None or self.end is not None
-
-    def contains(self, seconds: float) -> bool:
-        """Return whether a timestamp belongs to this interval."""
-        return (self.start is None or seconds >= self.start) and (
-            self.end is None or seconds < self.end
-        )
-
-    def as_dict(self) -> dict[str, int | None]:
-        """Return the interval in the export's integer time unit."""
-        return {
-            "start_t_ns": _ns(self.start) if self.start is not None else None,
-            "end_t_ns": _ns(self.end) if self.end is not None else None,
-        }
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -269,7 +241,7 @@ def _export_into(
     if manifest.video is None and (start != 0 or end is not None):
         raise ValueError("--start/--end need a video track to define their time range")
 
-    time_range = _TimeRange()
+    time_range = TimeRange()
     if manifest.video is not None:
         frame_streams, time_range = _write_frames(
             paths,
@@ -323,7 +295,7 @@ def _export_into(
             "session": manifest.session_id,
             "exported_at": time.time(),
             "frames": {"start": start, "end": end, "stride": stride},
-            "time_range": time_range.as_dict(),
+            "time_range": _time_range(time_range),
             "color_encoding": color,
         },
         "streams": streams,
@@ -347,7 +319,7 @@ def _write_frames(
     color: str,
     jpeg_quality: int,
     calibration: dict[str, Any],
-) -> tuple[dict[str, Any], _TimeRange]:
+) -> tuple[dict[str, Any], TimeRange]:
     """Write the image streams and the inertial samples.
 
     Args:
@@ -371,15 +343,7 @@ def _write_frames(
 
     with ArchiveSource(paths.video) as archive:
         _describe_sensors(archive, calibration)
-        times = archive.frame_times()
-        if start and start >= len(times):
-            raise ValueError(
-                f"start frame {start} is outside an archive of {len(times)} frames"
-            )
-        time_range = _TimeRange(
-            start=times[start][1] if start and start < len(times) else None,
-            end=times[end][1] if end is not None and end < len(times) else None,
-        )
+        time_range = TimeRange.of_frames(archive.frame_times(), start, end)
         writers = {}
         counts = {name: 0 for name in IMAGE_STREAMS}
         metadata_path = os.path.join(destination, "frame_metadata", "index.jsonl")
@@ -510,7 +474,7 @@ def _write_frames(
 
 
 def _write_motion(
-    archive: ArchiveSource, destination: str, time_range: _TimeRange
+    archive: ArchiveSource, destination: str, time_range: TimeRange
 ) -> dict[str, Any]:
     """Write the inertial samples, one stream per sensor.
 
@@ -652,7 +616,7 @@ def _array(manifest: SessionManifest) -> dict[str, Any]:
 def _write_audio(
     paths: SessionPaths,
     destination: str,
-    time_range: _TimeRange,
+    time_range: TimeRange,
 ) -> dict[str, Any]:
     """Copy the WAV and write its measured time mapping beside it.
 
@@ -694,14 +658,7 @@ def _write_audio(
             "cannot make a time-aligned partial export without a usable audio clock"
         )
 
-    start_sample = 0
-    end_sample = total_samples
-    if timeline is not None and time_range.start is not None:
-        start_sample = max(0, math.ceil(timeline.sample_at(time_range.start)))
-    if timeline is not None and time_range.end is not None:
-        end_sample = min(total_samples, math.ceil(timeline.sample_at(time_range.end)))
-    start_sample = min(start_sample, total_samples)
-    end_sample = max(start_sample, end_sample)
+    start_sample, end_sample = sample_range(timeline, time_range, total_samples)
     _write_wav_range(
         paths.audio,
         os.path.join(folder, "audio.wav"),
@@ -713,28 +670,19 @@ def _write_audio(
 
     if timeline is not None:
         output_points = (
-            _cropped_clock_points(timeline, start_sample, end_sample)
+            crop_clock_points(timeline, start_sample, end_sample)
             if time_range.selected
-            else [
-                (point.sample, point.monotonic, point.filled)
-                for point in timeline.points
-            ]
+            else list(timeline.points)
         )
         with open(
             os.path.join(folder, "clock.csv"), "w", encoding="utf-8", newline=""
         ) as handle:
             rows = csv.writer(handle)
             rows.writerow(("sample", "t_ns", "filled"))
-            for sample, monotonic, filled in output_points:
-                rows.writerow((sample, _ns(monotonic), filled))
+            for point in output_points:
+                rows.writerow((point.sample, _ns(point.monotonic), point.filled))
                 points += 1
-        output_timeline = AudioTimeline(
-            [
-                AudioClockPoint(sample, monotonic, filled)
-                for sample, monotonic, filled in output_points
-            ],
-            rate,
-        )
+        output_timeline = AudioTimeline(output_points, rate)
         _write_json(
             os.path.join(folder, "clock_fit.json"), output_timeline.report().as_dict()
         )
@@ -757,24 +705,8 @@ def _write_wav_range(
         out.writeframes(source.readframes(end - start))
 
 
-def _cropped_clock_points(
-    timeline: AudioTimeline, start: int, end: int
-) -> list[tuple[int, float, int]]:
-    """Rebase measured audio clock points onto a cropped WAV."""
-    points: list[tuple[int, float, int]] = [(0, timeline.monotonic_at(start), 0)]
-    points.extend(
-        (point.sample - start, point.monotonic, point.filled)
-        for point in timeline.points
-        if start < point.sample < end
-    )
-    final = (end - start, timeline.monotonic_at(end), 0)
-    if final[0] != points[-1][0]:
-        points.append(final)
-    return points
-
-
 def _write_doa(
-    paths: SessionPaths, destination: str, time_range: _TimeRange
+    paths: SessionPaths, destination: str, time_range: TimeRange
 ) -> dict[str, Any]:
     """Write the array's own direction estimate as a table.
 
@@ -820,7 +752,7 @@ def _write_doa(
 
 
 def _write_events(
-    paths: SessionPaths, destination: str, time_range: _TimeRange
+    paths: SessionPaths, destination: str, time_range: TimeRange
 ) -> dict[str, Any]:
     """Write the marks somebody made while recording.
 
@@ -1134,6 +1066,14 @@ class _IndexWriter:
         """Close the file."""
         if not self._handle.closed:
             self._handle.close()
+
+
+def _time_range(time_range: TimeRange) -> dict[str, int | None]:
+    """Return an interval in the export's integer time unit."""
+    return {
+        "start_t_ns": _ns(time_range.start) if time_range.start is not None else None,
+        "end_t_ns": _ns(time_range.end) if time_range.end is not None else None,
+    }
 
 
 def _ns(seconds: float) -> int:

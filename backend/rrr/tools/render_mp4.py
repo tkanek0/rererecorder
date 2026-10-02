@@ -12,20 +12,27 @@ from __future__ import annotations
 
 import argparse
 import bisect
-import json
 import math
 import os
 import tempfile
-import wave
 from dataclasses import dataclass
 from fractions import Fraction
 from pathlib import Path
-from typing import Any
 
 import av
 import cv2
 import numpy as np
 
+from rrr.playback import (
+    AudioSelection,
+    Direction,
+    audio_timeline,
+    frame_times,
+    in_colour_camera,
+    read_directions,
+    resample_onto_video,
+    select_audio,
+)
 from rrr.timeline import (
     REVIEW_NAME,
     AudioTimeline,
@@ -34,21 +41,11 @@ from rrr.timeline import (
     SessionPaths,
     read_manifest,
 )
-from rrr.tools.review import audio_timeline, describe_audio
-from rrr.video import ArchiveSource, StreamError, color_to_bgr
+from rrr.video import ArchiveSource, Extrinsics, StreamError, color_to_bgr
 
 VIDEO_TIME_BASE = Fraction(1, 90_000)
 AUDIO_FRAME_SAMPLES = 1_024
 DOA_STALE_S = 0.5
-
-
-@dataclass(frozen=True)
-class _Direction:
-    """One direction reading on the video clock."""
-
-    time: float
-    angle: float
-    voice: bool
 
 
 @dataclass(frozen=True)
@@ -160,13 +157,12 @@ def render(
 
     try:
         with ArchiveSource(paths.video) as archive:
-            times = archive.frame_times()
-            if not times:
-                fps = manifest.video.fps or 30.0
-                times = [(index, n / fps) for n, index in enumerate(archive.indices())]
-                clock_description = "nominal video rate; audio starts at frame zero"
-            else:
-                clock_description = "recorded monotonic video and audio clocks"
+            times, measured = frame_times(archive, manifest.video.fps)
+            clock_description = (
+                "recorded monotonic video and audio clocks"
+                if measured
+                else "nominal video rate; audio starts at frame zero"
+            )
             if not times:
                 raise ValueError("the video archive is empty")
 
@@ -182,12 +178,12 @@ def render(
                 enabled=draw_doa and manifest.doa_file is not None,
             )
 
-            audio = describe_audio(paths.audio, audio_channel, manifest.rig)
+            audio = select_audio(paths.audio, audio_channel, manifest.rig)
             timeline = None
             if audio is not None:
                 timeline, used_clock = audio_timeline(
                     paths.audio_clock,
-                    audio["rate"],
+                    audio.rate,
                     manifest.audio.first_monotonic if manifest.audio else None,
                     fallback_start=start,
                 )
@@ -219,7 +215,7 @@ def render(
         frames=len(times),
         duration_s=duration,
         audio=audio is not None,
-        audio_channel=audio["label"] if audio is not None else None,
+        audio_channel=audio.label if audio is not None else None,
         clock=clock_description,
         offset_s=offset,
         doa=doa_mode,
@@ -242,9 +238,9 @@ def _encode(
     fps: float,
     start: float,
     duration: float,
-    directions: list[_Direction],
+    directions: list[Direction],
     doa_mode: str,
-    audio: dict[str, Any] | None,
+    audio: AudioSelection | None,
     timeline: AudioTimeline | None,
     offset: float,
     crf: int,
@@ -275,7 +271,7 @@ def _encode(
         video_stream.options = {"crf": str(crf), "preset": "medium"}
         audio_stream = None
         if audio is not None and timeline is not None:
-            audio_stream = container.add_stream("aac", rate=audio["rate"])
+            audio_stream = container.add_stream("aac", rate=audio.rate)
             audio_stream.layout = "mono"
             audio_stream.bit_rate = 128_000
 
@@ -297,103 +293,43 @@ def _encode(
             container.mux(packet)
 
         if audio_stream is not None and audio is not None and timeline is not None:
-            for samples, pts in _audio_frames(audio, timeline, start, duration, offset):
+            for samples, pts in resample_onto_video(
+                audio, timeline, start, duration, offset, AUDIO_FRAME_SAMPLES
+            ):
                 frame = av.AudioFrame.from_ndarray(samples[np.newaxis, :], "s16", "mono")
-                frame.sample_rate = audio["rate"]
+                frame.sample_rate = audio.rate
                 frame.pts = pts
-                frame.time_base = Fraction(1, audio["rate"])
+                frame.time_base = Fraction(1, audio.rate)
                 for packet in audio_stream.encode(frame):
                     container.mux(packet)
             for packet in audio_stream.encode():
                 container.mux(packet)
 
 
-def _audio_frames(
-    audio: dict[str, Any],
-    timeline: AudioTimeline,
-    video_start: float,
-    duration: float,
-    offset: float,
-):
-    """Yield clock-corrected mono blocks covering the complete video."""
-    rate = int(audio["rate"])
-    total = math.ceil(duration * rate)
-    with wave.open(audio["path"], "rb") as handle:
-        for output_start in range(0, total, AUDIO_FRAME_SAMPLES):
-            count = min(AUDIO_FRAME_SAMPLES, total - output_start)
-            first_video_time = video_start + output_start / rate
-            first_source = timeline.sample_at(first_video_time - offset)
-            source_step = (
-                timeline.sample_at(first_video_time + 1.0 / rate - offset)
-                - first_source
-            )
-            source_positions = first_source + np.arange(count) * source_step
-            rendered = np.zeros(count, dtype=np.float64)
-            valid = (source_positions >= 0) & (source_positions < audio["samples"])
-            if np.any(valid):
-                first = max(0, math.floor(float(source_positions[valid].min())))
-                last = min(
-                    int(audio["samples"]),
-                    math.ceil(float(source_positions[valid].max())) + 2,
-                )
-                handle.setpos(first)
-                raw = handle.readframes(last - first)
-                source = np.frombuffer(raw, dtype="<i2").reshape(-1, audio["channels"])
-                mono = source[:, audio["selected"]].astype(np.float64).mean(axis=1)
-                rendered[valid] = np.interp(
-                    source_positions[valid], np.arange(first, last), mono
-                )
-            yield np.clip(np.rint(rendered), -32768, 32767).astype("<i2"), output_start
-
-
 def _directions(
     path: str,
     offset: float,
     rig: Rig,
-    depth_to_color: Any,
+    depth_to_color: Extrinsics | None,
     *,
     enabled: bool,
-) -> tuple[list[_Direction], str]:
+) -> tuple[list[Direction], str]:
     """Read DOA and, when fully described, rotate it into the colour camera."""
     if not enabled:
         return [], "off"
-    readings: list[_Direction] = []
-    try:
-        with open(path, encoding="utf-8") as handle:
-            for line in handle:
-                raw = json.loads(line)
-                readings.append(
-                    _Direction(
-                        time=float(raw["t"]) + offset,
-                        angle=float(raw["angle"]) % 360.0,
-                        voice=bool(raw.get("voice", False)),
-                    )
-                )
-    except FileNotFoundError:
-        return [], "unavailable"
-    readings.sort(key=lambda reading: reading.time)
+    readings = read_directions(path, offset)
     if not readings:
         return [], "unavailable"
-    if not rig.known or depth_to_color is None:
+    corrected = in_colour_camera(readings, rig, depth_to_color)
+    if corrected is None:
         return readings, "array coordinates (rig unset)"
-
-    rotation = np.asarray(depth_to_color.rotation).reshape(3, 3) @ np.asarray(
-        rig.rotation
-    ).reshape(3, 3)
-    corrected = []
-    for reading in readings:
-        radians = math.radians(reading.angle)
-        # 0 deg is the array's +Y, increasing clockwise toward +X.
-        ray = rotation @ np.array([math.sin(radians), math.cos(radians), 0.0])
-        bearing = math.degrees(math.atan2(float(ray[0]), float(ray[2]))) % 360.0
-        corrected.append(_Direction(reading.time, bearing, reading.voice))
     return corrected, f"colour-camera coordinates ({rig.source} rig)"
 
 
 def _draw_direction(
     image: np.ndarray,
     stamp: float,
-    readings: list[_Direction],
+    readings: list[Direction],
     mode: str,
 ) -> None:
     """Draw the freshest non-stale DOA reading as a top-down compass."""

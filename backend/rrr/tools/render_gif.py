@@ -16,7 +16,6 @@ from __future__ import annotations
 import argparse
 import os
 import tempfile
-import wave
 from dataclasses import dataclass
 from fractions import Fraction
 from pathlib import Path
@@ -27,8 +26,8 @@ import av.filter
 import cv2
 import numpy as np
 
+from rrr.playback import audio_timeline, frame_times, read_mono, select_audio
 from rrr.timeline import AudioTimeline, SessionError, SessionPaths, read_manifest
-from rrr.tools.review import audio_timeline, describe_audio
 from rrr.video import ArchiveSource, StreamError, color_to_bgr
 
 DEFAULT_OUTPUT = "video.gif"
@@ -50,7 +49,6 @@ FONT_SCALE = 0.35
 # Amplitude that fills the waveform strip; a high percentile so that one click
 # does not flatten the rest of the recording.
 WAVEFORM_PERCENTILE = 99.95
-WAV_CHUNK_SAMPLES = 1 << 20
 
 
 @dataclass(frozen=True)
@@ -198,13 +196,12 @@ def render(
     output.parent.mkdir(parents=True, exist_ok=True)
 
     with ArchiveSource(paths.video) as archive:
-        times = archive.frame_times()
-        if not times:
-            fps = manifest.video.fps or 30.0
-            times = [(index, n / fps) for n, index in enumerate(archive.indices())]
-            clock_description = "nominal video rate; audio starts at frame zero"
-        else:
-            clock_description = "recorded monotonic video and audio clocks"
+        times, measured = frame_times(archive, manifest.video.fps)
+        clock_description = (
+            "recorded monotonic video and audio clocks"
+            if measured
+            else "nominal video rate; audio starts at frame zero"
+        )
         if not times:
             raise ValueError("the video archive is empty")
         start = times[0][1]
@@ -212,25 +209,25 @@ def render(
 
         audio = None
         if volume or waveform:
-            description = describe_audio(paths.audio, audio_channel, manifest.rig)
+            description = select_audio(paths.audio, audio_channel, manifest.rig)
             if description is None:
                 raise ValueError("--volume and --waveform need the session's WAV")
             timeline, used_clock = audio_timeline(
                 paths.audio_clock,
-                description["rate"],
+                description.rate,
                 manifest.audio.first_monotonic if manifest.audio else None,
                 fallback_start=start,
             )
             if not used_clock:
                 clock_description = "nominal rates; tracks start together"
-            samples = _read_mono(description)
+            samples = read_mono(description)
             audio = _Audio(
                 samples=samples,
-                rate=description["rate"],
+                rate=description.rate,
                 timeline=timeline,
                 offset=offset or 0.0,
-                label=description["label"],
-                channels=tuple(description["selected"]),
+                label=description.label,
+                channels=description.selected,
                 loudness=_column_rms(samples, width),
                 scale=_waveform_scale(samples),
             )
@@ -261,21 +258,6 @@ def render(
         clock=clock_description,
         offset_s=offset,
     )
-
-
-def _read_mono(audio: dict[str, Any]) -> np.ndarray:
-    """Read the selected WAV channels as one zero-mean mono signal."""
-    selected = list(audio["selected"])
-    parts: list[np.ndarray] = []
-    with wave.open(audio["path"], "rb") as handle:
-        while True:
-            raw = handle.readframes(WAV_CHUNK_SAMPLES)
-            if not raw:
-                break
-            block = np.frombuffer(raw, dtype="<i2").reshape(-1, audio["channels"])
-            parts.append(block[:, selected].astype(np.float32).mean(axis=1))
-    mono = np.concatenate(parts) if parts else np.zeros(0, dtype=np.float32)
-    return mono - mono.mean() if len(mono) else mono
 
 
 def _compose(

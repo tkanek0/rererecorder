@@ -36,7 +36,8 @@ flowchart TD
     V["backend/rrr/video/<br/>D455: source, archive<br/><i>pyrealsense2</i>"]
     A["backend/respeaker_adapter/<br/>ReSpeaker: taps, DOA<br/><i>sounddevice, pyusb</i>"]
     R["backend/rrr/recorder/<br/>writers, session orchestration"]
-    S["backend/rrr/api/<br/>FastAPI, MJPEG, playback"]
+    S["backend/rrr/api/<br/>FastAPI, MJPEG, player"]
+    P["backend/rrr/playback/<br/>a recording on one clock"]
     C["backend/rrr/tools/<br/>record, inspect, export"]
     W["frontend/<br/>vite + react"]
     T --> V
@@ -44,6 +45,8 @@ flowchart TD
     A --> R
     R --> S
     R --> C
+    V --> P
+    P --> C
     S --> W
 ```
 

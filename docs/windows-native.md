@@ -24,7 +24,7 @@ different host APIs and picked a broken one (decision 24); the working one
 a real but differently-epoched clock was being discarded instead of
 corrected for (decision 26). Verified over a 5-minute live recording through
 the real CLI: +1 ppm fitted rate, 422 samples (26 ms) of silence filled over
-300 seconds, independently confirmed by `rrr.tools.inspect`.
+300 seconds, independently confirmed by `rrr.inspection`.
 
 Machine: a Windows 11 laptop, Intel Core Ultra 7 265U (12 cores / 14
 threads), corporate network with a Zscaler TLS-inspecting proxy. RealSense
@@ -264,13 +264,13 @@ array, no synthetic data):
 | 20 s | 20.05 s | 20.04 s | 4 samples (3 during calibration warm-up, 1 real ~8 ms hiccup) | +969 ppm |
 | 5 min | 300.00 s | 299.98 s | 422 samples (26 ms) | +1 ppm, residual rms 1.38 / max 20.7 ms |
 
-`rrr.tools.inspect` on the 5-minute session confirmed the same numbers
+`rrr.inspection` on the 5-minute session confirmed the same numbers
 independently and flagged one `PROBLEM` (the 20.7 ms worst residual) -
 traced to the recording's very first clock point, sample 0, which is
 necessarily timed by the coarser pre-calibration fallback since calibration
 itself has not decided anything yet at that instant. Every point after the
 first two sits under 0.4 ms. `RESIDUAL_WARN_MS = 1.0` was calibrated against
-Linux/ALSA's 0.03 ms jitter (see `backend/rrr/tools/inspect.py`), so this one-time,
+Linux/ALSA's 0.03 ms jitter (see `backend/rrr/inspection/checks.py`), so this one-time,
 understood startup transient trips it on Windows; not adjusted, since it is
 not evidence of an ongoing problem and the repository's practice is to
 explain a flagged number rather than silence the check that found it.
@@ -677,7 +677,7 @@ after review, the same as the sessions above.
 | `audio-wasapi-verify` | First attempt at picking WASAPI end to end: crashed immediately (`PaErrorCode -9999`, the COM/callback-mode bug - see decision 25). |
 | `audio-com-fix-check`, `audio-com-fix-check2` | After the COM fix: no more crash, but ~150 spurious silence-fills in 15 s and a +153,943 ppm fitted rate - decision 20's domain check discarding WASAPI's good but offset ADC clock (see decision 26). |
 | `audio-offset-fix-check` | 20 s, after the offset-correction fix: 4 fills (3 during the ~0.3 s calibration warm-up, 1 real ~8 ms hiccup), +969 ppm. |
-| `audio-offset-fix-5min` | 300.00 s wall clock, 299.98 s of audio, 422 samples (26 ms) filled, +1 ppm fitted, residual rms 1.38 / max 20.7 ms. The number cited throughout as §7's resolution; independently re-checked with `rrr.tools.inspect`, which flagged one `PROBLEM` (the 20.7 ms residual) traced to the recording's very first, necessarily-pre-calibration clock point - not a hole. |
+| `audio-offset-fix-5min` | 300.00 s wall clock, 299.98 s of audio, 422 samples (26 ms) filled, +1 ppm fitted, residual rms 1.38 / max 20.7 ms. The number cited throughout as §7's resolution; independently re-checked with `rrr.inspection`, which flagged one `PROBLEM` (the 20.7 ms residual) traced to the recording's very first, necessarily-pre-calibration clock point - not a hole. |
 | `audio-server-path-5min` | Same, but through the actual server (`PUT /api/recording`, polled at `GET /api/status` once a second for the whole run - the page's own `POLL_MS`, video off via `RRR_VIDEO=off`): 300.62 s wall clock, 300.57 s of audio, 662 samples (41 ms) filled, +4 ppm, residual rms 2.61 / max 32.2 ms. 297 polls, 0 poll errors. The extra filled samples over the CLI-only run are 2 more fills in the same first-fraction-of-a-second calibration window (indices 1 and 2 of the clock sidecar, both inside 0.13 s), not new loss later in the recording. |
 | `combined-realsense-respeaker-5min` | Camera and array recording at the same time (`--no-depth --no-infrared --color-codec raw`, this repository's own operating combination from decision 23): 301.91 s wall clock. Video: 8,996 frames, 29.99 fps, 0 dropped - unaffected by the array recording alongside it. Audio: 300.03 s, 1,216 samples (76 ms) filled, +16 ppm, residual rms 6.86 / max 72.3 ms - all 5 fills land within the first 0.36 s (the calibration window, again), none afterward. No live preview was attached during this run. |
 

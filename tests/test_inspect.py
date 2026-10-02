@@ -2,16 +2,18 @@
 
 from __future__ import annotations
 
+import json
 from collections.abc import Callable
 from dataclasses import replace
 
+import inspect_session as inspect_cli
 import numpy as np
-
+from rrr.inspection.checks import Check, _check_video, count_missing
 from rrr.timeline import SessionManifest, SessionPaths, VideoTrack
-from rrr.tools.inspect import Check, _check_video, count_missing
 from rrr.video import ArchiveWriter, Calibration, FrameSet, StreamConfig
 
 from .conftest import HEIGHT, WIDTH
+from .test_render_mp4 import FRAMES, session  # noqa: F401 - the fixture
 
 
 def test_a_gapless_counter_misses_nothing() -> None:
@@ -88,3 +90,12 @@ def test_without_counters_losses_are_named_as_uncounted(
     assert video["missing"] == {}
     assert check.problems == []
     assert any("not counted" in note for note in check.notes)
+
+
+def test_the_script_reports_a_whole_session_as_json(session, capsys) -> None:  # noqa: F811
+    """The thin command line runs every check and prints what the package found."""
+    status = inspect_cli.main([session.directory, "--json"])
+    report = json.loads(capsys.readouterr().out)
+    assert report["session_id"] == session.session_id
+    assert report["video"]["frames"] == FRAMES
+    assert status == (1 if report["problems"] else 0)

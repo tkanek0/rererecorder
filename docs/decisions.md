@@ -248,7 +248,7 @@ including with no IMU at all - that was the V4L2 backend, not the IMU. Decision
 
 **Cost:** the `motion` table is replaced by `imu`, which moves the format to
 version 3, and about 30 KB/s - 0.06% of the video. The samples start up to 0.7 s
-before the first frame and have gaps while the sensor settles; `backend/rrr/tools/inspect`
+before the first frame and have gaps while the sensor settles; `rrr.inspection`
 looks for gaps only inside the video's own span for that reason.
 
 `FrameSet.motion` still exists, holding the newest buffered sample of each
@@ -826,11 +826,11 @@ blocks it filled in at all). A single-block check cannot even measure a
 spread, which is why calibration needed to become a window rather than one
 reading. Verified end to end through the real CLI: a 5-minute recording
 fitted +1 ppm with 422 samples (26 ms) filled over 300 s, independently
-confirmed by `rrr.tools.inspect`.
+confirmed by `rrr.inspection`.
 
 **Cost:** the first ~0.3 s of every recording is timed from the coarser
 callback clock while calibration runs, which it also was, for one block
-only, before this change. `rrr.tools.inspect`'s `RESIDUAL_WARN_MS` (1.0 ms,
+only, before this change. `rrr.inspection`'s `RESIDUAL_WARN_MS` (1.0 ms,
 calibrated against Linux/ALSA's 0.03 ms jitter) flags the resulting
 first-point residual (measured 20.7 ms) on a Windows/WASAPI recording as a
 `PROBLEM` - understood as this startup transient rather than adjusted away,

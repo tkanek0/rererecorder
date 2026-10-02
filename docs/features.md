@@ -180,7 +180,7 @@ Nothing here needs the server, and the server records through exactly this code.
 
 ```
 uv run python -m rrr.tools.record --seconds 30 --session kitchen   # record
-uv run python -m rrr.tools.inspect data/sessions/kitchen          # cross-check a recording
+uv run python scripts/inspect_session.py data/sessions/kitchen     # cross-check a recording
 uv run python scripts/export.py data/sessions/kitchen             # write it out as plain files
 uv run python scripts/render_mp4.py data/sessions/kitchen         # a review movie
 uv run pytest                                                      # no device needed
@@ -193,9 +193,9 @@ On Linux, record through the container instead (decision 30); the Makefile's
 docker compose run --rm api python -m rrr.tools.record --seconds 30
 ```
 
-`rrr.tools.inspect` is the one that matters after a recording. It re-reads the files
-and makes them argue with each other rather than summarising what the recorder
-believed:
+`scripts/inspect_session.py` is the one that matters after a recording. It
+re-reads the files and makes them argue with each other rather than summarising
+what the recorder believed; the checks themselves are `rrr.inspection`:
 
 ```
   video           1010 frames over 33.67 s = 29.97 fps
@@ -282,7 +282,7 @@ of a recording was, never when something happened (decision 16).
 
 Marked from the page while recording (Enter in the field, or the button), and
 the label stays after marking because a run is marked over and over with the
-same condition. `rrr.tools.inspect` counts them and **fails if any of them falls
+same condition. `rrr.inspection` counts them and **fails if any of them falls
 outside the recording**, which is how a sidecar from a different session gets
 caught.
 

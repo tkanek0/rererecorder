@@ -1,18 +1,16 @@
 """Check what a recorded session actually says about its own timing.
 
-    uv run python -m rrr.tools.inspect data/sessions/2026-09-01_17-30-00
-
 Cross-checks the files against each other rather than summarising the
-manifest; see docs/features.md "The command line".
+manifest; see docs/features.md "The command line". ``scripts/inspect_session.py``
+prints the result.
 """
 
 from __future__ import annotations
 
-import argparse
 import json
 import sqlite3
-import sys
 import wave
+from dataclasses import dataclass
 
 import numpy as np
 
@@ -21,7 +19,6 @@ from rrr.timeline import (
     SessionManifest,
     SessionPaths,
     read_events,
-    read_manifest,
 )
 from rrr.video import ArchiveSource, StreamError
 
@@ -59,56 +56,80 @@ class Check:
         self.notes.append(message)
 
 
-def main(argv: list[str] | None = None) -> int:
-    """Inspect one session.
+@dataclass(frozen=True)
+class Inspection:
+    """What a session's files say about their own timing, checked against each other.
+
+    Attributes:
+        session_id: The session inspected.
+        audio: What the WAV and its clock points agree on, or None if no audio.
+        video: Frame counts, rate and losses, or None if no video.
+        imu: Inertial sample counts and rates, or None if none was recorded.
+        overlap: How the audio and video spans line up, or None.
+        doa: Direction readings, or None.
+        marks: Marks made while recording, or None.
+        problems: Disagreements that make the session unsynchronised.
+        notes: Things worth knowing that are not failures.
+    """
+
+    session_id: str
+    audio: dict | None
+    video: dict | None
+    imu: dict | None
+    overlap: dict | None
+    doa: dict | None
+    marks: dict | None
+    problems: list[str]
+    notes: list[str]
+
+    @property
+    def agreed(self) -> bool:
+        """Return whether every cross-check agreed."""
+        return not self.problems
+
+    def as_dict(self) -> dict:
+        """Return a JSON-serialisable view of the findings."""
+        return {
+            "session_id": self.session_id,
+            "audio": self.audio,
+            "video": self.video,
+            "imu": self.imu,
+            "overlap": self.overlap,
+            "doa": self.doa,
+            "marks": self.marks,
+            "problems": self.problems,
+            "notes": self.notes,
+        }
+
+
+def inspect_session(paths: SessionPaths, manifest: SessionManifest) -> Inspection:
+    """Run every cross-check on one session.
 
     Args:
-        argv: Command line arguments, or None to read them from the process.
+        paths: Where the session lives.
+        manifest: Its manifest, already read.
 
     Returns:
-        0 if every cross-check agreed, 1 if any disagreed.
+        The findings. Every check runs before anything is judged.
     """
-    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("directory", help="the session directory to inspect")
-    parser.add_argument(
-        "--json", action="store_true", help="machine-readable output instead"
-    )
-    args = parser.parse_args(argv)
-
-    root, _, session_id = args.directory.rstrip("/").rpartition("/")
-    paths = SessionPaths.resolve(root or ".", session_id)
-    manifest = read_manifest(paths)
     check = Check()
-
     audio = _check_audio(paths, manifest, check)
     video = _check_video(paths, manifest, check)
     imu = _check_imu(paths, manifest, video, check)
     overlap = _check_overlap(audio, video, manifest, check)
     doa = _check_doa(paths, audio, check)
     marks = _check_events(paths, audio, video, check)
-
-    if args.json:
-        json.dump(
-            {
-                "session_id": manifest.session_id,
-                "audio": audio,
-                "video": video,
-                "imu": imu,
-                "overlap": overlap,
-                "doa": doa,
-                "marks": marks,
-                "problems": check.problems,
-                "notes": check.notes,
-            },
-            sys.stdout,
-            indent=2,
-            default=float,
-        )
-        print()
-    else:
-        _print(manifest, audio, video, imu, overlap, doa, marks, check)
-
-    return 1 if check.problems else 0
+    return Inspection(
+        session_id=manifest.session_id,
+        audio=audio,
+        video=video,
+        imu=imu,
+        overlap=overlap,
+        doa=doa,
+        marks=marks,
+        problems=check.problems,
+        notes=check.notes,
+    )
 
 
 # -- audio --------------------------------------------------------------------
@@ -619,115 +640,3 @@ def _check_events(
                 f"{len(outside)} of {len(times)} marks fall outside the recording"
             )
     return result
-
-
-# -- output -------------------------------------------------------------------
-
-
-def _print(manifest, audio, video, imu, overlap, doa, marks, check: Check) -> None:
-    """Write the findings for a person to read."""
-    print(f"session {manifest.session_id}")
-    if manifest.started_at is not None:
-        import time as _time
-
-        stamp = _time.strftime(
-            "%Y-%m-%d %H:%M:%S", _time.localtime(manifest.started_at.realtime)
-        )
-        print(f"  started         {stamp}")
-    if manifest.duration_s is not None:
-        print(f"  duration        {manifest.duration_s:.2f} s")
-
-    track = manifest.clock_track
-    drift = track.drift_ppm
-    if drift is not None:
-        print(
-            f"  clock offset    {track.samples[0].offset:.6f} s, "
-            f"drifting {drift:+.2f} ppm over the session"
-        )
-
-    if video is not None:
-        print(
-            f"  video           {video['frames']} frames over {video['span_s']:.2f} s"
-            + (f" = {video['fps']:.2f} fps" if video["fps"] else "")
-        )
-        gap = video["gap_ms"]
-        print(
-            f"  frame interval  {gap['median']:.1f} ms median, "
-            f"{gap['min']:.1f} min, {gap['max']:.1f} max"
-        )
-        for stream, count in video["missing"].items():
-            print(
-                f"  {stream:<6}          {count['delivered']} of {count['span']} "
-                f"numbered frames, MISSING {count['missing']}"
-            )
-
-    if imu is not None:
-        rates = ", ".join(
-            f"{stream} {rate:.0f} Hz" for stream, rate in sorted(imu["rates"].items())
-        )
-        print(f"  inertial        {imu['samples']} samples ({rates})")
-        if "accel_magnitude" in imu:
-            print(
-                f"  gravity         {imu['accel_magnitude']:.2f} m/s^2 median "
-                f"magnitude (9.81 if still)"
-            )
-
-    if audio is not None and "report" in audio:
-        report = audio["report"]
-        print(
-            f"  audio           {audio['frames']} samples, "
-            f"{audio['channels']} ch at {audio['rate']} Hz"
-        )
-        print(
-            f"  length          {audio['seconds_by_header']:.3f} s by header, "
-            f"{audio['seconds_by_clock']:.3f} s by clock points "
-            f"({audio['disagreement_ms']:.1f} ms apart)"
-        )
-        if report["measured_rate"]:
-            print(
-                f"  audio clock     {report['measured_rate']:.2f} Hz fitted "
-                f"({report['rate_error_ppm']:+.0f} ppm) from {report['points']} points"
-            )
-            print(
-                f"  residual        {report['residual_rms_ms']:.3f} ms rms, "
-                f"{report['residual_max_ms']:.3f} ms max"
-            )
-
-    if doa is not None:
-        print(
-            f"  direction       {doa['readings']} readings"
-            + (f" at {doa['hz']:.1f} Hz" if doa.get("hz") else "")
-        )
-
-    if overlap is not None:
-        print(f"  overlap         {overlap['seconds']:.2f} s of both tracks")
-        print(
-            f"  audio started   {overlap['audio_lead_s'] * 1000:+.0f} ms "
-            f"before the video"
-        )
-        if overlap["calibrated"]:
-            print(f"  offset          {overlap['offset_s'] * 1000:+.1f} ms (measured)")
-        else:
-            print(
-                "  offset          NOT MEASURED - the tracks share a clock but "
-                "their absolute alignment is unknown"
-            )
-
-    if marks:
-        # A few distinct labels, so a mark per run does not bury the checks.
-        distinct = list(dict.fromkeys(marks["labels"]))
-        shown = ", ".join(distinct[:5])
-        if len(distinct) > 5:
-            shown += f", and {len(distinct) - 5} more"
-        print(f"  marks           {marks['marks']} ({shown})")
-
-    for note in check.notes:
-        print(f"  note            {note}")
-    for problem in check.problems:
-        print(f"  PROBLEM         {problem}")
-    if not check.problems:
-        print("  every cross-check agreed")
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())

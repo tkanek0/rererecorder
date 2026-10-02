@@ -38,9 +38,10 @@ flowchart TD
     R["backend/rrr/recorder/<br/>writers, session orchestration"]
     S["backend/rrr/api/<br/>FastAPI, MJPEG, player"]
     P["backend/rrr/playback/<br/>a recording on one clock"]
-    C["backend/rrr/tools/<br/>record, inspect"]
+    C["backend/rrr/tools/<br/>record, calibrate"]
+    N["backend/rrr/inspection/<br/>cross-checks"]
     Z["backend/rrr/visualization/<br/>strips, compass"]
-    X["scripts/<br/>render_gif, render_mp4, export"]
+    X["scripts/<br/>render_gif, render_mp4, export,<br/>inspect_session"]
     W["frontend/<br/>vite + react"]
     T --> V
     V --> R
@@ -48,6 +49,8 @@ flowchart TD
     R --> S
     R --> C
     V --> P
+    V --> N
+    N --> X
     P --> Z
     P --> X
     Z --> X

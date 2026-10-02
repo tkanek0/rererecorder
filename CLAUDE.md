@@ -95,7 +95,7 @@ quantisation, so motion capture is not needed to measure this array.
 
 **Measure it, then write down what it cost.** Every decision in
 `docs/decisions.md` names the alternatives and the measurement that settled it,
-and `backend/rrr/tools/inspect.py` re-reads a recording and makes the files argue with
+and `rrr.inspection` (run as `scripts/inspect_session.py`) re-reads a recording and makes the files argue with
 each other rather than repeating what the recorder believed.
 
 The other half of that habit is refusing to claim what has not been measured:

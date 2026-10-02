@@ -32,8 +32,8 @@ make up                         # the page on http://localhost:5177
 ```bash
 uv sync
 uv run rrr-api                  # control plane
-npm --prefix web install
-npm --prefix web run dev        # the page, on http://localhost:5177
+npm --prefix frontend install
+npm --prefix frontend run dev        # the page, on http://localhost:5177
 ```
 
 The command-line tools - recording, checking, exporting, rendering - are in

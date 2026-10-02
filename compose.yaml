@@ -31,11 +31,11 @@ services:
     cpus: ${RRR_CPUS:-8}
 
   app:
-    # The host's node major, so web/node_modules serves both.
+    # The host's node major, so frontend/node_modules serves both.
     image: node:24-slim
-    working_dir: /web
+    working_dir: /frontend
     volumes:
-      - ./web:/web
+      - ./frontend:/frontend
     environment:
       VITE_CONTROL_PORT: ${RRR_API_PORT:-8040}
       # npm needs a writable HOME, and the invoking user has none here.

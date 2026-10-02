@@ -25,7 +25,7 @@ help:
 
 setup:
 	uv sync
-	cd web && npm install
+	cd frontend && npm install
 
 image:
 	$(COMPOSE) build

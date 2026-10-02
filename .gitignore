@@ -16,7 +16,7 @@ __pycache__/
 *.wav
 *.jsonl
 
-# Node (web frontend)
+# Node (frontend)
 node_modules/
 dist/
 *.tsbuildinfo

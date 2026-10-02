@@ -4,5 +4,5 @@ data
 __pycache__/
 .pytest_cache/
 .mypy_cache/
-web/node_modules/
-web/dist/
+frontend/node_modules/
+frontend/dist/

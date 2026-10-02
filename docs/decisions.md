@@ -158,11 +158,11 @@ directions to describe a change that harms neither.
 
 ## 9. Frontend: vite + react, not a single HTML file
 
-**Chosen:** `web/`, served by vite's dev server - its own node container on
+**Chosen:** `frontend/`, served by vite's dev server - its own node container on
 Linux (decision 30), natively elsewhere.
 
 **Alternatives:** one hand-written HTML file with no build step (chosen first,
-then reversed on request). Building `web/` in a Docker stage and serving the
+then reversed on request). Building `frontend/` in a Docker stage and serving the
 static files from the control plane, which is how it first shipped.
 
 **Why:** it matches both playground repositories. The built-and-served variant
@@ -993,7 +993,7 @@ never a question. On Linux the container is the only route to RSUSB.
 starts and drops frames. Windows is not held to zero drops either: it records
 every stream it is asked for, and what it loses lands in the session the way it
 does anywhere else (`docs/windows-native.md`, "The operating conclusion").
-`make up` pulls a node image, and installs `web/node_modules` into the checkout
+`make up` pulls a node image, and installs `frontend/node_modules` into the checkout
 from inside it.
 
 ---

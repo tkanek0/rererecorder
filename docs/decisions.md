@@ -669,7 +669,7 @@ budget).
 `RRR_*` environment variables:
 
 - the CLI gains `--no-color`, `--no-depth`, `--no-infrared` and
-  `--color-codec` / `--depth-codec` / `--infrared-codec` (`backend/rrr/tools/record.py`);
+  `--color-codec` / `--depth-codec` / `--infrared-codec` (`scripts/record.py`);
 - the server's `PUT /api/settings` accepts `streams` (booleans) and `codecs`
   (`"compressed"`/`"raw"`) alongside the existing `sessions_dir`, refused
   while a recording is running for the same reason moving the directory is -

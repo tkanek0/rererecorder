@@ -127,7 +127,7 @@ Separately confirmed: the SDK's own native recording
 163 MB/s. So the camera, the USB link, and the OS capture path were never
 the bottleneck for throughput - only this repository's per-frame lossless
 compression was, and only until the thread count matched this CPU. (Also
-found in passing: `backend/rrr/tools/record.py --format db3`, mentioned in
+found in passing: `scripts/record.py --format db3`, mentioned in
 `archive.py`'s module docstring, does not exist as a CLI flag - the comment
 is stale.)
 
@@ -643,7 +643,7 @@ and nothing refuses the combination, but every measurement in this document
 shows a real, unresolved cost to adding either on this machine.
 
 Decision 23 makes this a choice rather than a set of environment variables to
-remember: `backend/rrr/tools/record.py --no-depth --no-infrared --color-codec raw`
+remember: `scripts/record.py --no-depth --no-infrared --color-codec raw`
 from the terminal, or the same three toggles from the page's settings panel -
 both drive the same `StreamConfig`/codec plumbing, so neither path is a
 second implementation of the other.
@@ -669,7 +669,7 @@ Reproducing any of these no longer needs a bespoke script: `scripts/soak_record.
 
 ### Audio-only runs (2026-09-14, §7's resolution)
 
-All via `rrr.tools.record --no-video`, this array, no synthetic data. Deleted
+All via `scripts/record.py --no-video`, this array, no synthetic data. Deleted
 after review, the same as the sessions above.
 
 | Session | What it showed |

@@ -1,10 +1,10 @@
 """Record a session from the terminal.
 
-    uv run python -m rrr.tools.record --seconds 20
-    uv run python -m rrr.tools.record --session kitchen-test --no-doa
-    uv run python -m rrr.tools.record --no-depth --no-infrared --color-codec raw
+    uv run python scripts/record.py --seconds 20
+    uv run python scripts/record.py --session kitchen-test --no-doa
+    uv run python scripts/record.py --no-depth --no-infrared --color-codec raw
 
-The same :class:`~recorder.SessionRecorder` the server uses, with a progress
+The same :class:`~rrr.recorder.SessionRecorder` the server uses, with a progress
 line instead of a browser, and no web stack needed.
 """
 

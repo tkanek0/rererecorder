@@ -1,6 +1,6 @@
 # The recorder on Linux: `make up`. See docs/decisions.md 30.
 #
-#   docker compose run --rm api python -m rrr.tools.record --seconds 30
+#   docker compose run --rm api python scripts/record.py --seconds 30
 
 name: rererecorder
 

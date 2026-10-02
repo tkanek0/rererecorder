@@ -5,9 +5,8 @@ from __future__ import annotations
 import argparse
 
 import pytest
-
+from record import _build_codecs, _build_streams
 from rrr.recorder import config
-from rrr.tools.record import _build_codecs, _build_streams
 
 
 def _args(**overrides: object) -> argparse.Namespace:

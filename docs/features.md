@@ -179,7 +179,7 @@ button, which also enumerates the device again. It is disabled while recording.
 Nothing here needs the server, and the server records through exactly this code.
 
 ```
-uv run python -m rrr.tools.record --seconds 30 --session kitchen   # record
+uv run python scripts/record.py --seconds 30 --session kitchen     # record
 uv run python scripts/inspect_session.py data/sessions/kitchen     # cross-check a recording
 uv run python scripts/export.py data/sessions/kitchen             # write it out as plain files
 uv run python scripts/render_mp4.py data/sessions/kitchen         # a review movie
@@ -190,7 +190,7 @@ On Linux, record through the container instead (decision 30); the Makefile's
 `COMPOSE` line shows the variables it needs:
 
 ```
-docker compose run --rm api python -m rrr.tools.record --seconds 30
+docker compose run --rm api python scripts/record.py --seconds 30
 ```
 
 `scripts/inspect_session.py` is the one that matters after a recording. It

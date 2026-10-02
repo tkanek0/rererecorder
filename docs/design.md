@@ -38,26 +38,25 @@ flowchart TD
     R["backend/rrr/recorder/<br/>writers, session orchestration"]
     S["backend/rrr/api/<br/>FastAPI, MJPEG, player"]
     P["backend/rrr/playback/<br/>a recording on one clock"]
-    C["backend/rrr/tools/<br/>record"]
-    O["backend/rrr/offset/<br/>handclap offset"]
     N["backend/rrr/inspection/<br/>cross-checks"]
+    O["backend/rrr/offset/<br/>handclap offset"]
     Z["backend/rrr/visualization/<br/>strips, compass"]
-    X["scripts/<br/>render_gif, render_mp4, export,<br/>inspect_session, calibrate"]
+    X["scripts/<br/>record, inspect_session, calibrate,<br/>export, render_gif, render_mp4"]
     W["frontend/<br/>vite + react"]
     T --> V
     V --> R
     A --> R
     R --> S
-    R --> C
+    S --> W
     V --> P
     V --> N
-    N --> X
     V --> O
-    O --> X
     P --> Z
+    R --> X
+    N --> X
+    O --> X
     P --> X
     Z --> X
-    S --> W
 ```
 
 `backend/rrr/timeline/` being the base, and importing nothing that needs a device, is the

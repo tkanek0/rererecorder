@@ -1,7 +1,7 @@
 """Record for a fixed duration with a chosen configuration, then say whether it held.
 
 Checks that a stream/codec combination holds the requested fps with nothing
-dropped (the check behind docs/decisions.md 21-23). Every `rrr.tools.record`
+dropped (the check behind docs/decisions.md 21-23). Every `scripts/record.py`
 flag is forwarded verbatim:
 
     uv run python scripts/soak_record.py --session soak-color-raw \\
@@ -19,9 +19,9 @@ from __future__ import annotations
 import argparse
 import sys
 
+import record
 from rrr.recorder import config
 from rrr.timeline import SessionError, SessionPaths, read_manifest
-from rrr.tools import record
 from rrr.video import ArchiveSource, StreamError
 
 
@@ -31,15 +31,15 @@ def main(argv: list[str] | None = None) -> int:
     Args:
         argv: Command line arguments, or None to read them from the process.
             Anything this script does not define itself is forwarded to
-            :func:`rrr.tools.record.main` unchanged.
+            :func:`record.main` unchanged.
 
     Returns:
         0 if the recording held within the given tolerances, 1 otherwise.
     """
     parser = argparse.ArgumentParser(
         description=__doc__.splitlines()[0],
-        epilog="every other flag is forwarded to `rrr.tools.record` unchanged "
-        "- see `python -m rrr.tools.record --help`.",
+        epilog="every other flag is forwarded to `scripts/record.py` unchanged "
+        "- see `python scripts/record.py --help`.",
     )
     parser.add_argument(
         "--session",

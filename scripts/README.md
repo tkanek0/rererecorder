@@ -19,10 +19,11 @@ path. Tests do the same through pytest's `pythonpath = ["scripts"]`. That is
 also why no script may be named after a standard library module:
 `inspect_session.py`, not `inspect.py`.
 
-## Working on a recording
+## Recording, and working on a recording
 
 | Script | What it does |
 |---|---|
+| `record.py` | Records a session from the terminal, through the same recorder the server uses. |
 | `inspect_session.py` | Re-reads a session and makes its files argue with each other. |
 | `calibrate.py` | Measures the audio-to-video offset from handclaps; `--apply` stores it. |
 | `export.py` | Writes a session as the neutral layout the analysis repository reads. |
@@ -44,7 +45,7 @@ not run beside the server (`docs/design.md`, Module boundaries).
 
 | Script | Needs a device? | What it reproduces |
 |---|---|---|
-| `soak_record.py` | Yes | "Does this combination of streams and codecs hold close to 30 fps with nothing dropped, for as long as it runs?" - decisions 21/22/23's core question, for any combination `rrr.tools.record` accepts. |
+| `soak_record.py` | Yes | "Does this combination of streams and codecs hold close to 30 fps with nothing dropped, for as long as it runs?" - decisions 21/22/23's core question, for any combination `record.py` accepts. |
 | `sqlite_write_benchmark.py` | No | Decision 22's SQLite/WAL insert-throughput finding: compressed-size blobs (~600 KB) insert well inside budget, raw-size blobs (~1.8 MB) do not - independent of any encoding cost. |
 | `frame_number_gaps.py` | Yes | Decision 21's premise check: the SDK's own per-stream `frame_number` never skips, on this hardware, in either auto-exposure state - so the earlier discard policy was throwing away good frames, not protecting against lost ones. |
 

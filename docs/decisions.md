@@ -395,7 +395,7 @@ session - and the rest is procedure.
 
 ## 17. Export to a flat directory, rather than being imported
 
-**Chosen:** `rrr.tools.export` writes a session out as plain files - PNG, CSV,
+**Chosen:** `scripts/export.py` writes a session out as plain files - PNG, CSV,
 WAV - in a flat layout indexed by `manifest.json`. The analysis repository reads
 that. It does not import this package.
 
@@ -883,7 +883,7 @@ started, and exports and review movies went to a third and fourth place
 property of the machine rather than of the code. `data` rather than `var`
 matches the name the container already used.
 
-What is derived from a session lives inside it: `rrr.tools.export` writes to
+What is derived from a session lives inside it: `scripts/export.py` writes to
 `<session>/export/` and `scripts/render_mp4.py` to `<session>/review.mp4` unless
 told otherwise, rather than to `export/<id>/` and `mp4/<id>.mp4` beside the
 code. A recording and what was made from it are then kept, moved and deleted

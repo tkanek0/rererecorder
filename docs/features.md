@@ -181,7 +181,7 @@ Nothing here needs the server, and the server records through exactly this code.
 ```
 uv run python -m rrr.tools.record --seconds 30 --session kitchen   # record
 uv run python -m rrr.tools.inspect data/sessions/kitchen          # cross-check a recording
-uv run python -m rrr.tools.export data/sessions/kitchen           # write it out as plain files
+uv run python scripts/export.py data/sessions/kitchen             # write it out as plain files
 uv run python scripts/render_mp4.py data/sessions/kitchen         # a review movie
 uv run pytest                                                      # no device needed
 ```
@@ -328,13 +328,13 @@ clap, ±16.7/√N for N. Until it has run, `calibration.offset_s` is null.
 
 ## Exporting
 
-`rrr.tools.export` writes a recording as plain files - PNG images, CSV tables, a
+`scripts/export.py` writes a recording as plain files - PNG images, CSV tables, a
 WAV - so a consumer needs a filesystem and nothing else (decision 17).
 
 ```bash
-uv run python -m rrr.tools.export data/sessions/x                  # into data/sessions/x/export
-uv run python -m rrr.tools.export data/sessions/x -o /mnt/other/x  # exactly there
-uv run python -m rrr.tools.export data/sessions/x --stride 5 --end 600
+uv run python scripts/export.py data/sessions/x                  # into data/sessions/x/export
+uv run python scripts/export.py data/sessions/x -o /mnt/other/x  # exactly there
+uv run python scripts/export.py data/sessions/x --stride 5 --end 600
 ```
 
 By default the export goes inside the session, so a recording and what was made
@@ -370,7 +370,7 @@ interval is applied to audio, IMU, DOA and marks too; `--stride` only decimates
 images. Check an export again without the source recording with:
 
 ```bash
-uv run python -m rrr.tools.validate_export data/sessions/<session>/export
+uv run python scripts/validate_export.py data/sessions/<session>/export
 ```
 
 ## MP4 review copies

@@ -10,13 +10,15 @@ import csv
 import json
 import os
 import sqlite3
+import subprocess
+import sys
 import wave
 from pathlib import Path
 
 import cv2
+import export as exporter
 import numpy as np
 import pytest
-
 from rrr.timeline import (
     AudioClockPoint,
     AudioClockWriter,
@@ -31,7 +33,6 @@ from rrr.timeline import (
     VideoTrack,
     write_manifest,
 )
-from rrr.tools import export as exporter
 from rrr.video import (
     ArchiveWriter,
     Calibration,
@@ -526,6 +527,25 @@ def test_validator_reports_a_missing_image(session, tmp_path) -> None:
     assert exporter.validate_export(str(out)) == [
         "stream color has 1 missing image files"
     ]
+
+
+def test_the_validator_runs_without_rrr(session, tmp_path) -> None:
+    """It defines the format for outside consumers, so it must not need this code."""
+    out, _ = _export(session, tmp_path)
+    script = Path(__file__).parent.parent / "scripts" / "validate_export.py"
+    code = (
+        "import runpy, sys;"
+        f"sys.argv = ['validate_export', {str(out)!r}];"
+        f"runpy.run_path({str(script)!r}, run_name='__main__')"
+    )
+    blocker = (
+        "import sys; sys.modules['rrr'] = None;"  # any import of rrr now fails
+    )
+    result = subprocess.run(
+        [sys.executable, "-c", blocker + code], capture_output=True, text=True
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == "OK"
 
 
 def test_failed_overwrite_leaves_the_previous_export(

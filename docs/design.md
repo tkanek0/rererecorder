@@ -38,9 +38,9 @@ flowchart TD
     R["backend/rrr/recorder/<br/>writers, session orchestration"]
     S["backend/rrr/api/<br/>FastAPI, MJPEG, player"]
     P["backend/rrr/playback/<br/>a recording on one clock"]
-    C["backend/rrr/tools/<br/>record, inspect, export"]
+    C["backend/rrr/tools/<br/>record, inspect"]
     Z["backend/rrr/visualization/<br/>strips, compass"]
-    X["scripts/<br/>render_gif, render_mp4"]
+    X["scripts/<br/>render_gif, render_mp4, export"]
     W["frontend/<br/>vite + react"]
     T --> V
     V --> R
@@ -48,7 +48,6 @@ flowchart TD
     R --> S
     R --> C
     V --> P
-    P --> C
     P --> Z
     P --> X
     Z --> X
@@ -98,7 +97,7 @@ data/sessions/2026-09-02_15-28-36/
     audio.clock.jsonl   measured capture time, once a second and at every gap
     doa.jsonl           the array's direction estimate
     events.jsonl        marks made by whoever was recording
-    export/             derived: rrr.tools.export's neutral copy
+    export/             derived: scripts/export.py's neutral copy
     review.mp4          derived: scripts/render_mp4.py's review movie
 ```
 
@@ -138,9 +137,12 @@ way out (decision 2).
 ## Leaving
 
 `video.rrdb` is shaped for recording, and nothing outside this repository should
-have to know that. `rrr.tools.export` writes a session as plain files in a flat,
-manifest-indexed layout, and that is the boundary: the analysis repository reads
-the export and never imports this package. See decisions 17.
+have to know that. `scripts/export.py` writes a session as plain files in a
+flat, manifest-indexed layout, and that is the boundary: the analysis repository
+reads the export and never imports this package. The layout lives only in that
+script and in `scripts/validate_export.py`, which imports nothing from `rrr`;
+the package supplies the reading (`rrr.playback`) and not the format. See
+decisions 17.
 
 ## Reading it back
 

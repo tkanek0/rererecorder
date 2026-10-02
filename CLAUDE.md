@@ -50,8 +50,9 @@ Agreed with the user:
 - **A neutral export format**, converted here, is how recordings reach the
   analysis repository. It does **not** import this package. `video.rrdb` is a
   performance-driven internal format and stays that way.
-  `rrr.tools.export` writes it; the layout and its four principles are in
-  `docs/decisions.md` 17.
+  `scripts/export.py` writes it and `scripts/validate_export.py` checks it; the
+  `rrr` package knows nothing of the layout. The layout and its four principles
+  are in `docs/decisions.md` 17.
 - **Lab prototyping only.** No field site yet, so site-level anchoring, capacity
   profiles for long field sessions and redaction are all deferred.
 
@@ -121,7 +122,7 @@ treated as unknown until something measures them:
 Built: the `rrr` namespace, the `rig` block, `events.jsonl` and its page
 button, the full rig calibration (infrared intrinsics and baseline, inertial
 extrinsics and the device's own correction), `RRR_EMITTER=on|off|alternating`,
-`rrr.tools.export`, and the page's Reconnect buttons. A failed device is never
+`scripts/export.py`, and the page's Reconnect buttons. A failed device is never
 retried automatically - see `docs/decisions.md` 29.
 
 Not built, and deliberately so: pose. Monocular SLAM belongs to the analysis

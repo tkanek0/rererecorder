@@ -398,6 +398,9 @@ without a WAV is an error, not a silent omission.
 
 ## Not yet
 
+- **The array can stop delivering audio** half a second into a recording, on
+  Linux. Open; the evidence and the next experiment are in
+  [decisions.md](decisions.md), "Known limits".
 - **The offset between the two devices is unmeasured** until `scripts/calibrate.py`
   runs on a session (see [Aligning the two devices](#aligning-the-two-devices)).
 - **A Raspberry Pi.** The image is built to be portable but has not run on one,

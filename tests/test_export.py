@@ -194,8 +194,7 @@ def session(tmp_path: Path) -> SessionPaths:
             audio=AudioTrack(
                 rate=RATE, channels=CHANNELS, samples=len(audio), first_monotonic=MONO
             ),
-            doa_file="doa.jsonl",
-            events_file="events.jsonl",
+            doa=True,
         ),
     )
     return paths
@@ -426,7 +425,8 @@ def test_an_unset_rig_is_exported_as_unset_and_noted(session, tmp_path) -> None:
 def test_a_filled_in_rig_reaches_the_export(session, tmp_path) -> None:
     from rrr.timeline import read_manifest
 
-    manifest = read_manifest(session).with_rig(
+    manifest = read_manifest(session)
+    manifest.rig = (
         Rig(
             source="nominal",
             rotation=(1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0),
@@ -452,12 +452,9 @@ def test_the_device_offset_is_written_but_not_applied(session, tmp_path) -> None
     """Applying it would bake one alignment into files meant to outlast it."""
     from rrr.timeline import read_manifest
 
-    write_manifest(
-        session,
-        read_manifest(session).with_calibration(
-            SyncCalibration(offset_s=0.08, method="handclap")
-        ),
-    )
+    manifest = read_manifest(session)
+    manifest.calibration = SyncCalibration(offset_s=0.08, method="handclap")
+    write_manifest(session, manifest)
 
     out, written = _export(session, tmp_path)
     calibration = json.loads((out / "calibration.json").read_text())

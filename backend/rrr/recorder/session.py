@@ -11,13 +11,12 @@ from __future__ import annotations
 import logging
 import threading
 import time
-from typing import Any, Self
+from typing import Any
 
 from realsense_adapter import FrameSource, LiveSource, StreamConfig
 from respeaker_adapter import AudioTap, DoaTap
 
 from rrr.timeline import (
-    EVENTS_NAME,
     AudioTimeline,
     AudioTrack,
     ClockTrack,
@@ -57,14 +56,11 @@ class SessionRecorder:
         *,
         streams: StreamConfig | None = None,
         serial: str = "",
-        tap: AudioTap | None = None,
-        doa: DoaTap | None = None,
         record_video: bool = True,
         record_audio: bool = True,
         record_doa: bool = True,
         codecs: dict[str, str] | None = None,
         hub: FrameHub | None = None,
-        source_factory: Any = None,
     ) -> None:
         """Prepare a recorder. Nothing is opened until :meth:`start`.
 
@@ -72,8 +68,6 @@ class SessionRecorder:
             root: Where session directories are created.
             streams: What to ask the camera for.
             serial: Camera serial to open, or empty for whichever is found.
-            tap: Audio tap to read, or None to make one.
-            doa: Direction tap to read, or None to make one.
             record_video: Whether to record the camera at all.
             record_audio: Whether to record the array at all.
             record_doa: Whether to record the direction beside the audio.
@@ -81,24 +75,17 @@ class SessionRecorder:
             hub: Frame hub to record from, or None to make one. The server
                 passes its own so preview and recording share one pipeline
                 (docs/design.md "The camera is shared").
-            source_factory: Callable returning a :class:`FrameSource`.
-                Ignored when a hub is given.
         """
         self._root = root
         self._streams = streams or StreamConfig()
         self._serial = serial
         self._record_video = record_video
         self._record_audio = record_audio
-        self._record_doa = record_doa
         self._codecs = codecs
-        self._source_factory = source_factory or self._open_camera
         self._owns_hub = hub is None
-        self._hub = hub or FrameHub(self._source_factory)
-
-        # Taps passed in belong to the caller; only taps made here are closed.
-        self._owns_taps = tap is None and doa is None
-        self._tap = tap or (_make_audio_tap() if record_audio else None)
-        self._doa = doa or (_make_doa_tap() if record_audio and record_doa else None)
+        self._hub = hub or FrameHub(self._open_camera)
+        self._tap = _make_audio_tap() if record_audio else None
+        self._doa = _make_doa_tap() if record_audio and record_doa else None
 
         self._lock = threading.Lock()
         self._stop = threading.Event()
@@ -153,7 +140,6 @@ class SessionRecorder:
             # Opened up front so a mark never waits on creating the file.
             self._events = EventWriter(paths.events)
             self._marks = 0
-            self._manifest.events_file = EVENTS_NAME
 
         errors: list[str] = []
         self._video = self._start_video(errors)
@@ -201,8 +187,8 @@ class SessionRecorder:
             self._tap,
             wav_path=self._paths.audio,
             clock_path=self._paths.audio_clock,
-            doa=self._doa if self._record_doa else None,
-            doa_path=self._paths.doa if self._record_doa else None,
+            doa=self._doa,
+            doa_path=self._paths.doa if self._doa is not None else None,
         )
         try:
             writer.start()
@@ -294,22 +280,10 @@ class SessionRecorder:
         """
         if self._owns_hub:
             self._hub.stop()
-        if not self._owns_taps:
-            return
         if self._tap is not None:
             self._tap.shutdown()
         if self._doa is not None:
             self._doa.shutdown()
-
-    def __enter__(self) -> Self:
-        """Return the recorder."""
-        return self
-
-    def __exit__(self, *exc: object) -> None:
-        """Stop any recording and release the devices."""
-        if self.recording:
-            self.stop()
-        self.close()
 
     # -- state -------------------------------------------------------------
 
@@ -391,16 +365,6 @@ class SessionRecorder:
         return monitor is not None and monitor.is_alive()
 
     @property
-    def paths(self) -> SessionPaths | None:
-        """Where the current or most recent session lives."""
-        return self._paths
-
-    @property
-    def manifest(self) -> SessionManifest | None:
-        """The current or most recent manifest."""
-        return self._manifest
-
-    @property
     def _session_id(self) -> str | None:
         return self._paths.session_id if self._paths else None
 
@@ -425,7 +389,6 @@ class SessionRecorder:
                 else {
                     "frames": video.frames,
                     "dropped": video.dropped,
-                    "skipped": video.skipped,
                     "skipped_duplicate": video.skipped_duplicate,
                     "skipped_warmup": video.skipped_warmup,
                     "motion": video.motion,
@@ -509,11 +472,7 @@ class SessionRecorder:
                 first_monotonic=stats.first_monotonic,
                 timeline=self._timeline_report(),
             )
-            self._manifest.doa_file = (
-                self._manifest.doa_file
-                if self._doa is None or not self._record_doa
-                else "doa.jsonl"
-            )
+            self._manifest.doa = self._doa is not None
 
     def _timeline_report(self) -> dict[str, object] | None:
         """Read back the clock sidecar and summarise the audio's time axis.

@@ -104,7 +104,7 @@ def session(tmp_path: Path) -> SessionPaths:
                 samples=count,
                 first_monotonic=START,
             ),
-            doa_file="doa.jsonl",
+            doa=True,
         ),
     )
     return paths
@@ -137,10 +137,9 @@ def test_measured_offset_and_rig_are_reported(session, tmp_path: Path) -> None:
         microphones=((0.0, 0.0, 0.0),),
         channels=(1,),
     )
-    write_manifest(
-        session,
-        manifest.with_rig(rig).with_calibration(SyncCalibration(offset_s=0.08)),
-    )
+    manifest.rig = rig
+    manifest.calibration = SyncCalibration(offset_s=0.08)
+    write_manifest(session, manifest)
     report = render(session.directory, tmp_path / "calibrated.mp4", audio_channel="mix")
     assert report.offset_s == pytest.approx(0.08)
     assert report.audio_channel == "physical microphone mix from rig"

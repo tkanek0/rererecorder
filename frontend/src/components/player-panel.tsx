@@ -378,8 +378,8 @@ export const PlayerPanel = ({ sessionId, onClose }: Props) => {
           />
           <Fact
             label="skipped"
-            value={String(detail?.video?.skipped ?? '-')}
-            tone={detail?.video?.skipped ? 'warn' : 'good'}
+            value={String(detail?.video?.skipped_duplicate ?? '-')}
+            tone={detail?.video?.skipped_duplicate ? 'warn' : 'good'}
           />
           <Fact
             label="timestamps"

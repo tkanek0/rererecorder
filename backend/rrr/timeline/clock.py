@@ -42,17 +42,6 @@ class ClockPair:
         """
         return realtime - self.offset
 
-    def to_realtime(self, monotonic: float) -> float:
-        """Convert a monotonic reading to seconds since the epoch.
-
-        Args:
-            monotonic: A ``time.monotonic()`` reading.
-
-        Returns:
-            The same instant as ``time.time()`` would have reported it.
-        """
-        return monotonic + self.offset
-
     def epoch_ms_to_monotonic(self, epoch_ms: float) -> float:
         """Convert a camera frame timestamp onto the monotonic axis.
 
@@ -87,7 +76,7 @@ class ClockPair:
         return ClockPair(
             monotonic=float(raw["monotonic"]),
             realtime=float(raw["realtime"]),
-            uncertainty=float(raw.get("uncertainty", 0.0)),
+            uncertainty=float(raw["uncertainty"]),
         )
 
 
@@ -153,59 +142,21 @@ class ClockTrack:
         """The most recently kept sample, or None if there are none."""
         return self._samples[-1] if self._samples else None
 
-    def at(self, monotonic: float) -> ClockPair | None:
-        """Return the kept sample in force at a monotonic instant.
 
-        Args:
-            monotonic: The instant to look up.
+def drift_ppm(samples: list[ClockPair]) -> float | None:
+    """How fast the realtime-monotonic offset moved, in parts per million.
 
-        Returns:
-            The latest sample taken at or before ``monotonic``, falling back to
-            the earliest sample if the instant precedes all of them, or None if
-            the track is empty. Not interpolated, since a step would make
-            blending meaningless.
-        """
-        if not self._samples:
-            return None
-        chosen = self._samples[0]
-        for pair in self._samples:
-            if pair.monotonic > monotonic:
-                break
-            chosen = pair
-        return chosen
+    Args:
+        samples: Clock pairs, oldest first.
 
-    @property
-    def drift_ppm(self) -> float | None:
-        """How fast the offset moved across the track, in parts per million.
-
-        Returns:
-            The change in offset divided by the monotonic span, or None if the
-            track is too short to say. A few tens is ordinary NTP slew; a large
-            value means the realtime clock was stepped.
-        """
-        if len(self._samples) < 2:
-            return None
-        span = self._samples[-1].monotonic - self._samples[0].monotonic
-        if span <= 0:
-            return None
-        drift = self._samples[-1].offset - self._samples[0].offset
-        return drift / span * 1e6
-
-    def as_list(self) -> list[dict[str, float]]:
-        """Return a JSON-serialisable view of every kept sample."""
-        return [pair.as_dict() for pair in self._samples]
-
-    @staticmethod
-    def from_list(raw: list[dict[str, float]], interval_s: float = 1.0) -> ClockTrack:
-        """Rebuild a track from its stored form.
-
-        Args:
-            raw: A list as :meth:`as_list` produced.
-            interval_s: Interval to report for the rebuilt track.
-
-        Returns:
-            The track.
-        """
-        track = ClockTrack(interval_s=interval_s)
-        track._samples = [ClockPair.from_dict(entry) for entry in raw]
-        return track
+    Returns:
+        The change in offset divided by the monotonic span, or None if the
+        samples are too few to say. A few tens is ordinary NTP slew; a large
+        value means the realtime clock was stepped.
+    """
+    if len(samples) < 2:
+        return None
+    span = samples[-1].monotonic - samples[0].monotonic
+    if span <= 0:
+        return None
+    return (samples[-1].offset - samples[0].offset) / span * 1e6

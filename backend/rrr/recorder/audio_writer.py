@@ -50,7 +50,6 @@ class AudioStats:
         clock_points: Measured points written to the sidecar.
         first_monotonic: ADC time of sample zero, or None before anything is
             written.
-        last_monotonic: ADC time of the newest sample written.
         error: What went wrong, if anything.
     """
 
@@ -62,7 +61,6 @@ class AudioStats:
     overruns: int = 0
     clock_points: int = 0
     first_monotonic: float | None = None
-    last_monotonic: float | None = None
     error: str | None = None
 
     @property
@@ -147,12 +145,6 @@ class AudioWriter:
         if thread is not None:
             thread.join(timeout)
         return self.stats
-
-    @property
-    def running(self) -> bool:
-        """Whether the writer thread is alive."""
-        thread = self._thread
-        return thread is not None and thread.is_alive()
 
     @property
     def stats(self) -> AudioStats:
@@ -269,7 +261,6 @@ class AudioWriter:
                     if self._stats.first_monotonic is None:
                         self._stats.first_monotonic = stamp.monotonic
                     self._stats.samples += len(block)
-                    self._stats.last_monotonic = stamp.monotonic + len(block) / rate
                 previous = stamp
 
             if directions is not None and self._doa is not None:

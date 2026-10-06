@@ -259,9 +259,9 @@ def _report(manifest: SessionManifest, directory: str) -> None:
             print(f"  inertial LOST   {video.motion_overrun} (the buffer overran)")
         if video.dropped:
             print(f"  video dropped   {video.dropped} (the disk could not keep up)")
-        if video.skipped:
+        if video.skipped_duplicate:
             print(
-                f"  video skipped   {video.skipped} mid-stream"
+                f"  video skipped   {video.skipped_duplicate} mid-stream"
                 f" (already delivered before)"
             )
         if video.skipped_warmup:

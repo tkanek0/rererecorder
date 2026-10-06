@@ -172,7 +172,7 @@ def render(
                 offset or 0.0,
                 manifest.rig,
                 archive.calibration.depth_to_color,
-                enabled=draw_doa and manifest.doa_file is not None,
+                enabled=draw_doa and manifest.doa,
             )
 
             audio = select_audio(paths.audio, audio_channel, manifest.rig)

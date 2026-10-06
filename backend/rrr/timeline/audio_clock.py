@@ -14,9 +14,6 @@ from typing import Self
 
 import numpy as np
 
-#: Suffix for the sidecar this module writes.
-SUFFIX = ".clock.jsonl"
-
 
 @dataclass(frozen=True)
 class AudioClockPoint:

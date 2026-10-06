@@ -9,22 +9,20 @@ from __future__ import annotations
 import json
 import os
 import re
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, field
 
-from .audio_clock import SUFFIX as AUDIO_CLOCK_SUFFIX
-from .clock import ClockPair, ClockTrack
-from .events import SUFFIX as EVENTS_SUFFIX
+from .clock import ClockPair
 
 #: Bumped when the layout changes in a way a reader must know about.
-FORMAT_VERSION = 1
+FORMAT_VERSION = 2
 
 #: File names inside a session directory, fixed so it reads without the manifest.
 MANIFEST_NAME = "session.json"
 VIDEO_NAME = "video.rrdb"
 AUDIO_NAME = "audio.wav"
-AUDIO_CLOCK_NAME = f"audio{AUDIO_CLOCK_SUFFIX}"
+AUDIO_CLOCK_NAME = "audio.clock.jsonl"
 DOA_NAME = "doa.jsonl"
-EVENTS_NAME = f"events{EVENTS_SUFFIX}"
+EVENTS_NAME = "events.jsonl"
 
 #: Default names of derived copies, kept inside the session so they are deleted
 #: with it; nothing reads them back.
@@ -45,7 +43,6 @@ class VideoTrack:
     """What was recorded from the camera.
 
     Attributes:
-        file: Archive name inside the session directory.
         frames: Frames written.
         dropped: Frames the encoder queue could not accept.
         skipped_warmup: Sets discarded before the first one was written, while
@@ -64,7 +61,6 @@ class VideoTrack:
         fps: Frames written divided by the span they cover.
     """
 
-    file: str = VIDEO_NAME
     frames: int = 0
     dropped: int = 0
     motion: int = 0
@@ -75,11 +71,6 @@ class VideoTrack:
     last_monotonic: float | None = None
     timestamp_domain: str = "unknown"
     fps: float | None = None
-
-    @property
-    def skipped(self) -> int:
-        """Sets discarded mid-stream. Excludes startup."""
-        return self.skipped_duplicate
 
     @property
     def motion_hz(self) -> float | None:
@@ -98,10 +89,8 @@ class VideoTrack:
     def as_dict(self) -> dict[str, object]:
         """Return a JSON-serialisable view of this track."""
         return {
-            "file": self.file,
             "frames": self.frames,
             "dropped": self.dropped,
-            "skipped": self.skipped,
             "motion": self.motion,
             "motion_overrun": self.motion_overrun,
             "skipped_warmup": self.skipped_warmup,
@@ -114,13 +103,8 @@ class VideoTrack:
 
     @staticmethod
     def from_dict(raw: dict[str, object]) -> VideoTrack:
-        """Rebuild a track from its stored form.
-
-        Legacy ``skipped_unpaired`` and combined ``skipped`` are ignored
-        (docs/decisions.md 21).
-        """
+        """Rebuild a track from its stored form."""
         return VideoTrack(
-            file=str(raw.get("file", VIDEO_NAME)),
             frames=int(raw.get("frames", 0)),
             dropped=int(raw.get("dropped", 0)),
             motion=int(raw.get("motion", 0)),
@@ -139,8 +123,6 @@ class AudioTrack:
     """What was recorded from the array.
 
     Attributes:
-        file: WAV name inside the session directory.
-        clock_file: Sidecar of measured capture times.
         rate: Nominal sample rate from the WAV header.
         channels: Channels written; always all of them.
         samples: Frames written to the WAV, counting inserted silence.
@@ -151,8 +133,6 @@ class AudioTrack:
             :meth:`~rrr.timeline.audio_clock.AudioTimeline.report` produced it.
     """
 
-    file: str = AUDIO_NAME
-    clock_file: str = AUDIO_CLOCK_NAME
     rate: int = 0
     channels: int = 0
     samples: int = 0
@@ -169,8 +149,6 @@ class AudioTrack:
     def as_dict(self) -> dict[str, object]:
         """Return a JSON-serialisable view of this track."""
         return {
-            "file": self.file,
-            "clock_file": self.clock_file,
             "rate": self.rate,
             "channels": self.channels,
             "samples": self.samples,
@@ -186,8 +164,6 @@ class AudioTrack:
         """Rebuild a track from its stored form."""
         timeline = raw.get("timeline")
         return AudioTrack(
-            file=str(raw.get("file", AUDIO_NAME)),
-            clock_file=str(raw.get("clock_file", AUDIO_CLOCK_NAME)),
             rate=int(raw.get("rate", 0)),
             channels=int(raw.get("channels", 0)),
             samples=int(raw.get("samples", 0)),
@@ -337,29 +313,24 @@ class SessionManifest:
 
     Attributes:
         session_id: Directory name.
-        format_version: Layout version.
         started_at: Both host clocks, read when recording began.
         stopped_at: The same, read when it ended. None while recording.
         clock_samples: Pairs taken throughout the recording.
         video: What the camera contributed, or None if it was not recorded.
         audio: What the array contributed, or None.
-        doa_file: Direction sidecar name, or None.
-        events_file: Mark sidecar name, or None if nobody marked anything.
-            No count is kept, so it cannot disagree with the file.
+        doa: Whether a direction sidecar was recorded.
         calibration: The measured offset between the devices, if any.
         rig: How the two devices are mounted relative to each other.
         errors: What went wrong; a failed device does not stop the other.
     """
 
     session_id: str
-    format_version: int = FORMAT_VERSION
     started_at: ClockPair | None = None
     stopped_at: ClockPair | None = None
     clock_samples: list[ClockPair] = field(default_factory=list)
     video: VideoTrack | None = None
     audio: AudioTrack | None = None
-    doa_file: str | None = None
-    events_file: str | None = None
+    doa: bool = False
     calibration: SyncCalibration = field(default_factory=SyncCalibration)
     rig: Rig = field(default_factory=Rig)
     errors: list[str] = field(default_factory=list)
@@ -371,15 +342,10 @@ class SessionManifest:
             return None
         return self.stopped_at.monotonic - self.started_at.monotonic
 
-    @property
-    def clock_track(self) -> ClockTrack:
-        """The clock samples as a track, for looking up an offset by instant."""
-        return ClockTrack.from_list([pair.as_dict() for pair in self.clock_samples])
-
     def as_dict(self) -> dict[str, object]:
         """Return a JSON-serialisable view of this manifest."""
         return {
-            "format_version": self.format_version,
+            "format_version": FORMAT_VERSION,
             "session_id": self.session_id,
             "clock_reference": "CLOCK_MONOTONIC",
             "started_at": self.started_at.as_dict() if self.started_at else None,
@@ -390,8 +356,7 @@ class SessionManifest:
             "clock_samples": [pair.as_dict() for pair in self.clock_samples],
             "video": self.video.as_dict() if self.video else None,
             "audio": self.audio.as_dict() if self.audio else None,
-            "doa_file": self.doa_file,
-            "events_file": self.events_file,
+            "doa": self.doa,
             "calibration": self.calibration.as_dict(),
             "rig": self.rig.as_dict(),
             "errors": list(self.errors),
@@ -408,13 +373,13 @@ class SessionManifest:
             The manifest.
 
         Raises:
-            SessionError: If the stored version is newer than this code knows.
+            SessionError: If the stored version is not the one this code writes.
         """
-        version = int(raw.get("format_version", 0))
-        if version > FORMAT_VERSION:
+        version = raw.get("format_version")
+        if version != FORMAT_VERSION:
             raise SessionError(
-                f"session format {version} is newer than this reader "
-                f"understands ({FORMAT_VERSION})"
+                f"session format {version} is not the one this reads "
+                f"({FORMAT_VERSION})"
             )
         video = raw.get("video")
         audio = raw.get("audio")
@@ -423,7 +388,6 @@ class SessionManifest:
         samples = raw.get("clock_samples") or []
         return SessionManifest(
             session_id=str(raw["session_id"]),
-            format_version=version,
             started_at=_optional_pair(raw.get("started_at")),
             stopped_at=_optional_pair(raw.get("stopped_at")),
             clock_samples=[
@@ -433,8 +397,7 @@ class SessionManifest:
             ],
             video=VideoTrack.from_dict(video) if isinstance(video, dict) else None,
             audio=AudioTrack.from_dict(audio) if isinstance(audio, dict) else None,
-            doa_file=_optional_str(raw.get("doa_file")),
-            events_file=_optional_str(raw.get("events_file")),
+            doa=bool(raw.get("doa")),
             calibration=(
                 SyncCalibration.from_dict(calibration)
                 if isinstance(calibration, dict)
@@ -443,29 +406,6 @@ class SessionManifest:
             rig=Rig.from_dict(rig) if isinstance(rig, dict) else Rig(),
             errors=[str(entry) for entry in raw.get("errors") or []],
         )
-
-    def with_calibration(self, calibration: SyncCalibration) -> SessionManifest:
-        """Return a copy carrying a different calibration.
-
-        Args:
-            calibration: The measurement to record.
-
-        Returns:
-            A new manifest; the rest of the session is untouched.
-        """
-        return replace(self, calibration=calibration)
-
-    def with_rig(self, rig: Rig) -> SessionManifest:
-        """Return a copy carrying a different rig.
-
-        Args:
-            rig: The mounting to record.
-
-        Returns:
-            A new manifest; the rest of the session is untouched.
-        """
-        return replace(self, rig=rig)
-
 
 @dataclass(frozen=True)
 class SessionPaths:

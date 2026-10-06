@@ -13,9 +13,6 @@ import time
 from dataclasses import dataclass, field
 from typing import Any, Self
 
-#: Suffix of the sidecar this module writes.
-SUFFIX = ".jsonl"
-
 
 @dataclass(frozen=True)
 class Event:

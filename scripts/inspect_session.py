@@ -15,7 +15,7 @@ import sys
 import time
 
 from rrr.inspection import Inspection, inspect_session
-from rrr.timeline import SessionManifest, SessionPaths, read_manifest
+from rrr.timeline import SessionManifest, SessionPaths, drift_ppm, read_manifest
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -61,11 +61,10 @@ def _print(manifest: SessionManifest, found: Inspection) -> None:
     if manifest.duration_s is not None:
         print(f"  duration        {manifest.duration_s:.2f} s")
 
-    track = manifest.clock_track
-    drift = track.drift_ppm
+    drift = drift_ppm(manifest.clock_samples)
     if drift is not None:
         print(
-            f"  clock offset    {track.samples[0].offset:.6f} s, "
+            f"  clock offset    {manifest.clock_samples[0].offset:.6f} s, "
             f"drifting {drift:+.2f} ppm over the session"
         )
 

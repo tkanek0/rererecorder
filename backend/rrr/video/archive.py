@@ -335,13 +335,11 @@ class WriterStats:
         dropped: Frames the queue could not accept: the disk or the encoders
             fell behind.
         motion: Inertial samples written.
-        bytes_written: Size of the file on disk at the last commit.
     """
 
     frames: int = 0
     dropped: int = 0
     motion: int = 0
-    bytes_written: int = 0
 
 
 class ArchiveWriter:
@@ -433,11 +431,6 @@ class ArchiveWriter:
         self.close()
 
     @property
-    def path(self) -> str:
-        """Where the archive is being written."""
-        return self._path
-
-    @property
     def stats(self) -> WriterStats:
         """A snapshot of what has been written."""
         with self._lock:
@@ -445,7 +438,6 @@ class ArchiveWriter:
                 frames=self._stats.frames,
                 dropped=self._stats.dropped,
                 motion=self._motion_written,
-                bytes_written=self._stats.bytes_written,
             )
 
     def _write_meta(self, values: dict[str, Any]) -> None:
@@ -649,15 +641,8 @@ class ArchiveWriter:
         return futures
 
     def _commit(self) -> None:
-        """Commit, and note how large the file has become."""
+        """Commit the open transaction."""
         self._connection.commit()
-        try:
-            page_size = self._connection.execute("PRAGMA page_size").fetchone()[0]
-            page_count = self._connection.execute("PRAGMA page_count").fetchone()[0]
-            with self._lock:
-                self._stats.bytes_written = page_size * page_count
-        except sqlite3.Error:
-            pass
 
 
 def _extrinsics(raw: dict[str, Any] | None) -> Extrinsics | None:

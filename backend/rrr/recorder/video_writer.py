@@ -32,7 +32,6 @@ class VideoStats:
             settled, before the first. Not a loss (docs/frame-loss.md).
         skipped_duplicate: Sets discarded mid-stream because every frame in
             them had already been delivered.
-        bytes_written: Size of the archive at the last commit.
         first_monotonic: Capture time of the first set written, or None.
         last_monotonic: Capture time of the last set written.
         timestamp_domain: What the camera's timestamps mean. Anything but
@@ -46,16 +45,10 @@ class VideoStats:
     motion_overrun: int = 0
     skipped_warmup: int = 0
     skipped_duplicate: int = 0
-    bytes_written: int = 0
     first_monotonic: float | None = None
     last_monotonic: float | None = None
     timestamp_domain: str = "unknown"
     error: str | None = None
-
-    @property
-    def skipped(self) -> int:
-        """Sets discarded mid-stream. Excludes startup."""
-        return self.skipped_duplicate
 
     @property
     def span_s(self) -> float | None:
@@ -180,7 +173,6 @@ class VideoWriter:
                 self._stats.frames = final.frames
                 self._stats.dropped = final.dropped
                 self._stats.motion = final.motion
-                self._stats.bytes_written = final.bytes_written
         self._writer = None
         self._hub.release()
         logger.info(
@@ -194,11 +186,6 @@ class VideoWriter:
         return self._running
 
     @property
-    def path(self) -> str:
-        """Where the archive is being written."""
-        return self._path
-
-    @property
     def stats(self) -> VideoStats:
         """A snapshot of what has been written."""
         with self._lock:
@@ -209,7 +196,6 @@ class VideoWriter:
             snapshot.frames = written.frames
             snapshot.dropped = written.dropped
             snapshot.motion = written.motion
-            snapshot.bytes_written = written.bytes_written
         source = self._hub.source
         if source is not None:
             snapshot.motion_overrun = getattr(source, "motion_overrun", 0)

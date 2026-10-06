@@ -57,7 +57,6 @@ export type VideoState = {
   /** Inertial samples written - about 960 a second, against 30 frames. */
   motion: number;
   motion_overrun: number;
-  skipped: number;
   skipped_duplicate: number;
   skipped_warmup: number;
   fps: number | null;
@@ -178,7 +177,7 @@ export type SessionSummary = {
   video: {
     frames: number;
     dropped: number;
-    skipped: number;
+    skipped_duplicate: number;
     motion: number;
     fps: number | null;
     timestamp_domain: string;

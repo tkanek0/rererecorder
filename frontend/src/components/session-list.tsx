@@ -64,7 +64,7 @@ export const SessionList = ({
           <tbody>
             {sessions.map((session) => {
               const video = session.video;
-              const lost = video ? video.dropped + video.skipped : 0;
+              const lost = video ? video.dropped + video.skipped_duplicate : 0;
               const live = session.session_id === recordingId;
               return (
                 <tr

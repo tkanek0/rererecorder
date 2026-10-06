@@ -145,8 +145,8 @@ export const RecordingPanel = ({ recording, writeRate, onChanged }: Props) => {
             />
             <Row
               label="skipped mid-stream"
-              value={String(video.skipped)}
-              tone={video.skipped > 0 ? 'warn' : 'good'}
+              value={String(video.skipped_duplicate)}
+              tone={video.skipped_duplicate > 0 ? 'warn' : 'good'}
             />
             {/* Normal, not a loss. See docs/features.md "Honesty about losses". */}
             <Row label="skipped at startup" value={String(video.skipped_warmup)} />

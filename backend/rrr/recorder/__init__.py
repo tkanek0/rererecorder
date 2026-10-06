@@ -3,15 +3,13 @@
 Imports no web framework; the CLI and the server both record through this.
 """
 
-from .audio_writer import AudioStats, AudioWriter
+from .audio_writer import AudioWriter
 from .session import RecorderBusy, SessionRecorder
-from .video_writer import VideoStats, VideoWriter
+from .video_writer import VideoWriter
 
 __all__ = [
-    "AudioStats",
     "AudioWriter",
     "RecorderBusy",
     "SessionRecorder",
-    "VideoStats",
     "VideoWriter",
 ]

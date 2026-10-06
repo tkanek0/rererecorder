@@ -5,6 +5,6 @@ the video. Measures and reports; whether to store the result in
 ``session.json`` belongs to the caller - see ``scripts/calibrate.py``.
 """
 
-from .handclap import Clap, OffsetError, OffsetMeasurement, measure_offset
+from .handclap import OffsetError, measure_offset
 
-__all__ = ["Clap", "OffsetError", "OffsetMeasurement", "measure_offset"]
+__all__ = ["OffsetError", "measure_offset"]

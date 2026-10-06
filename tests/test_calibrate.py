@@ -12,20 +12,24 @@ from pathlib import Path
 import calibrate
 import numpy as np
 import pytest
-from realsense_adapter import Calibration, Extrinsics, Intrinsics, StreamConfig
+from realsense_adapter import (
+    Calibration,
+    Extrinsics,
+    FrameSet,
+    Intrinsics,
+    StreamConfig,
+)
 from rrr.offset import handclap
 from rrr.timeline import (
-    AudioClockPoint,
-    AudioTrack,
     ClockPair,
-    JsonlWriter,
     SessionManifest,
     SessionPaths,
     VideoTrack,
     read_manifest,
     write_manifest,
 )
-from rrr.video import ArchiveWriter
+
+from .conftest import write_session
 
 RATE = 16_000
 CHANNELS = 6
@@ -64,85 +68,47 @@ def calibration() -> Calibration:
 @pytest.fixture
 def session(tmp_path: Path, calibration: Calibration) -> SessionPaths:
     """150 still frames but one, and an impulse PLANTED_OFFSET_S later."""
-    from realsense_adapter import FrameSet
-
-    paths = SessionPaths.create(str(tmp_path), "planted")
     frames_total = 150
     rng = np.random.default_rng(20260902)
     still = rng.integers(0, 200, (HEIGHT, WIDTH), dtype=np.uint8)
     moved = rng.integers(0, 200, (HEIGHT, WIDTH), dtype=np.uint8)
-
-    with ArchiveWriter(
-        paths.video,
-        calibration=calibration,
-        config=StreamConfig(infrared=True),
-    ) as writer:
-        for n in range(frames_total):
-            capture = MONO + n / FPS
-            image = moved if n == MOVEMENT_FRAME else still
-            assert writer.append(
-                FrameSet(
-                    index=n + 1,
-                    color_timestamp_ms=None,
-                    depth_timestamp_ms=(capture + OFFSET) * 1000.0,
-                    received_monotonic=capture,
-                    color=None,
-                    depth=np.zeros((HEIGHT, WIDTH), np.uint16),
-                    calibration=calibration,
-                    timestamp_domain="global_time",
-                    infrared=(image, image),
-                ),
-                timeout=30.0,
+    frames = []
+    for n in range(frames_total):
+        capture = MONO + n / FPS
+        image = moved if n == MOVEMENT_FRAME else still
+        frames.append(
+            FrameSet(
+                index=n + 1,
+                depth_timestamp_ms=(capture + OFFSET) * 1000.0,
+                received_monotonic=capture,
+                color=None,
+                depth=np.zeros((HEIGHT, WIDTH), np.uint16),
+                calibration=calibration,
+                timestamp_domain="global_time",
+                infrared=(image, image),
             )
-        assert writer.drain()
-
-    # Audio: silence, with an impulse at the movement's time plus the offset.
-    seconds = frames_total / FPS
-    samples = np.zeros((int(seconds * RATE), CHANNELS), dtype="<i2")
-    noise = np.random.default_rng(7).integers(-40, 40, samples.shape)
-    samples += noise.astype("<i2")
-    impulse_at = MOVEMENT_FRAME / FPS + PLANTED_OFFSET_S
-    start = int(impulse_at * RATE)
-    samples[start : start + 160, :] = 12_000  # 10 ms of loud
-
-    with wave.open(paths.audio, "wb") as out:
-        out.setnchannels(CHANNELS)
-        out.setsampwidth(2)
-        out.setframerate(RATE)
-        out.writeframes(samples.tobytes())
-
-    with JsonlWriter(paths.audio_clock) as clock_writer:
-        for block in range(0, len(samples), RATE):
-            clock_writer.append(
-                AudioClockPoint(sample=block, monotonic=MONO + block / RATE).as_dict()
-            )
-        clock_writer.append(
-            AudioClockPoint(sample=len(samples), monotonic=MONO + len(samples) / RATE).as_dict()
         )
 
-    write_manifest(
-        paths,
-        SessionManifest(
-            session_id="planted",
-            started_at=ClockPair(MONO, REAL),
-            stopped_at=ClockPair(MONO + seconds, REAL + seconds),
-            clock_samples=[ClockPair(MONO, REAL), ClockPair(MONO + seconds, REAL + seconds)],
-            video=VideoTrack(
-                frames=frames_total,
-                first_monotonic=MONO,
-                last_monotonic=MONO + (frames_total - 1) / FPS,
-                timestamp_domain="global_time",
-                fps=FPS,
-            ),
-            audio=AudioTrack(
-                rate=RATE,
-                channels=CHANNELS,
-                samples=len(samples),
-                first_monotonic=MONO,
-            ),
-        ),
+    # Audio: noise, with an impulse at the movement's time plus the offset.
+    seconds = frames_total / FPS
+    samples = np.random.default_rng(7).integers(
+        -40, 40, (int(seconds * RATE), CHANNELS)
+    ).astype("<i2")
+    start = int((MOVEMENT_FRAME / FPS + PLANTED_OFFSET_S) * RATE)
+    samples[start : start + 160, :] = 12_000  # 10 ms of loud
+
+    return write_session(
+        SessionPaths.create(str(tmp_path), "planted"),
+        calibration=calibration,
+        config=StreamConfig(infrared=True),
+        frames=frames,
+        audio=samples,
+        rate=RATE,
+        clock_every=RATE,
+        started_at=ClockPair(MONO, REAL),
+        stopped_at=ClockPair(MONO + seconds, REAL + seconds),
+        clock_samples=[ClockPair(MONO, REAL), ClockPair(MONO + seconds, REAL + seconds)],
     )
-    return paths
 
 
 # -- the two halves -----------------------------------------------------------

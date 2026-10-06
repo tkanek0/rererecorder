@@ -28,11 +28,8 @@ from realsense_adapter import (
 )
 from realsense_adapter.types import MotionSample
 from rrr.timeline import (
-    AudioClockPoint,
-    AudioTrack,
     ClockPair,
     Event,
-    JsonlWriter,
     Rig,
     SessionManifest,
     SessionPaths,
@@ -41,6 +38,8 @@ from rrr.timeline import (
     write_manifest,
 )
 from rrr.video import ArchiveWriter
+
+from .conftest import write_session
 
 RATE = 16_000
 CHANNELS = 6
@@ -102,101 +101,62 @@ def _calibration() -> Calibration:
 @pytest.fixture
 def session(tmp_path: Path) -> SessionPaths:
     """A complete short session: both devices, inertial, direction, one mark."""
-    paths = SessionPaths.create(str(tmp_path / "sessions"), "whole")
     calibration = _calibration()
     rng = np.random.default_rng(20260907)
-
-    with ArchiveWriter(
-        paths.video,
+    frames = []
+    motion = []
+    for n in range(FRAMES):
+        capture = MONO + n / FPS
+        # Two inertial samples per frame, so both streams have rows. Half a
+        # frame later, so a range boundary never falls on one.
+        motion += [
+            MotionSample(stream, (capture + 0.5 / FPS + OFFSET) * 1000.0, float(n), 1.0, 9.8)
+            for stream in ("accel", "gyro")
+        ]
+        frames.append(
+            FrameSet(
+                index=n + 1,
+                color_timestamp_ms=(capture + OFFSET) * 1000.0,
+                depth_timestamp_ms=(capture + OFFSET) * 1000.0,
+                received_monotonic=capture,
+                color=rng.integers(0, 2**16, (HEIGHT, WIDTH), dtype=np.uint16),
+                color_format="yuyv",
+                depth=rng.integers(0, 4000, (HEIGHT, WIDTH), dtype=np.uint16),
+                calibration=calibration,
+                timestamp_domain="global_time",
+                metadata={
+                    "color": {"actual_exposure": 100 + n},
+                    "depth": {"laser_power": 150},
+                },
+                infrared=(
+                    rng.integers(0, 255, (HEIGHT, WIDTH), dtype=np.uint8),
+                    rng.integers(0, 255, (HEIGHT, WIDTH), dtype=np.uint8),
+                ),
+            )
+        )
+    seconds = FRAMES / FPS
+    return write_session(
+        SessionPaths.create(str(tmp_path / "sessions"), "whole"),
         calibration=calibration,
         config=StreamConfig(infrared=True),
-        clock_anchor=ClockPair(MONO, REAL),
-    ) as writer:
-        for n in range(FRAMES):
-            capture = MONO + n / FPS
-            # Two inertial samples per frame, so both streams have rows. Half a
-            # frame later, so a range boundary never falls on one.
-            writer.append_motion(
-                [
-                    MotionSample(
-                        stream=stream,
-                        timestamp_ms=(capture + 0.5 / FPS + OFFSET) * 1000.0,
-                        x=float(n),
-                        y=1.0,
-                        z=9.8,
-                    )
-                    for stream in ("accel", "gyro")
-                ]
-            )
-            assert writer.append(
-                FrameSet(
-                    index=n + 1,
-                    color_timestamp_ms=(capture + OFFSET) * 1000.0,
-                    depth_timestamp_ms=(capture + OFFSET) * 1000.0,
-                    received_monotonic=capture,
-                    color=rng.integers(0, 2**16, (HEIGHT, WIDTH), dtype=np.uint16),
-                    color_format="yuyv",
-                    depth=rng.integers(0, 4000, (HEIGHT, WIDTH), dtype=np.uint16),
-                    calibration=calibration,
-                    timestamp_domain="global_time",
-                    metadata={
-                        "color": {"actual_exposure": 100 + n},
-                        "depth": {"laser_power": 150},
-                    },
-                    infrared=(
-                        rng.integers(0, 255, (HEIGHT, WIDTH), dtype=np.uint8),
-                        rng.integers(0, 255, (HEIGHT, WIDTH), dtype=np.uint8),
-                    ),
-                ),
-                timeout=30.0,
-            )
-        assert writer.drain()
-
-    seconds = FRAMES / FPS
-    audio = np.zeros((int(seconds * RATE), CHANNELS), dtype="<i2")
-    with wave.open(paths.audio, "wb") as out:
-        out.setnchannels(CHANNELS)
-        out.setsampwidth(2)
-        out.setframerate(RATE)
-        out.writeframes(audio.tobytes())
-
-    with JsonlWriter(paths.audio_clock) as clock_writer:
-        for block in range(0, len(audio) + 1, RATE // 4):
-            clock_writer.append(
-                AudioClockPoint(sample=block, monotonic=MONO + block / RATE).as_dict()
-            )
-
-    with open(paths.doa, "w", encoding="utf-8") as handle:
-        for n in range(5):
-            handle.write(
-                json.dumps({"t": MONO + n * 0.06, "angle": 90 + n, "voice": n % 2})
-                + "\n"
-            )
-
-    with JsonlWriter(paths.events) as marks:
-        marks.append(
+        frames=frames,
+        motion=motion,
+        audio=np.zeros((int(seconds * RATE), CHANNELS), dtype="<i2"),
+        rate=RATE,
+        clock_every=RATE // 4,
+        doa=[{"t": MONO + n * 0.06, "angle": 90 + n, "voice": n % 2} for n in range(5)],
+        events=[
             Event(
                 monotonic=MONO + 0.1,
                 realtime=REAL + 0.1,
                 label="speaker 45deg 2m",
                 data={"azimuth_deg": 45},
-            ).as_dict()
-        )
-
-    write_manifest(
-        paths,
-        SessionManifest(
-            session_id="whole",
-            started_at=ClockPair(MONO, REAL),
-            stopped_at=ClockPair(MONO + seconds, REAL + seconds),
-            video=VideoTrack(frames=FRAMES, fps=FPS, timestamp_domain="global_time"),
-            audio=AudioTrack(
-                rate=RATE, channels=CHANNELS, samples=len(audio), first_monotonic=MONO
-            ),
-            doa=True,
-        ),
+            )
+        ],
+        clock_anchor=ClockPair(MONO, REAL),
+        started_at=ClockPair(MONO, REAL),
+        stopped_at=ClockPair(MONO + seconds, REAL + seconds),
     )
-    return paths
 
 
 def _export(session: SessionPaths, tmp_path: Path, **kwargs) -> tuple[Path, dict]:

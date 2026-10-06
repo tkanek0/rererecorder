@@ -15,7 +15,7 @@ from rrr.timeline import SessionManifest, SessionPaths, VideoTrack, read_manifes
 from rrr.video import ArchiveWriter
 
 from .conftest import HEIGHT, WIDTH
-from .test_render_mp4 import FRAMES, session  # noqa: F401 - the fixture
+from .conftest import SMALL_FRAMES as FRAMES
 
 
 def test_a_gapless_counter_misses_nothing() -> None:
@@ -94,25 +94,25 @@ def test_without_counters_losses_are_named_as_uncounted(
     assert any("not counted" in note for note in check.notes)
 
 
-def test_the_script_reports_a_whole_session_as_json(session, capsys) -> None:  # noqa: F811
+def test_the_script_reports_a_whole_session_as_json(small_session, capsys) -> None:
     """The thin command line runs every check and prints what the package found."""
-    status = inspect_cli.main([session.directory, "--json"])
+    status = inspect_cli.main([small_session.directory, "--json"])
     report = json.loads(capsys.readouterr().out)
-    assert report["session_id"] == session.session_id
+    assert report["session_id"] == small_session.session_id
     assert report["video"]["frames"] == FRAMES
     assert status == (1 if report["problems"] else 0)
 
 
-def test_a_session_the_recorder_flagged_does_not_pass(session) -> None:  # noqa: F811
+def test_a_session_the_recorder_flagged_does_not_pass(small_session) -> None:
     """What the recorder knew went wrong must not read as "every check agreed"."""
-    manifest = read_manifest(session)
-    assert inspect_session(session, manifest).doa["readings"] > 0
+    manifest = read_manifest(small_session)
+    assert inspect_session(small_session, manifest).doa["readings"] > 0
 
-    open(session.doa, "w").close()
+    open(small_session.doa, "w").close()
     flagged = replace(manifest, errors=["video: no frames within 15s"])
-    problems = inspect_session(session, flagged).problems
+    problems = inspect_session(small_session, flagged).problems
     assert "the recorder reported: video: no frames within 15s" in problems
     assert "the direction was recorded and holds no readings" in problems
 
     empty = SessionManifest(session_id=manifest.session_id)
-    assert "neither device was recorded" in inspect_session(session, empty).problems
+    assert "neither device was recorded" in inspect_session(small_session, empty).problems

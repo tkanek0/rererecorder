@@ -7,11 +7,31 @@ Values are measured on the real D455, not round figures: epoch-ms timestamps as
 from __future__ import annotations
 
 import time
+import wave
 from collections.abc import Callable
 
 import numpy as np
 import pytest
-from realsense_adapter import Calibration, Extrinsics, FrameSet, Intrinsics
+from realsense_adapter import (
+    Calibration,
+    Extrinsics,
+    FrameSet,
+    Intrinsics,
+    StreamConfig,
+)
+from realsense_adapter.types import MotionSample
+from rrr.timeline import (
+    AudioClockPoint,
+    AudioTrack,
+    ClockPair,
+    Event,
+    JsonlWriter,
+    SessionManifest,
+    SessionPaths,
+    VideoTrack,
+    write_manifest,
+)
+from rrr.video import ArchiveWriter
 
 #: The D455 at its native depth resolution, measured on the device.
 WIDTH, HEIGHT = 848, 480
@@ -111,3 +131,130 @@ def wait_until(ready: Callable[[], bool], timeout: float = 2.0) -> bool:
             return True
         time.sleep(0.01)
     return ready()
+
+
+def write_session(
+    paths: SessionPaths,
+    *,
+    calibration: Calibration,
+    config: StreamConfig,
+    frames: list[FrameSet],
+    audio: np.ndarray | None = None,
+    rate: int = 16_000,
+    clock_every: int | None = None,
+    motion: list[MotionSample] | None = None,
+    doa: list[dict[str, object]] | None = None,
+    events: list[Event] | None = None,
+    clock_anchor: ClockPair | None = None,
+    **manifest: object,
+) -> SessionPaths:
+    """Write a whole session the way the recorder lays one out.
+
+    Args:
+        paths: Where, as ``SessionPaths.create`` made it.
+        calibration: Stored with the archive.
+        config: Stored with the archive.
+        frames: Every frame set, in order.
+        audio: ``(n, channels)`` int16 for the WAV, or None for no audio.
+        rate: The WAV's rate.
+        clock_every: Samples between clock points; None for one at each end.
+        motion: Inertial samples for the archive.
+        doa: Direction readings for ``doa.jsonl``.
+        events: Marks for ``events.jsonl``.
+        clock_anchor: The archive's anchor; None reads the host's clocks.
+        **manifest: Manifest fields beyond the tracks this derives.
+    """
+    with ArchiveWriter(
+        paths.video, calibration=calibration, config=config, clock_anchor=clock_anchor
+    ) as writer:
+        if motion:
+            assert writer.append_motion(motion)
+        for frame_set in frames:
+            assert writer.append(frame_set, timeout=30.0)
+        assert writer.drain()
+    first, last = frames[0].received_monotonic, frames[-1].received_monotonic
+    tracks: dict[str, object] = {
+        "video": VideoTrack(
+            frames=len(frames),
+            first_monotonic=first,
+            last_monotonic=last,
+            timestamp_domain="global_time",
+            fps=(len(frames) - 1) / (last - first) if last > first else None,
+        )
+    }
+    if audio is not None:
+        with wave.open(paths.audio, "wb") as out:
+            out.setnchannels(audio.shape[1])
+            out.setsampwidth(2)
+            out.setframerate(rate)
+            out.writeframes(audio.astype("<i2").tobytes())
+        step = clock_every or len(audio)
+        with JsonlWriter(paths.audio_clock) as clock:
+            for sample in [*range(0, len(audio), step), len(audio)]:
+                clock.append(AudioClockPoint(sample, first + sample / rate).as_dict())
+        tracks["audio"] = AudioTrack(
+            rate=rate, channels=audio.shape[1], samples=len(audio), first_monotonic=first
+        )
+    for path, entries in ((paths.doa, doa), (paths.events, events)):
+        if entries:
+            with JsonlWriter(path) as sidecar:
+                for entry in entries:
+                    sidecar.append(entry if isinstance(entry, dict) else entry.as_dict())
+    write_manifest(
+        paths,
+        SessionManifest(
+            session_id=paths.session_id, doa=bool(doa), **{**tracks, **manifest}
+        ),
+    )
+    return paths
+
+
+#: The small session several converters are tried on: 4 colour frames at
+#: 10 fps, 8 kHz audio whose processed channel is a ramp, one direction.
+SMALL_FRAMES = 4
+SMALL_FPS = 10.0
+SMALL_RATE = 8_000
+SMALL_START = 1_000.0
+
+
+@pytest.fixture
+def small_session(tmp_path) -> SessionPaths:
+    intrinsics = Intrinsics(
+        width=32, height=24, fx=16.0, fy=16.0, ppx=16.0, ppy=12.0,
+        model="brown_conrady", coeffs=(0.0,) * 5,
+    )
+    calibration = Calibration(
+        color=intrinsics,
+        depth=intrinsics,
+        depth_scale=0.001,
+        depth_to_color=Extrinsics.identity(),
+        aligned=False,
+    )
+    frames = []
+    for n in range(SMALL_FRAMES):
+        image = np.zeros((24, 32, 3), dtype=np.uint8)
+        image[:, :, n % 3] = 64 + n * 32
+        at = SMALL_START + n / SMALL_FPS
+        frames.append(
+            FrameSet(
+                index=n,
+                color_timestamp_ms=at * 1_000,
+                received_monotonic=at,
+                color=image,
+                depth=None,
+                calibration=calibration,
+                timestamp_domain="global_time",
+            )
+        )
+    count = round(SMALL_FRAMES / SMALL_FPS * SMALL_RATE)
+    audio = np.zeros((count, 6), dtype="<i2")
+    audio[:, 0] = np.arange(count) % 1_000
+    return write_session(
+        SessionPaths.create(str(tmp_path / "sessions"), "whole"),
+        calibration=calibration,
+        config=StreamConfig(depth=None, infrared=False),
+        frames=frames,
+        audio=audio,
+        rate=SMALL_RATE,
+        doa=[{"t": SMALL_START, "angle": 90, "voice": True}],
+    )

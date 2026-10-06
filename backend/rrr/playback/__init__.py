@@ -12,12 +12,14 @@ from .audio import (
     audio_timeline,
     crop_clock_points,
     read_mono,
+    read_wav,
     resample_onto_video,
     sample_range,
     select_audio,
 )
 from .direction import Direction, direction_at, in_colour_camera, read_directions
 from .frames import TimeRange
+from .output import replacing
 
 __all__ = [
     "AudioSelection",
@@ -29,6 +31,8 @@ __all__ = [
     "in_colour_camera",
     "read_directions",
     "read_mono",
+    "read_wav",
+    "replacing",
     "resample_onto_video",
     "sample_range",
     "select_audio",

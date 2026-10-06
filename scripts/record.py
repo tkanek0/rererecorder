@@ -17,7 +17,9 @@ import signal
 import sys
 import time
 
+from inspect_session import print_inspection
 from realsense_adapter import StreamConfig
+from rrr.inspection import inspect_session
 from rrr.recorder import SessionRecorder, config
 from rrr.timeline import SessionManifest
 
@@ -128,7 +130,7 @@ def main(argv: list[str] | None = None) -> int:
         # An unclosed capture stream makes the array's next open fail.
         recorder.close()
 
-    _report(manifest, paths.directory)
+    print_inspection(manifest, inspect_session(paths, manifest))
     return _status(manifest, args.min_fps)
 
 
@@ -227,97 +229,6 @@ def _progress(recorder: SessionRecorder) -> None:
         )
     parts.append(f"{state['size_bytes'] / 1e6:7.1f} MB")
     print("  " + " | ".join(parts) + "   ", end="\r", file=sys.stderr, flush=True)
-
-
-def _report(manifest: SessionManifest, directory: str) -> None:
-    """Print what the session holds, and what is wrong with it if anything."""
-    print(f"session {manifest.session_id} in {directory}")
-    if manifest.duration_s is not None:
-        print(f"  duration        {manifest.duration_s:.2f} s")
-
-    video = manifest.video
-    if video is not None:
-        print(
-            f"  video           {video.frames} frames"
-            + (f" at {video.fps:.2f} fps" if video.fps else "")
-        )
-        print(f"  timestamps      {video.timestamp_domain}")
-        if video.motion:
-            rate = video.motion_hz
-            print(
-                f"  inertial        {video.motion} samples"
-                + (f" = {rate:.0f} Hz across both streams" if rate else "")
-            )
-        elif config.DEFAULT_STREAMS.motion:
-            print("  inertial NONE   the sensor was asked for and gave nothing")
-        if video.motion_overrun:
-            print(f"  inertial LOST   {video.motion_overrun} (the buffer overran)")
-        if video.dropped:
-            print(f"  video dropped   {video.dropped} (the disk could not keep up)")
-        if video.skipped_duplicate:
-            print(
-                f"  video skipped   {video.skipped_duplicate} mid-stream"
-                f" (already delivered before)"
-            )
-        if video.skipped_warmup:
-            print(
-                f"  startup         {video.skipped_warmup} sets discarded while "
-                f"the streams settled (normal)"
-            )
-
-    audio = manifest.audio
-    if audio is not None:
-        print(f"  audio           {audio.seconds:.2f} s, {audio.channels} ch")
-        if not audio.samples:
-            print("  audio EMPTY     the array recorded nothing")
-        if audio.filled:
-            print(
-                f"  audio filled    {audio.filled} samples "
-                f"({audio.filled / audio.rate * 1000:.0f} ms of silence)"
-            )
-        if audio.overruns:
-            print(f"  audio overruns  {audio.overruns}")
-        report = audio.timeline or {}
-        if report.get("measured_rate"):
-            print(
-                f"  audio clock     {report['measured_rate']:.1f} Hz measured "
-                f"({report['rate_error_ppm']:+.0f} ppm), "
-                f"residual {report['residual_rms_ms']:.2f} ms rms / "
-                f"{report['residual_max_ms']:.2f} ms max"
-            )
-
-    overlap = _overlap(manifest)
-    if overlap is not None:
-        print(f"  overlap         {overlap:.2f} s of both tracks")
-
-    if manifest.calibration.measured:
-        print(f"  offset          {manifest.calibration.offset_s * 1000:+.1f} ms")
-    elif video is not None and audio is not None:
-        print("  offset          not measured - run scripts/calibrate.py to align")
-
-    for error in manifest.errors:
-        print(f"  error           {error}")
-
-
-def _overlap(manifest: SessionManifest) -> float | None:
-    """Seconds during which both devices were recording.
-
-    Args:
-        manifest: The finished session.
-
-    Returns:
-        The overlap on the shared monotonic axis, or None if only one track
-        exists.
-    """
-    video, audio = manifest.video, manifest.audio
-    if video is None or audio is None:
-        return None
-    if video.first_monotonic is None or audio.first_monotonic is None:
-        return None
-    audio_end = audio.first_monotonic + audio.seconds
-    start = max(video.first_monotonic, audio.first_monotonic)
-    end = min(video.last_monotonic or video.first_monotonic, audio_end)
-    return max(0.0, end - start)
 
 
 def _status(manifest: SessionManifest, min_fps: float | None = None) -> int:

@@ -466,6 +466,16 @@ class SessionPaths:
             raise SessionError(f"no session {session_id!r}")
         return SessionPaths(directory=directory, session_id=session_id)
 
+    @staticmethod
+    def of_directory(directory: str) -> SessionPaths:
+        """Paths for a session given by its directory, as a command line names it.
+
+        Raises:
+            SessionError: If it is not a session directory.
+        """
+        absolute = os.path.abspath(directory)
+        return SessionPaths.resolve(os.path.dirname(absolute), os.path.basename(absolute))
+
     def _path(self, name: str) -> str:
         return os.path.join(self.directory, name)
 

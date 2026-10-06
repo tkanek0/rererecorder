@@ -12,7 +12,9 @@ import wave
 from dataclasses import dataclass
 
 import numpy as np
+from respeaker_adapter.config import CHANNEL_MICS
 
+from rrr.playback import read_wav
 from rrr.timeline import (
     AudioTimeline,
     SessionManifest,
@@ -193,18 +195,15 @@ def _find_claps(paths: SessionPaths) -> list[float]:
     control can move an onset.
     """
     try:
-        with wave.open(paths.audio, "rb") as handle:
-            rate = handle.getframerate()
-            channels = handle.getnchannels()
-            raw = handle.readframes(handle.getnframes())
+        samples, rate = read_wav(paths.audio)
     except (OSError, wave.Error):
         return []
-    if not raw:
+    if not len(samples):
         return []
 
-    samples = np.frombuffer(raw, dtype="<i2").reshape(-1, channels)
-    # Channel 0 is the processed one; 1-4 are the microphones on a ReSpeaker.
-    mics = samples[:, 1:5] if channels >= 5 else samples
+    # Channel 0 is the processed one; the raw microphones are what clap.
+    channels = samples.shape[1]
+    mics = samples[:, list(CHANNEL_MICS)] if channels > max(CHANNEL_MICS) else samples
     signal = np.abs(mics.astype(np.float32)).mean(axis=1)
 
     block = max(1, int(ONSET_BLOCK_S * rate))

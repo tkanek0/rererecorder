@@ -14,8 +14,6 @@ The session is read through ``rrr.playback`` and the compass is drawn by
 from __future__ import annotations
 
 import argparse
-import os
-import tempfile
 from dataclasses import dataclass
 from fractions import Fraction
 from pathlib import Path
@@ -30,6 +28,7 @@ from rrr.playback import (
     direction_at,
     in_colour_camera,
     read_directions,
+    replacing,
     resample_onto_video,
     select_audio,
 )
@@ -138,25 +137,13 @@ def render(
         FileExistsError: If ``output`` exists and ``overwrite`` is false.
         ValueError: If the session has no usable colour video.
     """
-    directory = Path(directory)
-    root = str(directory.parent) if str(directory.parent) else "."
-    paths = SessionPaths.resolve(root, directory.name)
+    paths = SessionPaths.of_directory(str(directory))
     manifest = read_manifest(paths)
     if manifest.video is None:
         raise ValueError("the session has no video track")
 
     output = Path(output)
-    if output.exists() and not overwrite:
-        raise FileExistsError(f"{output} exists; pass --force to replace it")
-    output.parent.mkdir(parents=True, exist_ok=True)
-    descriptor, temporary_name = tempfile.mkstemp(
-        prefix=f".{output.stem}.", suffix=".mp4", dir=output.parent
-    )
-    os.close(descriptor)
-    temporary = Path(temporary_name)
-    os.chmod(temporary, 0o644)
-
-    try:
+    with replacing(output, overwrite) as temporary:
         with ArchiveSource(paths.video) as archive:
             times = archive.frame_times()
             clock_description = "recorded monotonic video and audio clocks"
@@ -202,10 +189,6 @@ def render(
                 crf,
                 manifest.session_id,
             )
-        os.replace(temporary, output)
-    except Exception:
-        temporary.unlink(missing_ok=True)
-        raise
 
     return RenderReport(
         output=str(output),

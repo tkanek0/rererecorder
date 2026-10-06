@@ -108,9 +108,8 @@ def main(argv: list[str] | None = None) -> int:
     if args.end is not None and args.end <= args.start:
         parser.error("--end must be greater than --start")
 
-    root, _, session_id = args.directory.rstrip("/").rpartition("/")
     try:
-        paths = SessionPaths.resolve(root or ".", session_id)
+        paths = SessionPaths.of_directory(args.directory)
         manifest = read_manifest(paths)
     except SessionError as error:
         print(f"cannot read the session: {error}", file=sys.stderr)

@@ -17,8 +17,6 @@ The session is read through ``rrr.playback`` and the strips are drawn by
 from __future__ import annotations
 
 import argparse
-import os
-import tempfile
 from dataclasses import dataclass
 from fractions import Fraction
 from pathlib import Path
@@ -29,7 +27,7 @@ import av.filter
 import cv2
 import numpy as np
 from realsense_adapter import StreamError, color_to_bgr
-from rrr.playback import audio_timeline, read_mono, select_audio
+from rrr.playback import audio_timeline, read_mono, replacing, select_audio
 from rrr.timeline import AudioTimeline, SessionError, SessionPaths, read_manifest
 from rrr.video import ArchiveSource
 from rrr.visualization import (
@@ -178,19 +176,13 @@ def render(
     if delay < 1:
         raise ValueError("frame_ms must be at least 10")
 
-    directory = Path(directory)
-    root = str(directory.parent) if str(directory.parent) else "."
-    paths = SessionPaths.resolve(root, directory.name)
+    paths = SessionPaths.of_directory(str(directory))
     manifest = read_manifest(paths)
     if manifest.video is None:
         raise ValueError("the session has no video track")
 
     output = Path(output)
-    if output.exists() and not overwrite:
-        raise FileExistsError(f"{output} exists; pass --force to replace it")
-    output.parent.mkdir(parents=True, exist_ok=True)
-
-    with ArchiveSource(paths.video) as archive:
+    with replacing(output, overwrite) as temporary, ArchiveSource(paths.video) as archive:
         times = archive.frame_times()
         clock_description = "recorded monotonic video and audio clocks"
         if not times:
@@ -228,18 +220,7 @@ def render(
             _compose(archive, index, stamp, start, width, audio, volume, waveform, window_s)
             for index, stamp in selected
         )
-        descriptor, temporary_name = tempfile.mkstemp(
-            prefix=f".{output.stem}.", suffix=".gif", dir=output.parent
-        )
-        os.close(descriptor)
-        temporary = Path(temporary_name)
-        os.chmod(temporary, 0o644)
-        try:
-            _encode(temporary, images, delay, colours)
-            os.replace(temporary, output)
-        except Exception:
-            temporary.unlink(missing_ok=True)
-            raise
+        _encode(temporary, images, delay, colours)
 
     return GifReport(
         output=str(output),

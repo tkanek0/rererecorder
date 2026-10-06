@@ -15,7 +15,13 @@ import sys
 import time
 
 from rrr.inspection import Inspection, inspect_session
-from rrr.timeline import SessionManifest, SessionPaths, drift_ppm, read_manifest
+from rrr.timeline import (
+    SessionError,
+    SessionManifest,
+    SessionPaths,
+    drift_ppm,
+    read_manifest,
+)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -34,21 +40,24 @@ def main(argv: list[str] | None = None) -> int:
     )
     args = parser.parse_args(argv)
 
-    root, _, session_id = args.directory.rstrip("/").rpartition("/")
-    paths = SessionPaths.resolve(root or ".", session_id)
-    manifest = read_manifest(paths)
+    try:
+        paths = SessionPaths.of_directory(args.directory)
+        manifest = read_manifest(paths)
+    except SessionError as error:
+        print(f"cannot read the session: {error}", file=sys.stderr)
+        return 1
     found = inspect_session(paths, manifest)
 
     if args.json:
         json.dump(found.as_dict(), sys.stdout, indent=2, default=float)
         print()
     else:
-        _print(manifest, found)
+        print_inspection(manifest, found)
 
     return 0 if found.agreed else 1
 
 
-def _print(manifest: SessionManifest, found: Inspection) -> None:
+def print_inspection(manifest: SessionManifest, found: Inspection) -> None:
     """Write the findings for a person to read."""
     audio, video, imu = found.audio, found.video, found.imu
     overlap, doa, marks = found.overlap, found.doa, found.marks

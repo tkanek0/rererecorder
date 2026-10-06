@@ -8,6 +8,7 @@ from collections.abc import Iterator
 from dataclasses import dataclass
 
 import numpy as np
+from respeaker_adapter.config import CHANNEL_MICS
 
 from rrr.timeline import AudioClockPoint, AudioTimeline, Rig
 
@@ -15,6 +16,25 @@ from .frames import TimeRange
 
 #: Samples read from a WAV at a time when mixing it down whole.
 _CHUNK_SAMPLES = 1 << 20
+
+
+def read_wav(path: str) -> tuple[np.ndarray, int]:
+    """Read a whole session WAV.
+
+    Args:
+        path: The WAV.
+
+    Returns:
+        ``(samples, rate)``: ``(n, channels)`` int16, and the header's rate.
+
+    Raises:
+        OSError: If it cannot be opened.
+        wave.Error: If it is not a WAV.
+    """
+    with wave.open(path, "rb") as handle:
+        rate, channels = handle.getframerate(), handle.getnchannels()
+        raw = handle.readframes(handle.getnframes())
+    return np.frombuffer(raw, dtype="<i2").reshape(-1, channels), rate
 
 
 @dataclass(frozen=True)
@@ -70,8 +90,8 @@ def select_audio(path: str, requested: str, rig: Rig) -> AudioSelection | None:
         if rig.channels:
             selected = tuple(rig.channels)
             label = "physical microphone mix from rig"
-        elif channels >= 5:
-            selected = tuple(range(1, 5))
+        elif channels > max(CHANNEL_MICS):
+            selected = CHANNEL_MICS
             label = "nominal ReSpeaker microphone mix (channels 1-4)"
         else:
             selected = tuple(range(channels))

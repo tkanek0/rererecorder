@@ -10,12 +10,12 @@ import shutil
 import wave
 from typing import Any
 
-import numpy as np
 from fastapi import APIRouter, HTTPException, Request, Response
 from realsense_adapter import (
     StreamError,
 )
 
+from rrr.playback import read_wav
 from rrr.timeline import (
     SessionError,
     SessionPaths,
@@ -216,20 +216,16 @@ def session_audio(session_id: str, request: Request) -> Response:
     paths = _resolve(session_id)
     channel = int(request.query_params.get("channel", 0))
     try:
-        with wave.open(paths.audio, "rb") as handle:
-            rate = handle.getframerate()
-            channels = handle.getnchannels()
-            raw = handle.readframes(handle.getnframes())
+        samples, rate = read_wav(paths.audio)
     except (OSError, wave.Error) as error:
         raise HTTPException(
             status_code=404, detail=f"no readable audio: {error}"
         ) from error
-    if not 0 <= channel < channels:
+    if not 0 <= channel < samples.shape[1]:
         raise HTTPException(
-            status_code=404, detail=f"channel {channel} of {channels}"
+            status_code=404, detail=f"channel {channel} of {samples.shape[1]}"
         )
 
-    samples = np.frombuffer(raw, dtype="<i2").reshape(-1, channels)
     buffer = io.BytesIO()
     with wave.open(buffer, "wb") as out:
         out.setnchannels(1)

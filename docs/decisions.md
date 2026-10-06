@@ -614,12 +614,11 @@ health is instead visible directly from whether frames are missing, which
 
 ## 22. Offer a raw codec for depth, colour and infrared
 
-**Chosen:** `DEFAULT_CODECS` gains a `"raw"` option for all three streams -
-`encode_depth_raw`/`decode_depth_raw`, `encode_plane_raw`/`decode_plane_raw`
-(infrared and each YUYV plane), `encode_color_raw`/`decode_color_raw` (rgb8).
-No compression at all: the array's own bytes, little-endian, straight into
-the BLOB column. Selected per stream through `ArchiveWriter(codecs=...)` or
-`RRR_DEPTH_CODEC` / `RRR_COLOR_CODEC` / `RRR_INFRARED_CODEC`.
+**Chosen:** every stream can be stored `"raw"` instead of compressed: the
+array's own bytes, little-endian, straight into the BLOB column
+(`rrr.video.archive.encode`). Chosen per stream as `compressed` or `raw`, from
+the page, `scripts/record.py --<stream>-codec`, or `RRR_DEPTH_CODEC` /
+`RRR_COLOR_CODEC` / `RRR_INFRARED_CODEC`.
 
 **Alternatives:** a faster/weaker compression level (already at the fastest,
 `PNG_LEVEL = 1`); a different lossless codec entirely; accept the drop rate

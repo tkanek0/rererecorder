@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 import os
 import queue
 import sqlite3
@@ -143,187 +144,59 @@ def join_yuyv(y: np.ndarray, u: np.ndarray, v: np.ndarray) -> np.ndarray:
     return raw.reshape(height, width * 2).view(np.uint16)[:, :width]
 
 
-def encode_depth_zlib(depth: np.ndarray) -> bytes:
-    """Compress a raw depth image with zlib.
+def encode(image: np.ndarray, codec: str) -> bytes:
+    """Encode one image losslessly.
 
     Args:
-        depth: ``(height, width)`` uint16.
+        image: Depth ``(h, w)`` uint16, an 8-bit plane ``(h, w)``, or RGB
+            ``(h, w, 3)`` uint8.
+        codec: ``"raw"`` (the values, little-endian), ``"zlib"`` (the same,
+            compressed; for depth, where PNG's byte predictors lose,
+            docs/decisions.md 5) or ``"png"`` (for 8-bit images).
 
     Returns:
-        A zlib stream of the raw values, little-endian regardless of host. The
-        shape comes from the archive's calibration (docs/decisions.md 5).
-    """
-    return zlib.compress(depth.astype("<u2", copy=False).tobytes(), 1)
-
-
-def decode_depth_zlib(blob: bytes, shape: tuple[int, int]) -> np.ndarray:
-    """Decompress a zlib depth blob.
-
-    Args:
-        blob: What :func:`encode_depth_zlib` produced.
-        shape: ``(height, width)``, from the recording's calibration.
-
-    Returns:
-        The uint16 array that was written.
+        The blob. Only a PNG carries its own shape; the others take theirs from
+        the archive's calibration.
 
     Raises:
-        StreamError: If the blob does not hold exactly that many values.
+        RuntimeError: If OpenCV refused to encode a PNG.
     """
-    values = np.frombuffer(zlib.decompress(blob), dtype="<u2")
-    if values.size != shape[0] * shape[1]:
-        raise StreamError(
-            f"depth blob holds {values.size} values, not {shape[0] * shape[1]}"
-        )
+    if codec == "png":
+        if image.ndim == 3:
+            image = cv2.cvtColor(image, cv2.COLOR_RGB2BGR)  # what OpenCV writes
+        ok, buffer = cv2.imencode(".png", image, [cv2.IMWRITE_PNG_COMPRESSION, PNG_LEVEL])
+        if not ok:
+            raise RuntimeError("PNG encoding failed")
+        return buffer.tobytes()
+    raw = image.astype(image.dtype.newbyteorder("<"), copy=False).tobytes()
+    return zlib.compress(raw, 1) if codec == "zlib" else raw
+
+
+def decode(
+    blob: bytes, codec: str, shape: tuple[int, ...] | None, dtype: type
+) -> np.ndarray:
+    """Decode what :func:`encode` produced, back to the exact array.
+
+    Args:
+        blob: The stored bytes.
+        codec: The codec it was written with.
+        shape: The array's shape, from the calibration; None for a PNG.
+        dtype: The array's element type.
+
+    Raises:
+        StreamError: If the blob is not an image of that type and shape.
+    """
+    if codec == "png":
+        image = cv2.imdecode(np.frombuffer(blob, np.uint8), cv2.IMREAD_UNCHANGED)
+        if image is None or image.dtype != dtype:
+            raise StreamError(f"PNG blob did not decode to a {np.dtype(dtype)} image")
+        return cv2.cvtColor(image, cv2.COLOR_BGR2RGB) if image.ndim == 3 else image
+    if codec == "zlib":
+        blob = zlib.decompress(blob)
+    values = np.frombuffer(blob, dtype=np.dtype(dtype).newbyteorder("<"))
+    if shape is None or values.size != math.prod(shape):
+        raise StreamError(f"{codec} blob holds {values.size} values, not shape {shape}")
     return values.reshape(shape)
-
-
-def encode_depth_raw(depth: np.ndarray) -> bytes:
-    """Store a raw depth image's bytes directly, no compression at all.
-
-    Args:
-        depth: ``(height, width)`` uint16.
-
-    Returns:
-        The values as little-endian bytes, row-major. The shape comes from the
-        archive's calibration. See docs/decisions.md 22.
-    """
-    return depth.astype("<u2", copy=False).tobytes()
-
-
-def decode_depth_raw(blob: bytes, shape: tuple[int, int]) -> np.ndarray:
-    """Decode a raw depth blob.
-
-    Args:
-        blob: What :func:`encode_depth_raw` produced.
-        shape: ``(height, width)``, from the recording's calibration.
-
-    Returns:
-        The uint16 array that was written.
-
-    Raises:
-        StreamError: If the blob does not hold exactly that many values.
-    """
-    values = np.frombuffer(blob, dtype="<u2")
-    if values.size != shape[0] * shape[1]:
-        raise StreamError(
-            f"depth blob holds {values.size} values, not {shape[0] * shape[1]}"
-        )
-    return values.reshape(shape)
-
-
-def encode_plane_raw(plane: np.ndarray) -> bytes:
-    """Store an 8-bit plane's bytes directly - infrared, or a YUYV component.
-
-    Args:
-        plane: ``(height, width)`` uint8.
-
-    Returns:
-        The raw bytes, row-major. See docs/decisions.md 22.
-    """
-    return plane.tobytes()
-
-
-def decode_plane_raw(blob: bytes, shape: tuple[int, int]) -> np.ndarray:
-    """Decode a raw 8-bit plane blob.
-
-    Args:
-        blob: What :func:`encode_plane_raw` produced.
-        shape: ``(height, width)``, from the recording's calibration.
-
-    Raises:
-        StreamError: If the blob does not hold exactly that many bytes.
-    """
-    values = np.frombuffer(blob, dtype=np.uint8)
-    if values.size != shape[0] * shape[1]:
-        raise StreamError(
-            f"plane blob holds {values.size} bytes, not {shape[0] * shape[1]}"
-        )
-    return values.reshape(shape)
-
-
-def encode_plane(plane: np.ndarray) -> bytes:
-    """Encode one 8-bit plane - infrared, or a YUYV component - as a PNG.
-
-    Args:
-        plane: ``(height, width)`` uint8.
-
-    Returns:
-        A PNG; on 8-bit data it beats zlib on size (10.8 ms, 231 KB for
-        1280x720 infrared).
-
-    Raises:
-        RuntimeError: If OpenCV refused to encode it.
-    """
-    ok, buffer = cv2.imencode(".png", plane, [cv2.IMWRITE_PNG_COMPRESSION, PNG_LEVEL])
-    if not ok:
-        raise RuntimeError("plane PNG encoding failed")
-    return buffer.tobytes()
-
-
-def decode_plane(blob: bytes) -> np.ndarray:
-    """Decode an 8-bit plane."""
-    image = cv2.imdecode(np.frombuffer(blob, np.uint8), cv2.IMREAD_UNCHANGED)
-    if image is None or image.dtype != np.uint8 or image.ndim != 2:
-        raise StreamError("plane blob did not decode to an 8-bit image")
-    return image
-
-
-def encode_color(color: np.ndarray) -> bytes:
-    """Encode a colour image losslessly.
-
-    Args:
-        color: ``(height, width, 3)`` uint8 RGB.
-
-    Returns:
-        A PNG. Written BGR-first because that is what OpenCV encodes; the
-        decoder puts it back.
-
-    Raises:
-        RuntimeError: If OpenCV refused to encode it.
-    """
-    ok, buffer = cv2.imencode(
-        ".png",
-        cv2.cvtColor(color, cv2.COLOR_RGB2BGR),
-        [cv2.IMWRITE_PNG_COMPRESSION, PNG_LEVEL],
-    )
-    if not ok:
-        raise RuntimeError("colour PNG encoding failed")
-    return buffer.tobytes()
-
-
-def encode_color_raw(color: np.ndarray) -> bytes:
-    """Store an rgb8 colour image's bytes directly, no compression.
-
-    Args:
-        color: ``(height, width, 3)`` uint8 RGB.
-
-    Returns:
-        The raw bytes, row-major, RGB order.
-    """
-    return color.tobytes()
-
-
-def decode_color_raw(blob: bytes, shape: tuple[int, int]) -> np.ndarray:
-    """Decode a raw rgb8 colour blob.
-
-    Args:
-        blob: What :func:`encode_color_raw` produced.
-        shape: ``(height, width)``, from the recording's calibration.
-    """
-    values = np.frombuffer(blob, dtype=np.uint8)
-    if values.size != shape[0] * shape[1] * 3:
-        raise StreamError(
-            f"colour blob holds {values.size} bytes, not {shape[0] * shape[1] * 3}"
-        )
-    return values.reshape((shape[0], shape[1], 3))
-
-
-def decode_color(blob: bytes) -> np.ndarray:
-    """Decode a colour blob back to RGB."""
-    image = cv2.imdecode(np.frombuffer(blob, np.uint8), cv2.IMREAD_COLOR)
-    if image is None:
-        raise StreamError("colour blob did not decode")
-    return cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
 
 
 @dataclass
@@ -614,30 +487,23 @@ class ArchiveWriter:
         Returns:
             Column name to future, with None where the set has nothing.
         """
-        futures: dict[str, Any] = dict.fromkeys(_BLOB_COLUMNS)
+        images: dict[str, tuple[np.ndarray, str]] = {}
         if frames.depth is not None:
-            encoder = (
-                encode_depth_raw if self._codecs["depth"] == "raw" else encode_depth_zlib
-            )
-            futures["depth"] = self._pool.submit(encoder, frames.depth)
-        plane_encoder = (
-            encode_plane_raw if self._codecs["infrared"] == "raw" else encode_plane
-        )
+            images["depth"] = (frames.depth, self._codecs["depth"])
         if frames.color is not None:
+            color_codec = self._codecs["color"]
             if frames.color_format == "yuyv":
                 planes = split_yuyv(frames.color)
-                color_plane_encoder = (
-                    encode_plane_raw if self._codecs["color"] == "raw" else encode_plane
-                )
                 for column, plane in zip(("color_y", "color_u", "color_v"), planes):
-                    futures[column] = self._pool.submit(color_plane_encoder, plane)
-            elif self._codecs["color"] == "raw":
-                futures["color"] = self._pool.submit(encode_color_raw, frames.color)
+                    images[column] = (plane, color_codec)
             else:
-                futures["color"] = self._pool.submit(encode_color, frames.color)
+                images["color"] = (frames.color, color_codec)
         if frames.infrared is not None:
-            futures["ir1"] = self._pool.submit(plane_encoder, frames.infrared[0])
-            futures["ir2"] = self._pool.submit(plane_encoder, frames.infrared[1])
+            for column, plane in zip(("ir1", "ir2"), frames.infrared):
+                images[column] = (plane, self._codecs["infrared"])
+        futures: dict[str, Any] = dict.fromkeys(_BLOB_COLUMNS)
+        for column, (image, codec) in images.items():
+            futures[column] = self._pool.submit(encode, image, codec)
         return futures
 
     def _commit(self) -> None:
@@ -973,18 +839,6 @@ class ArchiveSource:
 
     # -- decoding ----------------------------------------------------------
 
-    def _shape(self, intrinsics: Intrinsics | None, what: str) -> tuple[int, int]:
-        """``(height, width)`` of a raw blob, from the recorded calibration.
-
-        Raises:
-            StreamError: If that calibration was not recorded.
-        """
-        if intrinsics is None:
-            raise StreamError(
-                f"{self._path} stores raw {what} but no calibration to give it a shape"
-            )
-        return intrinsics.height, intrinsics.width
-
     def _to_frame_set(self, row: tuple) -> FrameSet:
         """Turn one row selected as ``_FRAME_COLUMNS`` then the blobs into a FrameSet."""
         idx, color_timestamp_ms, depth_timestamp_ms, received_monotonic, metadata = row[:5]
@@ -1004,25 +858,50 @@ class ArchiveSource:
             timestamp_domain=self._meta.get("timestamp_domain") or "unknown",
         )
 
-    def _decode_depth(self, blob: bytes | None) -> np.ndarray | None:
-        """Decode a depth blob as the recorded codec says."""
+    def _image(
+        self,
+        blob: bytes | None,
+        stream: str,
+        intrinsics: Intrinsics | None,
+        dtype: type,
+        *,
+        width_divisor: int = 1,
+        channels: int = 1,
+    ) -> np.ndarray | None:
+        """Decode one stored image as the recording's codec for ``stream`` says.
+
+        Raises:
+            StreamError: If a codec that needs the calibration's shape finds none.
+        """
         if blob is None:
             return None
-        shape = self._shape(self.calibration.depth, "depth")
-        if self._codecs["depth"] == "raw":
-            return decode_depth_raw(blob, shape)
-        return decode_depth_zlib(blob, shape)
+        codec = self._codecs[stream]
+        shape: tuple[int, ...] | None = None
+        if codec != "png":
+            if intrinsics is None:
+                raise StreamError(
+                    f"{self._path} stores {codec} {stream} but no calibration "
+                    "to give it a shape"
+                )
+            shape = (intrinsics.height, intrinsics.width // width_divisor)
+            if channels > 1:
+                shape += (channels,)
+        return decode(blob, codec, shape, dtype)
+
+    def _decode_depth(self, blob: bytes | None) -> np.ndarray | None:
+        return self._image(blob, "depth", self.calibration.depth, np.uint16)
 
     def _decode_infrared(
         self, ir1: bytes | None, ir2: bytes | None
     ) -> tuple[np.ndarray, np.ndarray] | None:
-        """Decode the infrared pair, which shares depth's resolution."""
+        """The infrared pair, which shares depth's resolution, or None."""
         if ir1 is None or ir2 is None:
             return None
-        if self._codecs["infrared"] != "raw":
-            return decode_plane(ir1), decode_plane(ir2)
-        shape = self._shape(self.calibration.depth, "infrared")
-        return decode_plane_raw(ir1, shape), decode_plane_raw(ir2, shape)
+        depth = self.calibration.depth
+        return (
+            self._image(ir1, "infrared", depth, np.uint8),
+            self._image(ir2, "infrared", depth, np.uint8),
+        )
 
     def _decode_color(
         self,
@@ -1036,20 +915,12 @@ class ArchiveSource:
         Returns:
             ``(image, format)``.
         """
-        raw = self._codecs["color"] == "raw"
+        intrinsics = self.calibration.color
         if y is not None and u is not None and v is not None:
-            if not raw:
-                return join_yuyv(decode_plane(y), decode_plane(u), decode_plane(v)), "yuyv"
-            height, width = self._shape(self.calibration.color, "colour")
-            half = (height, width // 2)
             planes = (
-                decode_plane_raw(y, (height, width)),
-                decode_plane_raw(u, half),
-                decode_plane_raw(v, half),
+                self._image(y, "color", intrinsics, np.uint8),
+                self._image(u, "color", intrinsics, np.uint8, width_divisor=2),
+                self._image(v, "color", intrinsics, np.uint8, width_divisor=2),
             )
             return join_yuyv(*planes), "yuyv"
-        if color is not None:
-            if not raw:
-                return decode_color(color), "rgb8"
-            return decode_color_raw(color, self._shape(self.calibration.color, "colour")), "rgb8"
-        return None, "rgb8"
+        return self._image(color, "color", intrinsics, np.uint8, channels=3), "rgb8"

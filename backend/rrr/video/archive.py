@@ -47,9 +47,9 @@ FORMAT_VERSION = 4
 #: times the time, which 30 fps cannot afford.
 PNG_LEVEL = 1
 
-#: How each stream is encoded by default; ``"raw"`` is the uncompressed
-#: alternative for each (docs/decisions.md 22).
-DEFAULT_CODECS = {"depth": "zlib", "color": "png", "infrared": "png"}
+#: Each stream's compressed codec; ``"raw"`` is the alternative for each
+#: (docs/decisions.md 5, 22).
+COMPRESSED_CODECS = {"depth": "zlib", "color": "png", "infrared": "png"}
 
 #: Frames buffered before the encoders: four seconds at 30 fps. Overflow is
 #: counted as dropped.
@@ -369,7 +369,7 @@ class ArchiveWriter:
             config: Stream configuration, stored once.
             device: Identity of the camera, stored once.
             options: Sensor options at the start of the recording.
-            codecs: Overrides for DEFAULT_CODECS. ``depth`` is ``"zlib"`` or
+            codecs: Overrides for COMPRESSED_CODECS. ``depth`` is ``"zlib"`` or
                 ``"raw"``; ``color`` and ``infrared`` are ``"png"`` or ``"raw"``.
             workers: Encoder threads.
             clock_anchor: Host clock pair naming the monotonic axis in
@@ -378,7 +378,7 @@ class ArchiveWriter:
         """
         self._path = path
         self._clock_anchor = clock_anchor
-        self._codecs = {**DEFAULT_CODECS, **(codecs or {})}
+        self._codecs = {**COMPRESSED_CODECS, **(codecs or {})}
         self._motion_written = 0
         if self._codecs["depth"] not in ("zlib", "raw"):
             raise ValueError(f"unknown depth codec {self._codecs['depth']!r}")

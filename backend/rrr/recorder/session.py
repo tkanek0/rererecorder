@@ -339,7 +339,7 @@ class SessionRecorder:
 
         Args:
             value: Overrides for the default codecs, or None to use them
-                unchanged. See ``video.archive.DEFAULT_CODECS``.
+                unchanged. See ``video.archive.COMPRESSED_CODECS``.
 
         Raises:
             RecorderBusy: If a recording is running.

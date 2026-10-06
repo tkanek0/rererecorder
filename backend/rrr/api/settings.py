@@ -46,7 +46,7 @@ async def put_settings(request: Request) -> dict[str, Any]:
                 ``infrared``, ``motion`` as booleans.
             ``codecs``: an object with any of ``color``, ``depth``,
                 ``infrared`` mapped to ``"compressed"`` or ``"raw"``. See
-                ``rrr.recorder.config.codec_for``.
+                ``rrr.recorder.config.with_codecs``.
 
     Returns:
         The settings afterwards.
@@ -99,9 +99,6 @@ async def _apply_sessions_dir(raw: Any) -> None:
     logger.info("recordings now go to %s", wanted)
 
 
-_STREAM_KEYS = ("color", "depth", "infrared", "motion")
-
-
 def _apply_streams(raw: Any) -> None:
     """Change which streams the camera is asked for.
 
@@ -119,26 +116,8 @@ def _apply_streams(raw: Any) -> None:
     """
     if not isinstance(raw, dict):
         raise HTTPException(status_code=400, detail="streams must be an object")
-    unknown = set(raw) - set(_STREAM_KEYS)
-    if unknown:
-        raise HTTPException(
-            status_code=400, detail=f"unknown stream setting: {', '.join(unknown)}"
-        )
-
-    current = state.streams
-    defaults = recording_config.DEFAULT_STREAMS
-    fields: dict[str, Any] = {}
-    if "color" in raw:
-        fields["color"] = defaults.color if raw["color"] else None
-    if "depth" in raw:
-        fields["depth"] = defaults.depth if raw["depth"] else None
-    if "infrared" in raw:
-        fields["infrared"] = bool(raw["infrared"])
-    if "motion" in raw:
-        fields["motion"] = bool(raw["motion"])
-
     try:
-        updated = current.with_changes(**fields)
+        updated = recording_config.with_streams(state.streams, raw)
     except ValueError as error:
         raise HTTPException(status_code=400, detail=str(error)) from error
 
@@ -163,12 +142,10 @@ def _apply_codecs(raw: Any) -> None:
     if not isinstance(raw, dict):
         raise HTTPException(status_code=400, detail="codecs must be an object")
 
-    updated = dict(state.codecs)
-    for stream, choice in raw.items():
-        try:
-            updated[stream] = recording_config.codec_for(stream, choice)
-        except ValueError as error:
-            raise HTTPException(status_code=400, detail=str(error)) from error
+    try:
+        updated = recording_config.with_codecs(state.codecs, raw)
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
 
     state.recorder.codecs = updated
     logger.info("codecs now %s", updated)

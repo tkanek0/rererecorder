@@ -139,8 +139,7 @@ def _build_streams(args: argparse.Namespace) -> StreamConfig:
         args: Parsed command line arguments.
 
     Returns:
-        The stream configuration to record. Untouched, and so the exact same
-        object, when none of the three flags was given.
+        The stream configuration to record.
 
     Raises:
         ValueError: If ``StreamConfig`` refuses the combination, e.g. infrared
@@ -149,14 +148,14 @@ def _build_streams(args: argparse.Namespace) -> StreamConfig:
     Skipped when ``--no-video`` is given, so an unused configuration cannot
     fail the recording.
     """
-    streams = config.DEFAULT_STREAMS
-    if args.no_video or not (args.no_color or args.no_depth or args.no_infrared):
-        return streams
-    return streams.with_changes(
-        color=None if args.no_color else streams.color,
-        depth=None if args.no_depth else streams.depth,
-        infrared=False if args.no_infrared else streams.infrared,
-    )
+    if args.no_video:
+        return config.DEFAULT_STREAMS
+    off = {
+        name: False
+        for name in ("color", "depth", "infrared")
+        if getattr(args, f"no_{name}")
+    }
+    return config.with_streams(config.DEFAULT_STREAMS, off)
 
 
 def _build_codecs(args: argparse.Namespace) -> dict[str, str]:
@@ -166,18 +165,14 @@ def _build_codecs(args: argparse.Namespace) -> dict[str, str]:
         args: Parsed command line arguments.
 
     Returns:
-        Codec overrides for the archive, one entry per stream - see
-        ``rrr.recorder.config.codec_for``.
+        The codec per stream.
     """
-    codecs = dict(config.CODECS)
-    for stream, choice in (
-        ("color", args.color_codec),
-        ("depth", args.depth_codec),
-        ("infrared", args.infrared_codec),
-    ):
-        if choice is not None:
-            codecs[stream] = config.codec_for(stream, choice)
-    return codecs
+    choices = {
+        stream: getattr(args, f"{stream}_codec")
+        for stream in ("color", "depth", "infrared")
+        if getattr(args, f"{stream}_codec") is not None
+    }
+    return config.with_codecs(config.CODECS, choices)
 
 
 def _wait(recorder: SessionRecorder, seconds: float, *, quiet: bool) -> None:

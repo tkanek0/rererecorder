@@ -680,9 +680,10 @@ budget).
 
 `SessionRecorder.streams` and `.codecs` are now settable properties
 (mirroring the existing `.root` setter), refusing with `RecorderBusy` while
-recording. `rrr.recorder.config.codec_for(stream, choice)` is the one place
-"compressed" is translated into an actual codec name per stream (`zlib` for
-depth, `png` for colour and infrared).
+recording. `rrr.recorder.config.with_streams` and `with_codecs` are the one
+place the page, the command line and the environment turn a choice into a
+configuration; "compressed" is `zlib` for depth and `png` for colour and
+infrared (`rrr.video.archive.COMPRESSED_CODECS`).
 
 **Alternatives:** a per-recording-start parameter instead of a persistent
 setting (rejected: `sessions_dir` already established the "setting, changed

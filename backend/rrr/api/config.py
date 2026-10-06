@@ -7,14 +7,7 @@ from __future__ import annotations
 
 import os
 
-
-def _flag(name: str, default: bool) -> bool:
-    """Read a boolean from the environment."""
-    raw = os.environ.get(name)
-    if raw is None:
-        return default
-    return raw.strip().lower() not in ("0", "false", "no", "off", "")
-
+from rrr.recorder.config import env_flag
 
 #: Every interface, so the page can be opened from another machine.
 HOST = os.environ.get("RRR_API_HOST", "0.0.0.0")
@@ -54,4 +47,4 @@ ALLOW_ORIGINS = os.environ.get("RRR_ALLOW_ORIGINS", "*").split(",")
 
 #: Whether the recording directory can be changed over HTTP. The path is only
 #: checked for being a writable directory.
-ALLOW_SETTINGS_WRITE = _flag("RRR_ALLOW_SETTINGS_WRITE", True)
+ALLOW_SETTINGS_WRITE = env_flag("RRR_ALLOW_SETTINGS_WRITE", True)

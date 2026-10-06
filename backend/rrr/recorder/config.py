@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+from collections.abc import Mapping
 
 from realsense_adapter import (
     DEFAULT_COLOR,
@@ -14,8 +15,13 @@ from realsense_adapter import (
 )
 from respeaker_adapter import config as respeaker
 
+from rrr.video.archive import COMPRESSED_CODECS
 
-def _flag(name: str, default: bool) -> bool:
+#: The streams a recording can turn on and off.
+STREAM_NAMES = ("color", "depth", "infrared", "motion")
+
+
+def env_flag(name: str, default: bool) -> bool:
     """Read a boolean from the environment.
 
     Args:
@@ -62,55 +68,81 @@ DEFAULT_STREAMS = StreamConfig(
     color=_spec("RRR_COLOR", DEFAULT_COLOR),
     depth=_spec("RRR_DEPTH", DEFAULT_DEPTH),
     color_format=os.environ.get("RRR_COLOR_FORMAT", DEFAULT_COLOR_FORMAT),
-    infrared=_flag("RRR_INFRARED", True),
+    infrared=env_flag("RRR_INFRARED", True),
     emitter=os.environ.get("RRR_EMITTER", DEFAULT_EMITTER),
     # Off: docs/decisions.md 2.
-    align_to_color=_flag("RRR_ALIGN", False),
-    motion=_flag("RRR_MOTION", True),
+    align_to_color=env_flag("RRR_ALIGN", False),
+    motion=env_flag("RRR_MOTION", True),
 )
 
-#: How the archive encodes each stream. See docs/decisions.md 5 and 22.
-CODECS = {
-    "depth": os.environ.get("RRR_DEPTH_CODEC", "zlib"),
-    "color": os.environ.get("RRR_COLOR_CODEC", "png"),
-    "infrared": os.environ.get("RRR_INFRARED_CODEC", "png"),
-}
-
-#: What "compressed" means per stream, for the CLI and the page. See
-#: docs/decisions.md 23.
-COMPRESSED_CODECS = {"depth": "zlib", "color": "png", "infrared": "png"}
-
-
-def codec_for(stream: str, choice: str) -> str:
-    """Translate a "compressed"/"raw" choice into an archive codec name.
+def with_streams(current: StreamConfig, enabled: Mapping[str, bool]) -> StreamConfig:
+    """Turn streams on or off; a stream turned on comes back at its configured size.
 
     Args:
-        stream: Which stream this choice is for - ``"color"``, ``"depth"`` or
-            ``"infrared"``.
-        choice: ``"compressed"`` (the codec in COMPRESSED_CODECS) or
-            ``"raw"``.
+        current: The configuration to change.
+        enabled: Any of :data:`STREAM_NAMES` mapped to on or off; others keep
+            their value.
 
     Returns:
-        The codec name :class:`~rrr.video.ArchiveWriter` understands.
+        The changed configuration.
 
     Raises:
-        ValueError: If ``stream`` or ``choice`` is not one of the above.
+        ValueError: For an unknown stream, or a combination ``StreamConfig``
+            refuses, e.g. infrared without depth.
     """
-    if choice == "raw":
-        return "raw"
-    if choice != "compressed":
-        raise ValueError(
-            f"unknown codec choice {choice!r}, expected 'compressed' or 'raw'"
-        )
-    try:
-        return COMPRESSED_CODECS[stream]
-    except KeyError:
-        raise ValueError(f"no such stream {stream!r}") from None
+    unknown = set(enabled) - set(STREAM_NAMES)
+    if unknown:
+        raise ValueError(f"unknown stream: {', '.join(sorted(unknown))}")
+    changes: dict[str, object] = {}
+    for name in ("color", "depth"):
+        if name in enabled:
+            changes[name] = getattr(DEFAULT_STREAMS, name) if enabled[name] else None
+    for name in ("infrared", "motion"):
+        if name in enabled:
+            changes[name] = bool(enabled[name])
+    return current.with_changes(**changes)
+
+
+def with_codecs(current: Mapping[str, str], choices: Mapping[str, str]) -> dict[str, str]:
+    """Choose ``"compressed"`` or ``"raw"`` for streams; others keep their codec.
+
+    Args:
+        current: Codec per stream, as :class:`~rrr.video.ArchiveWriter` takes it.
+        choices: Stream names mapped to a choice.
+
+    Returns:
+        The codec per stream.
+
+    Raises:
+        ValueError: For an unknown stream or choice.
+    """
+    codecs = dict(current)
+    for stream, choice in choices.items():
+        if stream not in COMPRESSED_CODECS:
+            raise ValueError(f"no such stream {stream!r}")
+        if choice not in ("compressed", "raw"):
+            raise ValueError(
+                f"unknown codec choice {choice!r}, expected 'compressed' or 'raw'"
+            )
+        codecs[stream] = "raw" if choice == "raw" else COMPRESSED_CODECS[stream]
+    return codecs
+
+
+#: How the archive encodes each stream: ``compressed`` unless
+#: ``RRR_<STREAM>_CODEC=raw``. See docs/decisions.md 5 and 22.
+CODECS = with_codecs(
+    COMPRESSED_CODECS,
+    {
+        stream: os.environ[f"RRR_{stream.upper()}_CODEC"]
+        for stream in COMPRESSED_CODECS
+        if f"RRR_{stream.upper()}_CODEC" in os.environ
+    },
+)
 
 #: Whether each device is recorded at all.
-RECORD_VIDEO = _flag("RRR_VIDEO", True)
-RECORD_AUDIO = _flag("RRR_AUDIO", True)
-RECORD_DOA = _flag("RRR_DOA", True)
+RECORD_VIDEO = env_flag("RRR_VIDEO", True)
+RECORD_AUDIO = env_flag("RRR_AUDIO", True)
+RECORD_DOA = env_flag("RRR_DOA", True)
 
 #: How the array is opened. respeaker_adapter reads no environment, so its
 #: settings are chosen here and passed in.

@@ -1,7 +1,7 @@
 """Polled access to the direction the array currently hears.
 
 The XVF-3000 holds a current value rather than streaming it, so
-:class:`DoaTap` polls it on a background thread and keeps a short trail.
+:class:`DoaTap` polls it on a background thread.
 Timestamps are ``time.monotonic()``, the axis audio is on.
 """
 
@@ -10,7 +10,6 @@ from __future__ import annotations
 import logging
 import threading
 import time
-from collections import deque
 from dataclasses import dataclass
 from typing import Self
 
@@ -37,28 +36,20 @@ class Reading:
 
 
 class DoaTap:
-    """Poll the array's direction estimate, and keep a short trail of it.
+    """Poll the array's direction estimate.
 
     Reference counted like :class:`respeaker_adapter.capture.AudioTap`. A missing or
     refused device is reported through :attr:`error`, not raised, and not
     retried until :meth:`reconnect` (docs/decisions.md 29).
     """
 
-    def __init__(
-        self,
-        poll_hz: float = config.DOA_POLL_HZ,
-        history_s: float = config.DOA_HISTORY_S,
-    ) -> None:
+    def __init__(self, poll_hz: float = config.DOA_POLL_HZ) -> None:
         """Initialise the tap without opening the device.
 
         Args:
             poll_hz: How often to ask the chip for its current angle.
-            history_s: Seconds of readings to keep.
         """
         self._interval = 1.0 / max(1e-3, poll_hz)
-        self._history: deque[Reading] = deque(
-            maxlen=max(1, int(history_s * poll_hz))
-        )
 
         self._lock = threading.Lock()
         self._updated = threading.Condition(self._lock)
@@ -179,23 +170,6 @@ class DoaTap:
                 self._updated.wait(remaining)
             return self._latest
 
-    def history(self, seconds: float | None = None) -> list[Reading]:
-        """Return recent readings, oldest first.
-
-        Args:
-            seconds: How far back to go, capped at what is kept. None asks for
-                everything available.
-
-        Returns:
-            The readings, which may be empty if polling has not produced any.
-        """
-        with self._lock:
-            readings = list(self._history)
-        if seconds is None:
-            return readings
-        cutoff = time.monotonic() - seconds
-        return [reading for reading in readings if reading.captured_at >= cutoff]
-
     # -- poller thread -----------------------------------------------------
 
     def _should_stop(self) -> bool:
@@ -214,7 +188,6 @@ class DoaTap:
                 captured_at=time.monotonic(),
             )
             self._latest = reading
-            self._history.append(reading)
             self._updated.notify_all()
 
     def _run(self) -> None:

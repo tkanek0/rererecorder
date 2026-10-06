@@ -9,42 +9,28 @@ variable: every setting is an argument, defaulting to
 
 from .capture import (
     AudioTap,
-    DeviceNotFound,
-    DeviceStatus,
-    devices,
     probe,
     rescan,
 )
 from .config import (
     BLOCK_SIZE,
-    CHANNEL_MICS,
-    CHANNEL_PLAYBACK,
-    CHANNEL_PROCESSED,
     CHANNELS,
     DEVICE_NAME,
-    SAMPLE_RATE,
 )
 from .doa import DoaTap, Reading
-from .types import BlockStamp, Chunk, Window, dbfs, rms
+from .types import BlockStamp, Chunk, DeviceNotFound, dbfs, rms
 
 __all__ = [
     "BLOCK_SIZE",
     "CHANNELS",
-    "CHANNEL_MICS",
-    "CHANNEL_PLAYBACK",
-    "CHANNEL_PROCESSED",
     "DEVICE_NAME",
-    "SAMPLE_RATE",
     "AudioTap",
     "BlockStamp",
     "Chunk",
     "DeviceNotFound",
-    "DeviceStatus",
     "DoaTap",
     "Reading",
-    "Window",
     "dbfs",
-    "devices",
     "probe",
     "rescan",
     "rms",

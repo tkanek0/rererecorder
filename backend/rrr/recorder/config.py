@@ -118,6 +118,3 @@ AUDIO_DEVICE = os.environ.get("RRR_AUDIO_DEVICE", respeaker.DEVICE_NAME)
 AUDIO_BLOCK_SIZE = int(os.environ.get("RRR_AUDIO_BLOCK_SIZE", respeaker.BLOCK_SIZE))
 AUDIO_WINDOW_S = float(os.environ.get("RRR_AUDIO_WINDOW_S", respeaker.WINDOW_S))
 DOA_POLL_HZ = float(os.environ.get("RRR_AUDIO_DOA_POLL_HZ", respeaker.DOA_POLL_HZ))
-DOA_HISTORY_S = float(
-    os.environ.get("RRR_AUDIO_DOA_HISTORY_S", respeaker.DOA_HISTORY_S)
-)

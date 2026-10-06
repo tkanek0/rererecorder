@@ -8,7 +8,7 @@ thread into a ring buffer, with two ways out:
   dropped, for delivery and recording.
 
 Times come from PortAudio's ``inputBufferAdcTime``, not the callback's
-``time.monotonic()``, which runs one block (64 ms at 1024 samples) late; when
+``time.monotonic()``, which runs one block (16 ms at 256 samples) late; when
 the host API does not fill it in, the callback time is used and logged.
 """
 
@@ -26,7 +26,7 @@ from typing import Self
 import numpy as np
 
 from . import config
-from .types import BlockStamp, Chunk, Window
+from .types import BlockStamp, Chunk, DeviceNotFound, Window
 
 try:
     import sounddevice as sd
@@ -90,10 +90,6 @@ else:
 
     def _com_uninitialize() -> None:
         """No-op off Windows, matching :func:`_com_initialize`."""
-
-
-class DeviceNotFound(RuntimeError):
-    """Raised when no capture device matches the configured name."""
 
 
 class AudioTap:
@@ -678,21 +674,3 @@ def rescan() -> None:
     """
     sd._terminate()
     sd._initialize()
-
-
-def devices() -> list[dict[str, object]]:
-    """List the capture devices PortAudio can see.
-
-    Returns:
-        One entry per input device with its index, name and channel count.
-    """
-    return [
-        {
-            "index": index,
-            "name": str(device["name"]),
-            "channels": int(device["max_input_channels"]),
-            "rate": float(device["default_samplerate"]),
-        }
-        for index, device in enumerate(sd.query_devices())
-        if device["max_input_channels"] > 0
-    ]

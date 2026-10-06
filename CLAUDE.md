@@ -130,8 +130,10 @@ anything new - an unmeasured extrinsic is null, not identity.
 Two values are currently *asserted* rather than measured, and both should be
 treated as unknown until something measures them:
 
-- `backend/respeaker_adapter/config.py` `MIC_ANGLES` - the file says "NOT YET VERIFIED", and
-  nothing in the repository reads it.
+- The microphone angles, 45/135/225/315 degrees in the chip's DOA convention.
+  Only the page's level meter uses them (`MIC_LAYOUT` in
+  `frontend/src/components/devices-panel.tsx`): the spacing is safe, the zero
+  is a guess.
 - The rigid transform between the camera and the array. `session.json` has a
   `rig` block for it, filled in by hand, and it ships `"unset"`. It is required
   before a direction estimate can become a ray in the world; an export carries

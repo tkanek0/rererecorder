@@ -19,6 +19,10 @@ from . import config
 SILENCE = 1e-7
 
 
+class DeviceNotFound(RuntimeError):
+    """Raised when the array, or a usable capture device on it, is not attached."""
+
+
 @dataclass(frozen=True)
 class BlockStamp:
     """When one capture block's first sample entered the converter.
@@ -75,16 +79,6 @@ class Window:
     captured_at: float = 0.0
 
     @property
-    def duration(self) -> float:
-        """Length of the window in seconds."""
-        return len(self.samples) / self.rate
-
-    @property
-    def channels(self) -> int:
-        """Number of channels the window carries."""
-        return int(self.samples.shape[1])
-
-    @property
     def processed(self) -> np.ndarray:
         """The beamformed, echo-cancelled channel the chip produces."""
         return self.samples[:, config.CHANNEL_PROCESSED]
@@ -93,31 +87,6 @@ class Window:
     def mics(self) -> np.ndarray:
         """The four raw microphones as ``(n, 4)``, in board order."""
         return self.samples[:, list(config.CHANNEL_MICS)]
-
-    @property
-    def playback(self) -> np.ndarray:
-        """Loopback of what was played out; silent unless something is."""
-        return self.samples[:, config.CHANNEL_PLAYBACK]
-
-    def tail(self, seconds: float) -> Window:
-        """Return the last ``seconds`` of this window.
-
-        Args:
-            seconds: How much to keep. More than the window holds returns the
-                whole window.
-
-        Returns:
-            A new window sharing this one's buffer.
-        """
-        count = max(1, int(self.rate * seconds))
-        if count >= len(self.samples):
-            return self
-        return Window(
-            samples=self.samples[-count:],
-            rate=self.rate,
-            index=self.index,
-            captured_at=self.captured_at,
-        )
 
 
 @dataclass(frozen=True)

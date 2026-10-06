@@ -567,4 +567,4 @@ def _make_audio_tap() -> AudioTap:
 
 def _make_doa_tap() -> DoaTap:
     """Open-on-demand direction tap with this application's configured settings."""
-    return DoaTap(poll_hz=config.DOA_POLL_HZ, history_s=config.DOA_HISTORY_S)
+    return DoaTap(poll_hz=config.DOA_POLL_HZ)

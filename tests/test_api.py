@@ -11,6 +11,8 @@ import os
 import pytest
 from fastapi.testclient import TestClient
 from rrr.api import app as api_app
+from rrr.api import devices as api_devices
+from rrr.api import state as api_state
 from rrr.recorder import config as recording_config
 from rrr.timeline import (
     ClockPair,
@@ -122,11 +124,11 @@ def test_the_realsense_enumeration_is_kept_until_a_reconnect(
     enumerations: list[int] = []
     reconnects: list[int] = []
     rescans: list[int] = []
-    monkeypatch.setattr(api_app, "list_devices", lambda: enumerations.append(1) or [])
+    monkeypatch.setattr(api_state, "list_devices", lambda: enumerations.append(1) or [])
     monkeypatch.setattr(api_app.state, "realsense_found", None)
     monkeypatch.setattr(api_app.state, "realsense_found_after", 0.0)
     monkeypatch.setattr(api_app.state.hub, "reconnect", lambda: reconnects.append(1))
-    monkeypatch.setattr(api_app, "rescan", lambda: rescans.append(1))
+    monkeypatch.setattr(api_devices, "rescan", lambda: rescans.append(1))
 
     for _ in range(3):
         client.get("/api/status")

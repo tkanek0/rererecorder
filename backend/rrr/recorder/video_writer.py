@@ -142,6 +142,8 @@ class VideoWriter:
             self._hub.release()
             raise
 
+        # What the sensor buffered before this recording belongs to nobody.
+        self._take_motion()
         self._running = True
         self._hub.add_listener(self._on_frame)
         logger.info("recording video to %s", self._path)
@@ -225,21 +227,16 @@ class VideoWriter:
             self._stats.last_monotonic = frames.received_monotonic
 
     def _drain_motion(self, writer: ArchiveWriter) -> None:
-        """Move buffered inertial samples into the archive.
-
-        Args:
-            writer: The open archive.
-
-        This must be the only drainer: draining takes ownership of the samples,
-        so the preview only peeks at the newest one.
-        """
-        source = self._hub.source
-        drain = getattr(source, "drain_motion", None) if source is not None else None
-        if drain is None:
-            return
-        samples = drain()
+        """Move the inertial samples buffered since the last call into the archive."""
+        samples = self._take_motion()
         if samples:
             writer.append_motion(samples)
+
+    def _take_motion(self) -> list:
+        """Take what the source buffered; this writer is its only drainer."""
+        source = self._hub.source
+        drain = getattr(source, "drain_motion", None) if source is not None else None
+        return drain() if drain is not None else []
 
     def _read_options(self) -> dict[str, float]:
         """Read the camera's sensor options, if the source can report them.

@@ -251,6 +251,11 @@ looks for gaps only inside the video's own span for that reason.
 Inertial samples reach a consumer only through the archive's `imu` table and
 `ArchiveSource.motion_samples`; a `FrameSet` carries none.
 
+The source buffers about four seconds of samples between drains, so a
+recording discards that buffer when it starts: with the preview already
+running, it held samples from before the session, which `rrr.inspection`
+rightly reported as sitting outside the video.
+
 ---
 
 ## 13. Both devices in one container, with the audio group granted

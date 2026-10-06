@@ -207,3 +207,30 @@ def test_starting_twice_is_refused(tmp_path, hub) -> None:
             writer.start(timeout=1.0)
     finally:
         writer.stop(timeout=10.0)
+
+
+def test_only_inertial_samples_from_the_recording_are_written(
+    tmp_path, hub, sets
+) -> None:
+    """The sensor buffers seconds of samples; those from before the start are not this session's."""
+    from realsense_adapter.types import MotionSample
+
+    class Source:
+        def __init__(self) -> None:
+            self.buffered = [MotionSample("accel", 1.0, 0.0, 9.8, 0.0)]
+
+        def drain_motion(self) -> list[MotionSample]:
+            taken, self.buffered = self.buffered, []
+            return taken
+
+    hub.source = Source()
+    path = str(tmp_path / "video.rrdb")
+    writer = VideoWriter(hub, path, config=StreamConfig(color=None))
+    writer.start()
+    hub.source.buffered.append(MotionSample("accel", 2.0, 0.0, 9.8, 0.0))
+    hub.publish(sets(1)[0])
+    stats = writer.stop()
+
+    assert stats.motion == 1
+    with ArchiveSource(path) as archive:
+        assert [s.timestamp_ms for s in archive.motion_samples()] == [2.0]

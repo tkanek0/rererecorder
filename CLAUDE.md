@@ -78,6 +78,24 @@ The practical consequence is that **hand-measured ground truth is good enough**.
 A source placed to 10 cm at 2 m is a 2.9 degree reference against a 13 degree
 quantisation, so motion capture is not needed to measure this array.
 
+## Design principles
+
+This project is under active development. Keep the code and docs at the ideal,
+minimal design for what exists today.
+Adhere to **YAGNI**, **KISS**, **SRP**, and **DRY**.
+
+- Remove dead code immediately. Backward compatibility is not required, change
+  formats and protocols freely.
+- Generalize similar logic aggressively and prefer one simple mechanism over
+  special cases.
+- Merge similar tests and drop overly fine-grained ones. Test behavior that
+  matters, not every branch.
+- Keep code comments minimal. When an explanation would get long, put it in
+  `docs/` and point there.
+- Update the affected docs in the same turn as any change to behavior,
+  commands, settings, structure or names, and commit them with that change.
+  Before finishing a turn, check that the docs still describe the code.
+
 ## Conventions
 
 - The recorder lives under `backend/rrr/`. Import as `from rrr.video import ArchiveSource`.

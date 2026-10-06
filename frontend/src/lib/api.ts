@@ -7,13 +7,12 @@
 const DEFAULT_PORT = 8040;
 
 /**
- * Base HTTP URL of the control plane: this page's host, on `VITE_CONTROL_PORT`,
- * unless `VITE_CONTROL_URL` overrides it. See docs/features.md "The page".
+ * Base HTTP URL of the control plane: this page's host, on `VITE_CONTROL_PORT`.
+ * See docs/features.md "The page".
  *
  * @returns The URL, with no trailing slash.
  */
-export const controlBase = (): string =>
-  import.meta.env.VITE_CONTROL_URL ??
+const controlBase = (): string =>
   `http://${window.location.hostname}:${
     import.meta.env.VITE_CONTROL_PORT ?? DEFAULT_PORT
   }`;
@@ -39,17 +38,6 @@ export type StreamConfig = {
   motion: boolean;
 };
 
-/** What the camera is doing right now. */
-export type CameraStatus = {
-  active: boolean;
-  fps: number;
-  error: string | null;
-  device: DeviceInfo | null;
-  streams: StreamConfig;
-  timestamp_domain: string;
-  listeners: number;
-};
-
 /** What the camera has contributed to the running session. */
 export type VideoState = {
   frames: number;
@@ -61,25 +49,19 @@ export type VideoState = {
   skipped_warmup: number;
   fps: number | null;
   timestamp_domain: string;
-  error: string | null;
 };
 
 /** What the array has contributed, when it is being recorded at all. */
 export type AudioState = {
   seconds: number;
   filled: number;
-  gaps: number;
-  dropped_by_reader: number;
   overruns: number;
-  clock_points: number;
-  error: string | null;
 };
 
 /** The recorder's own view of the session in progress. */
 export type RecordingState = {
   recording: boolean;
   session_id: string | null;
-  directory: string | null;
   seconds: number;
   size_bytes: number;
   video: VideoState | null;
@@ -89,22 +71,12 @@ export type RecordingState = {
   errors: string[];
 };
 
-/** One mark made by hand while recording. */
-export type Mark = {
-  monotonic: number;
-  realtime: number;
-  label: string;
-  data: Record<string, unknown>;
-};
-
 /** Where recordings go, and how long the disk lasts at the current rate. */
 export type StorageStatus = {
   sessions_dir: string;
   free_bytes?: number;
   total_bytes?: number;
   write_bytes_per_s: number | null;
-  /** Whether the remaining time comes from a recording happening now. */
-  rate_is_live?: boolean;
   seconds_left: number | null;
   error?: string;
 };
@@ -118,8 +90,6 @@ export type RealsenseDeviceStatus = {
   device: DeviceInfo | null;
   /** What is being asked for right now. */
   streams: StreamConfig;
-  streaming: boolean;
-  fps: number;
   /** Whether opening it failed. See `reconnectDevice`. */
   failed: boolean;
   error: string | null;
@@ -154,7 +124,6 @@ export type Devices = {
 
 /** Everything the page polls for. */
 export type Status = {
-  camera: CameraStatus;
   recording: RecordingState;
   storage: StorageStatus;
   devices: Devices;
@@ -193,7 +162,6 @@ export type ArchiveDetail = {
   first_index?: number | null;
   last_index?: number | null;
   first_monotonic?: number | null;
-  last_monotonic?: number | null;
   streams?: { color: boolean; depth: boolean; infrared: boolean };
   aligned?: boolean;
   codecs?: Record<string, string> | null;
@@ -219,8 +187,6 @@ export type AudioTrack = {
 export type SessionDetail = Omit<SessionSummary, 'audio'> & {
   size_bytes: number;
   archive: ArchiveDetail;
-  clock_reference: string;
-  stopped_at: { monotonic: number; realtime: number } | null;
   audio: AudioTrack | null;
 };
 
@@ -241,16 +207,22 @@ export type CaptureName = StreamName | 'motion';
 /** How a stream's archive is encoded, without naming the algorithm. */
 export type CodecChoice = 'compressed' | 'raw';
 
+/** Turn a failed response into an error carrying the server's `detail`. */
+const failure = async (response: Response): Promise<Error> => {
+  const body: unknown = await response.json().catch(() => null);
+  const detail =
+    typeof body === 'object' && body !== null && 'detail' in body
+      ? String(body.detail)
+      : null;
+  return new Error(detail ?? `${response.status} ${response.statusText}`);
+};
+
 const request = async <T>(path: string, init?: RequestInit): Promise<T> => {
   const response = await fetch(`${controlBase()}${path}`, {
     headers: init?.body ? { 'Content-Type': 'application/json' } : undefined,
     ...init,
   });
-  if (!response.ok) {
-    // The server's explanation is in `detail`.
-    const body = await response.json().catch(() => null);
-    throw new Error(body?.detail ?? `${response.status} ${response.statusText}`);
-  }
+  if (!response.ok) throw await failure(response);
   return (await response.json()) as T;
 };
 
@@ -288,8 +260,8 @@ export const fetchSettings = (): Promise<Settings> =>
 export const setRecording = (
   recording: boolean,
   session?: string,
-): Promise<RecordingState> =>
-  request<RecordingState>('/api/recording', {
+): Promise<unknown> =>
+  request('/api/recording', {
     method: 'PUT',
     body: JSON.stringify({ recording, session: session ?? null }),
   });
@@ -303,8 +275,8 @@ export const setRecording = (
 export const addMark = (
   label: string,
   data?: Record<string, unknown>,
-): Promise<{ event: Mark; marks: number }> =>
-  request<{ event: Mark; marks: number }>('/api/events', {
+): Promise<unknown> =>
+  request('/api/events', {
     method: 'POST',
     body: JSON.stringify({ label, data: data ?? null }),
   });
@@ -341,8 +313,8 @@ export const setStreams = (
  *
  * @param name Which device.
  */
-export const reconnectDevice = (name: DeviceName): Promise<Devices> =>
-  request<Devices>(`/api/devices/${name}/reconnect`, { method: 'POST' });
+export const reconnectDevice = (name: DeviceName): Promise<unknown> =>
+  request(`/api/devices/${name}/reconnect`, { method: 'POST' });
 
 /**
  * Change how each stream's archive is encoded, from the next recording.
@@ -357,15 +329,29 @@ export const setCodecs = (
     body: JSON.stringify({ codecs }),
   });
 
-/** URL of a live preview, for an `<img>` element. */
-export const previewUrl = (kind: PreviewKind, width = 640): string =>
-  `${controlBase()}/stream/${kind}.mjpg?width=${width}`;
+/**
+ * URL of a live preview, for an `<img>` element.
+ *
+ * @param kind Which stream.
+ * @returns The MJPEG URL, at the server's preview width.
+ */
+export const previewUrl = (kind: PreviewKind): string =>
+  `${controlBase()}/stream/${kind}.mjpg`;
 
-/** URL of the live per-channel audio level stream (server-sent events). */
+/**
+ * URL of the live per-channel audio level stream (server-sent events).
+ *
+ * @returns The URL.
+ */
 export const audioLevelsUrl = (): string =>
   `${controlBase()}/stream/audio-levels`;
 
-/** Fetch one session in full, enough to play it back. */
+/**
+ * Fetch one session in full, enough to play it back.
+ *
+ * @param sessionId Directory name.
+ * @returns The manifest, its size and its frame range.
+ */
 export const fetchSession = (sessionId: string): Promise<SessionDetail> =>
   request<SessionDetail>(`/api/sessions/${encodeURIComponent(sessionId)}`);
 
@@ -374,31 +360,18 @@ export const fetchSession = (sessionId: string): Promise<SessionDetail> =>
  *
  * @param sessionId Directory name. Refused while that session is recording.
  */
-export const deleteSession = (
-  sessionId: string,
-): Promise<{ deleted: string; freed_bytes: number }> =>
+export const deleteSession = (sessionId: string): Promise<unknown> =>
   request(`/api/sessions/${encodeURIComponent(sessionId)}`, {
     method: 'DELETE',
   });
 
 /**
- * URL of one recorded frame, for an `<img>` element.
+ * URL of one channel of a session's audio, for an `<audio>` element.
  *
  * @param sessionId Directory name.
- * @param index The archive's own frame index, not a position in a sequence.
- * @param kind Which stream to render.
- * @param width Width to scale to before encoding.
+ * @param channel 0 for the processed channel, 1-4 for the microphones.
+ * @returns The WAV URL.
  */
-export const frameUrl = (
-  sessionId: string,
-  index: number,
-  kind: PreviewKind,
-  width = 640,
-): string =>
-  `${controlBase()}/api/sessions/${encodeURIComponent(sessionId)}/frame/${index}.jpg` +
-  `?kind=${kind}&width=${width}`;
-
-/** URL of one channel of a session's audio, for an `<audio>` element. */
 export const audioUrl = (sessionId: string, channel = 0): string =>
   `${controlBase()}/api/sessions/${encodeURIComponent(sessionId)}/audio.wav` +
   `?channel=${channel}`;
@@ -439,13 +412,13 @@ export const loadFrame = async (
   sessionId: string,
   index: number,
   kind: PreviewKind,
-  width = 640,
+  width: number,
 ): Promise<{ url: string; meta: FrameMeta }> => {
-  const response = await fetch(frameUrl(sessionId, index, kind, width));
-  if (!response.ok) {
-    const body = await response.json().catch(() => null);
-    throw new Error(body?.detail ?? `${response.status} ${response.statusText}`);
-  }
+  const response = await fetch(
+    `${controlBase()}/api/sessions/${encodeURIComponent(sessionId)}` +
+      `/frame/${index}.jpg?kind=${kind}&width=${width}`,
+  );
+  if (!response.ok) throw await failure(response);
   const monotonic = response.headers.get('X-Received-Monotonic');
   return {
     url: URL.createObjectURL(await response.blob()),

@@ -380,7 +380,6 @@ class SessionRecorder:
         return {
             "recording": self.recording,
             "session_id": self._session_id,
-            "directory": self._paths.directory if self._paths else None,
             "seconds": self._elapsed(),
             "size_bytes": self._paths.size_bytes() if self._paths else 0,
             "video": (

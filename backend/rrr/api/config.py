@@ -19,8 +19,7 @@ def _flag(name: str, default: bool) -> bool:
 #: Every interface, so the page can be opened from another machine.
 HOST = os.environ.get("RRR_API_HOST", "0.0.0.0")
 
-#: 8000-8030 are taken on this machine. Pinned: refusing to start beats
-#: silently landing elsewhere.
+#: Pinned: refusing to start beats silently landing elsewhere.
 PORT = int(os.environ.get("RRR_API_PORT", "8040"))
 
 #: Seconds to wait for open connections before shutting down anyway. Finite,
@@ -43,11 +42,6 @@ JPEG_QUALITY = int(os.environ.get("RRR_JPEG_QUALITY", "80"))
 #: "A devices panel, and two real bugs it exposed".
 PREVIEW_MAX_HZ_RECORDING = float(os.environ.get("RRR_PREVIEW_MAX_HZ_RECORDING", "10"))
 PREVIEW_MAX_HZ_IDLE = float(os.environ.get("RRR_PREVIEW_MAX_HZ_IDLE", "15"))
-
-#: Depth colour scale defaults. The page overrides these per request.
-DEPTH_NEAR_M = float(os.environ.get("RRR_DEPTH_NEAR_M", "0.3"))
-DEPTH_FAR_M = float(os.environ.get("RRR_DEPTH_FAR_M", "6.0"))
-DEPTH_COLORMAP = os.environ.get("RRR_DEPTH_COLORMAP", "turbo")
 
 # -- the audio level meter -----------------------------------------------------
 

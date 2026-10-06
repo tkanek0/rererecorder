@@ -70,7 +70,7 @@ export const App = () => {
     if (!wasRecording) refreshSessions();
   }, [wasRecording, refreshSessions]);
 
-  const device = status?.camera.device;
+  const device = status?.devices.realsense.device;
 
   return (
     <div className="app">

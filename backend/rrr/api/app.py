@@ -40,7 +40,6 @@ from rrr.timeline import (
     SessionError,
     SessionPaths,
     listing,
-    read_events,
     read_manifest,
 )
 from rrr.video import ArchiveSource, FrameHub
@@ -58,13 +57,12 @@ class State:
     """
 
     def __init__(self) -> None:
-        self.sessions_root = recording_config.SESSIONS_ROOT
         self.hub = FrameHub(
             self._open_camera,
             idle_shutdown_s=config.IDLE_SHUTDOWN_S,
         )
         self.recorder = SessionRecorder(
-            self.sessions_root,
+            recording_config.SESSIONS_ROOT,
             streams=recording_config.DEFAULT_STREAMS,
             serial=recording_config.SERIAL,
             record_video=recording_config.RECORD_VIDEO,
@@ -145,21 +143,10 @@ app.add_middleware(
 # -- status ------------------------------------------------------------------
 
 
-@app.get("/api/health")
-def health() -> dict[str, Any]:
-    """Whether the server is up, and what it can see."""
-    return {
-        "ok": True,
-        "camera": _camera(),
-        "recording": state.recorder.recording,
-    }
-
-
 @app.get("/api/status")
 def status() -> dict[str, Any]:
-    """Everything the page polls for: camera, recording and disk."""
+    """Everything the page polls for: recording, disk and devices."""
     return {
-        "camera": _camera(),
         "recording": state.recorder.state(),
         "storage": _storage(),
         "devices": _devices(),
@@ -197,8 +184,6 @@ def _realsense_device() -> dict[str, Any]:
         # What is currently being asked for, shown here rather than in a
         # separate area: it describes this device, not the page in general.
         "streams": state.streams.as_dict(),
-        "streaming": hub.active,
-        "fps": round(hub.fps, 2),
         "failed": hub.failed,
         "error": hub.error,
     }
@@ -267,22 +252,6 @@ def reconnect_device(name: str) -> dict[str, Any]:
     return _devices()
 
 
-def _camera() -> dict[str, Any]:
-    """Describe the camera and what it is streaming."""
-    hub = state.hub
-    device = hub.device
-    source = hub.source
-    return {
-        "active": hub.active,
-        "fps": round(hub.fps, 2),
-        "error": hub.error,
-        "device": device.as_dict() if device else None,
-        "streams": state.streams.as_dict(),
-        "timestamp_domain": getattr(source, "timestamp_domain", "unknown"),
-        "listeners": hub.listeners,
-    }
-
-
 def _storage() -> dict[str, Any]:
     """Where recordings go, and how much room is left there.
 
@@ -290,7 +259,7 @@ def _storage() -> dict[str, Any]:
         The directory, its free and total bytes, and how long that lasts at the
         rate this recording is actually writing.
     """
-    root = state.sessions_root
+    root = state.recorder.root
     probe = root if os.path.isdir(root) else os.path.dirname(os.path.abspath(root))
     try:
         usage = shutil.disk_usage(probe)
@@ -308,7 +277,6 @@ def _storage() -> dict[str, Any]:
         "free_bytes": free,
         "total_bytes": total,
         "write_bytes_per_s": live,
-        "rate_is_live": live is not None,
         "seconds_left": free / basis if basis else None,
     }
 
@@ -408,8 +376,8 @@ async def add_event(request: Request) -> dict[str, Any]:
 def sessions() -> dict[str, Any]:
     """Every readable session in the current directory, newest first."""
     return {
-        "sessions_dir": state.sessions_root,
-        "sessions": [manifest.as_dict() for manifest in listing(state.sessions_root)],
+        "sessions_dir": state.recorder.root,
+        "sessions": [manifest.as_dict() for manifest in listing(state.recorder.root)],
     }
 
 
@@ -428,7 +396,7 @@ def _resolve(session_id: str) -> SessionPaths:
             and the filesystem.
     """
     try:
-        return SessionPaths.resolve(state.sessions_root, session_id)
+        return SessionPaths.resolve(state.recorder.root, session_id)
     except SessionError as error:
         raise HTTPException(status_code=404, detail=str(error)) from error
 
@@ -456,12 +424,6 @@ def session_detail(session_id: str) -> dict[str, Any]:
     detail = manifest.as_dict()
     detail["size_bytes"] = paths.size_bytes()
     detail["archive"] = _archive_detail(paths.video)
-    # Read from the file, which is what the session actually holds.
-    try:
-        detail["events"] = [event.as_dict() for event in read_events(paths.events)]
-    except ValueError as error:
-        logger.warning("unreadable marks in %s: %s", session_id, error)
-        detail["events"] = []
     return detail
 
 
@@ -509,8 +471,7 @@ def session_frame(session_id: str, index: int, request: Request) -> Response:
     Args:
         session_id: Directory name.
         index: The archive's own frame index.
-        request: Used for ``kind``, ``width``, ``near``, ``far`` and
-            ``colormap``.
+        request: Used for ``kind`` and ``width``.
 
     Returns:
         The JPEG, with its index in ``X-Frame-Index`` and its capture time in
@@ -521,13 +482,11 @@ def session_frame(session_id: str, index: int, request: Request) -> Response:
 
     The archive is opened per request; see docs/decisions.md 10.
     """
-    kind = request.query_params.get("kind", "color")
-    if kind not in ("color", "depth", "ir1", "ir2"):
-        raise HTTPException(status_code=404, detail=f"no stream {kind!r}")
+    query = request.query_params
+    kind = _kind(query.get("kind", "color"))
     only = "infrared" if kind.startswith("ir") else kind
 
     paths = _resolve(session_id)
-    query = request.query_params
     try:
         with ArchiveSource(paths.video) as archive:
             frames = archive.frame_at(index, only=only)
@@ -536,21 +495,11 @@ def session_frame(session_id: str, index: int, request: Request) -> Response:
     if frames is None:
         raise HTTPException(status_code=404, detail=f"no frame {index}")
 
-    image = preview.render(
-        frames,
-        kind,  # type: ignore[arg-type]
-        near_m=float(query.get("near", config.DEPTH_NEAR_M)),
-        far_m=float(query.get("far", config.DEPTH_FAR_M)),
-        colormap=query.get("colormap", config.DEPTH_COLORMAP),
-    )
-    if image is None:
+    jpeg = _preview_jpeg(frames, kind, _width(query))
+    if jpeg is None:
         raise HTTPException(
             status_code=404, detail=f"this recording has no {kind} stream"
         )
-    jpeg = preview.encode_jpeg(
-        preview.downscale(image, int(query.get("width", config.PREVIEW_WIDTH))),
-        config.JPEG_QUALITY,
-    )
     return Response(
         content=jpeg,
         media_type="image/jpeg",
@@ -671,7 +620,7 @@ async def delete_session(session_id: str) -> dict[str, Any]:
 def get_settings() -> dict[str, Any]:
     """What can be changed from the page, and what it is now."""
     return {
-        "sessions_dir": state.sessions_root,
+        "sessions_dir": state.recorder.root,
         "writable": config.ALLOW_SETTINGS_WRITE,
         # Resolution and frame rate are read-only here; stream toggles and
         # codecs are not (docs/decisions.md 23).
@@ -739,8 +688,7 @@ async def _apply_sessions_dir(raw: Any) -> None:
     except OSError as error:
         raise HTTPException(status_code=400, detail=str(error)) from error
 
-    state.sessions_root = wanted
-    # The recorder is long-lived (see State), so its root moves instead.
+    # The recorder is long-lived (see State), so its root moves.
     state.recorder.root = wanted
     logger.info("recordings now go to %s", wanted)
 
@@ -846,8 +794,7 @@ def stream(kind: str, request: Request) -> StreamingResponse:
 
     Args:
         kind: ``color``, ``depth``, ``ir1`` or ``ir2``.
-        request: Used for the optional ``near``, ``far``, ``colormap`` and
-            ``width`` query parameters.
+        request: Used for the optional ``width`` query parameter.
 
     Returns:
         A ``multipart/x-mixed-replace`` response.
@@ -855,17 +802,8 @@ def stream(kind: str, request: Request) -> StreamingResponse:
     Raises:
         HTTPException: 404 for an unknown stream.
     """
-    if kind not in ("color", "depth", "ir1", "ir2"):
-        raise HTTPException(status_code=404, detail=f"no stream {kind!r}")
-
-    query = request.query_params
-    near = float(query.get("near", config.DEPTH_NEAR_M))
-    far = float(query.get("far", config.DEPTH_FAR_M))
-    colormap = query.get("colormap", config.DEPTH_COLORMAP)
-    width = int(query.get("width", config.PREVIEW_WIDTH))
-
     return StreamingResponse(
-        _frames(request, kind, near, far, colormap, width),
+        _frames(request, _kind(kind), _width(request.query_params)),
         media_type=preview.MJPEG_CONTENT_TYPE,
         headers={"Cache-Control": "no-store"},
     )
@@ -889,9 +827,7 @@ _FAILED_WAIT_S = 1.0
 _STREAM_WAIT_S = 1.0
 
 
-async def _frames(
-    request: Request, kind: str, near: float, far: float, colormap: str, width: int
-):
+async def _frames(request: Request, kind: str, width: int):
     """Yield MJPEG parts until the client goes away.
 
     Holds the hub for its own life. Must check for disconnect itself, or a
@@ -915,20 +851,32 @@ async def _frames(
                 continue
             next_at = now + 1.0 / _preview_max_hz()
 
-            jpeg = await run_in_threadpool(
-                _preview_jpeg, frames, kind, near, far, colormap, width
-            )
+            jpeg = await run_in_threadpool(_preview_jpeg, frames, kind, width)
             if jpeg is not None:
                 yield preview.mjpeg_part(jpeg)
     finally:
         hub.release()
 
 
-def _preview_jpeg(
-    frames, kind: str, near: float, far: float, colormap: str, width: int
-) -> bytes | None:
+def _kind(kind: str) -> str:
+    """Check a requested preview kind.
+
+    Raises:
+        HTTPException: 404 for a stream there is no preview of.
+    """
+    if kind not in preview.KINDS:
+        raise HTTPException(status_code=404, detail=f"no stream {kind!r}")
+    return kind
+
+
+def _width(query: Any) -> int:
+    """The preview width a request asks for, or the configured one."""
+    return int(query.get("width", config.PREVIEW_WIDTH))
+
+
+def _preview_jpeg(frames, kind: str, width: int) -> bytes | None:
     """Render one preview frame, or None if the set lacks that stream."""
-    image = preview.render(frames, kind, near_m=near, far_m=far, colormap=colormap)
+    image = preview.render(frames, kind)  # type: ignore[arg-type]
     if image is None:
         return None
     return preview.encode_jpeg(preview.downscale(image, width), config.JPEG_QUALITY)

@@ -71,10 +71,6 @@ class FrameHub:
         self._error: str | None = None
         self._error_at = 0.0
         self._device: DeviceInfo | None = None
-        #: Smoothed frame *interval*, not rate: mean(1/dt) reads high under
-        #: jitter, since it exceeds 1/mean(dt).
-        self._interval = 0.0
-        self._last_at = 0.0
         #: Called for every set, in order. Own lock, so adding one cannot
         #: deadlock against a publish in progress.
         self._listeners: list[Callable[[FrameSet], None]] = []
@@ -93,14 +89,6 @@ class FrameHub:
         with self._lock:
             self._users = max(0, self._users - 1)
             self._released_at = time.monotonic()
-
-    def held(self) -> _Hold:
-        """Return a context manager that holds the hub open.
-
-        Returns:
-            An object usable in a ``with`` statement, releasing on exit.
-        """
-        return _Hold(self)
 
     def add_listener(self, listener: Callable[[FrameSet], None]) -> None:
         """Call ``listener`` for every frame set, in order, dropping none.
@@ -125,12 +113,6 @@ class FrameHub:
         with self._listener_lock:
             if listener in self._listeners:
                 self._listeners.remove(listener)
-
-    @property
-    def listeners(self) -> int:
-        """How many listeners are registered."""
-        with self._listener_lock:
-            return len(self._listeners)
 
     def reconnect(self) -> None:
         """Clear a failure and, if anyone is waiting, open the source again.
@@ -219,12 +201,6 @@ class FrameHub:
             return self._device
 
     @property
-    def fps(self) -> float:
-        """Recent delivery rate, smoothed. Zero before the second frame."""
-        with self._lock:
-            return round(1.0 / self._interval, 1) if self._interval > 0 else 0.0
-
-    @property
     def source(self) -> FrameSource | None:
         """The source currently open, or None if the hub is not streaming.
 
@@ -282,19 +258,9 @@ class FrameHub:
 
     def _publish(self, frame_set: FrameSet) -> None:
         """Store a frame set and wake everyone waiting for one."""
-        now = frame_set.received_monotonic
         with self._updated:
             self._index += 1
             self._latest = dataclasses.replace(frame_set, index=self._index)
-            if self._last_at:
-                interval = now - self._last_at
-                if interval > 0:
-                    self._interval = (
-                        interval
-                        if self._interval == 0.0
-                        else 0.9 * self._interval + 0.1 * interval
-                    )
-            self._last_at = now
             published = self._latest
             self._updated.notify_all()
 
@@ -342,8 +308,6 @@ class FrameHub:
         with self._updated:
             self._source = None
             self._latest = None
-            self._last_at = 0.0
-            self._interval = 0.0
             if failure is not None:
                 self._failed = True
                 self._error = failure
@@ -353,17 +317,3 @@ class FrameHub:
                 if self._thread is threading.current_thread():
                     self._thread = None
             self._updated.notify_all()
-
-
-class _Hold:
-    """Context manager returned by ``FrameHub.held``."""
-
-    def __init__(self, hub: FrameHub) -> None:
-        self._hub = hub
-
-    def __enter__(self) -> FrameHub:
-        self._hub.acquire()
-        return self._hub
-
-    def __exit__(self, *exc: object) -> None:
-        self._hub.release()

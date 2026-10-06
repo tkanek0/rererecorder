@@ -7,7 +7,7 @@ them, and are downscaled before encoding.
 
 from __future__ import annotations
 
-from typing import Literal
+from typing import Literal, get_args
 
 import cv2
 import numpy as np
@@ -15,19 +15,11 @@ from realsense_adapter import FrameSet, color_to_bgr
 
 #: Which preview a request is asking for.
 Kind = Literal["color", "depth", "ir1", "ir2"]
+KINDS: tuple[str, ...] = get_args(Kind)
 
-#: Colour scales offered by name, so a query parameter can pick one. Turbo is
-#: the default: jet's perceptually uneven bands invent and hide edges.
-COLORMAPS: dict[str, int] = {
-    "turbo": cv2.COLORMAP_TURBO,
-    "jet": cv2.COLORMAP_JET,
-    "viridis": cv2.COLORMAP_VIRIDIS,
-    "magma": cv2.COLORMAP_MAGMA,
-}
-
-#: Default near and far clip for colorization, in metres, sized for indoors.
-DEFAULT_NEAR_M = 0.3
-DEFAULT_FAR_M = 6.0
+#: Near and far clip for colorization, in metres, sized for indoors.
+NEAR_M = 0.3
+FAR_M = 6.0
 
 #: multipart boundary for the MJPEG streams.
 BOUNDARY = "frame"
@@ -37,76 +29,37 @@ BOUNDARY = "frame"
 MJPEG_CONTENT_TYPE = f"multipart/x-mixed-replace; boundary={BOUNDARY}"
 
 
-def colorize_depth(
-    depth: np.ndarray,
-    depth_scale: float,
-    near_m: float = DEFAULT_NEAR_M,
-    far_m: float = DEFAULT_FAR_M,
-    colormap: str = "turbo",
-) -> np.ndarray:
-    """Render a depth image as a colour picture.
+def colorize_depth(depth: np.ndarray, depth_scale: float) -> np.ndarray:
+    """Render a depth image as a colour picture, NEAR_M to FAR_M on turbo.
+
+    Turbo, because jet's perceptually uneven bands invent and hide edges.
+    Anything further than FAR_M is clipped rather than dropped, so a far wall
+    stays visible.
 
     Args:
         depth: ``(height, width)`` uint16 raw depth.
         depth_scale: Metres per raw depth unit.
-        near_m: Distance mapped to the low end of the scale.
-        far_m: Distance mapped to the high end. Anything further is clipped
-            rather than dropped, so a far wall stays visible.
-        colormap: Key from :data:`COLORMAPS`. An unknown name falls back to
-            turbo.
 
     Returns:
         ``(height, width, 3)`` uint8 BGR. Unmeasured pixels are black, which
         is outside every scale here so it cannot pass for a reading.
     """
     metres = depth.astype(np.float32) * depth_scale
-    span = max(far_m - near_m, 1e-6)
-    scaled = np.clip((metres - near_m) / span, 0.0, 1.0)
-    coloured = cv2.applyColorMap(
-        (scaled * 255).astype(np.uint8), COLORMAPS.get(colormap, cv2.COLORMAP_TURBO)
-    )
+    scaled = np.clip((metres - NEAR_M) / (FAR_M - NEAR_M), 0.0, 1.0)
+    coloured = cv2.applyColorMap((scaled * 255).astype(np.uint8), cv2.COLORMAP_TURBO)
     coloured[depth == 0] = 0
     return coloured
-
-
-def to_bgr_from_planes(
-    y: np.ndarray, u: np.ndarray, v: np.ndarray
-) -> np.ndarray:
-    """Convert stored YUYV planes to BGR without rebuilding the packed buffer.
-
-    Args:
-        y: Luma, ``(height, width)`` uint8.
-        u: First chroma plane, half width.
-        v: Second chroma plane, half width.
-
-    Returns:
-        ``(height, width, 3)`` uint8 BGR.
-    """
-    height, width = y.shape
-    yuv = np.empty((height, width, 3), np.uint8)
-    yuv[:, :, 0] = y
-    # 4:2:2: repeat each chroma sample, not interpolate, to match color_to_bgr.
-    yuv[:, :, 1] = np.repeat(u, 2, axis=1)
-    yuv[:, :, 2] = np.repeat(v, 2, axis=1)
-    return cv2.cvtColor(yuv, cv2.COLOR_YUV2BGR)
 
 
 def render(
     frames: FrameSet,
     kind: Kind,
-    *,
-    near_m: float = DEFAULT_NEAR_M,
-    far_m: float = DEFAULT_FAR_M,
-    colormap: str = "turbo",
 ) -> np.ndarray | None:
     """Pick the image a preview request wants, ready to encode.
 
     Args:
         frames: The frame set to draw from.
         kind: Which stream.
-        near_m: Near clip for depth colorization.
-        far_m: Far clip for depth colorization.
-        colormap: Colour scale name for depth.
 
     Returns:
         The image, or None if that stream is not in this recording. Colour and
@@ -117,13 +70,7 @@ def render(
     if kind == "depth":
         if frames.depth is None:
             return None
-        return colorize_depth(
-            frames.depth,
-            frames.calibration.depth_scale,
-            near_m=near_m,
-            far_m=far_m,
-            colormap=colormap,
-        )
+        return colorize_depth(frames.depth, frames.calibration.depth_scale)
     if frames.infrared is None:
         return None
     return frames.infrared[0] if kind == "ir1" else frames.infrared[1]

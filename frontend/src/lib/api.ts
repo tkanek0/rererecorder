@@ -20,6 +20,14 @@ const controlBase = (): string =>
 /** Which preview a panel is showing. */
 export type PreviewKind = 'color' | 'depth' | 'ir1' | 'ir2';
 
+/** What each preview is called on screen. */
+export const PREVIEW_LABELS: Record<PreviewKind, string> = {
+  color: 'colour',
+  depth: 'depth',
+  ir1: 'infrared left',
+  ir2: 'infrared right',
+};
+
 /** What the camera is, as the SDK reports it. */
 export type DeviceInfo = {
   name: string;

@@ -50,3 +50,13 @@ export const clockTime = (epoch: number | null | undefined): string =>
   epoch === null || epoch === undefined
     ? '-'
     : new Date(epoch * 1000).toLocaleString();
+
+/**
+ * Render the measured audio-to-video offset, or say that nobody measured it.
+ *
+ * @param offset Seconds, or null when unmeasured.
+ */
+export const offset = (offset: number | null | undefined): string =>
+  offset === null || offset === undefined
+    ? 'unmeasured'
+    : `${(offset * 1000).toFixed(1)} ms`;

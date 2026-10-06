@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 import {
+  PREVIEW_LABELS,
   audioUrl,
   fetchFrameTimes,
   fetchSession,
@@ -9,8 +10,10 @@ import {
   type PreviewKind,
   type SessionDetail,
 } from '../lib/api';
-import { bytes, duration } from '../lib/format';
+import { bytes, duration, offset } from '../lib/format';
 import { nearestFrame, timeOfFrame } from '../lib/frame-index';
+import { errorMessage } from '../lib/use-action';
+import { Row } from './row';
 
 /** Playback speeds offered, as multiples of the recorded rate. */
 const SPEEDS = [0.25, 0.5, 1, 2, 4] as const;
@@ -31,14 +34,6 @@ const CHANNELS = [
 type Props = {
   sessionId: string;
   onClose: () => void;
-};
-
-/** What each stream is called on screen. */
-const KIND_LABELS: Record<PreviewKind, string> = {
-  color: 'colour',
-  depth: 'depth',
-  ir1: 'infrared left',
-  ir2: 'infrared right',
 };
 
 /**
@@ -90,7 +85,7 @@ export const PlayerPanel = ({ sessionId, onClose }: Props) => {
         setIndex(at);
       })
       .catch((cause) =>
-        setError(cause instanceof Error ? cause.message : String(cause)),
+        setError(errorMessage(cause)),
       );
     fetchFrameTimes(sessionId)
       .then((times) => {
@@ -128,7 +123,7 @@ export const PlayerPanel = ({ sessionId, onClose }: Props) => {
       }
       if (!playing) {
         show(clamped).catch((cause) =>
-          setError(cause instanceof Error ? cause.message : String(cause)),
+          setError(errorMessage(cause)),
         );
       }
     },
@@ -139,7 +134,7 @@ export const PlayerPanel = ({ sessionId, onClose }: Props) => {
   useEffect(() => {
     if (!detail || playing) return;
     show(indexRef.current).catch((cause) =>
-      setError(cause instanceof Error ? cause.message : String(cause)),
+      setError(errorMessage(cause)),
     );
   }, [detail, kind, playing, show]);
 
@@ -153,7 +148,7 @@ export const PlayerPanel = ({ sessionId, onClose }: Props) => {
     if (!audio) return;
     audio.playbackRate = speed;
     void audio.play().catch((cause) => {
-      setError(cause instanceof Error ? cause.message : String(cause));
+      setError(errorMessage(cause));
       setPlaying(false);
     });
 
@@ -172,7 +167,7 @@ export const PlayerPanel = ({ sessionId, onClose }: Props) => {
       loading.current = true;
       show(wanted)
         .catch((cause) =>
-          setError(cause instanceof Error ? cause.message : String(cause)),
+          setError(errorMessage(cause)),
         )
         .finally(() => {
           loading.current = false;
@@ -198,7 +193,7 @@ export const PlayerPanel = ({ sessionId, onClose }: Props) => {
           await show(indexRef.current);
         } catch (cause) {
           if (!cancelled) {
-            setError(cause instanceof Error ? cause.message : String(cause));
+            setError(errorMessage(cause));
             setPlaying(false);
           }
           return;
@@ -252,8 +247,7 @@ export const PlayerPanel = ({ sessionId, onClose }: Props) => {
 
   return (
     <section
-      className="panel player"
-      style={{ gridColumn: '1 / -1' }}
+      className="panel player wide"
       ref={panel}
     >
       <h2>
@@ -281,7 +275,7 @@ export const PlayerPanel = ({ sessionId, onClose }: Props) => {
       <div className="player-body">
         <div className="player-view">
           {src ? (
-            <img src={src} alt={KIND_LABELS[kind]} />
+            <img src={src} alt={PREVIEW_LABELS[kind]} />
           ) : (
             <div className="placeholder">loading…</div>
           )}
@@ -323,7 +317,7 @@ export const PlayerPanel = ({ sessionId, onClose }: Props) => {
                 onClick={() => setKind(option)}
                 disabled={option === kind}
               >
-                {KIND_LABELS[option]}
+                {PREVIEW_LABELS[option]}
               </button>
             ))}
             <span className="counter">speed</span>
@@ -364,36 +358,36 @@ export const PlayerPanel = ({ sessionId, onClose }: Props) => {
         </div>
 
         <div className="player-facts rows">
-          <Fact label="length" value={duration(detail?.duration_s)} />
-          <Fact label="frames" value={String(detail?.archive.frames ?? '-')} />
-          <Fact
+          <Row label="length" value={duration(detail?.duration_s)} />
+          <Row label="frames" value={String(detail?.archive.frames ?? '-')} />
+          <Row
             label="fps"
             value={detail?.video?.fps ? detail.video.fps.toFixed(2) : '-'}
           />
-          <Fact label="size" value={bytes(detail?.size_bytes)} />
-          <Fact
+          <Row label="size" value={bytes(detail?.size_bytes)} />
+          <Row
             label="dropped"
             value={String(detail?.video?.dropped ?? '-')}
             tone={detail?.video?.dropped ? 'bad' : 'good'}
           />
-          <Fact
+          <Row
             label="skipped"
             value={String(detail?.video?.skipped_duplicate ?? '-')}
             tone={detail?.video?.skipped_duplicate ? 'warn' : 'good'}
           />
-          <Fact
+          <Row
             label="timestamps"
             value={detail?.video?.timestamp_domain ?? '-'}
             tone={
               detail?.video?.timestamp_domain === 'global_time' ? 'good' : 'bad'
             }
           />
-          <Fact
+          <Row
             label="aligned"
             value={detail?.archive.aligned === undefined ? '-' : String(detail.archive.aligned)}
           />
-          <Fact label="colour" value={detail?.archive.color_format ?? '-'} />
-          <Fact
+          <Row label="colour" value={detail?.archive.color_format ?? '-'} />
+          <Row
             label="inertial"
             value={
               detail?.archive.motion_rate &&
@@ -404,11 +398,11 @@ export const PlayerPanel = ({ sessionId, onClose }: Props) => {
                 : 'none'
             }
           />
-          <Fact
+          <Row
             label="depth codec"
             value={detail?.archive.codecs?.depth ?? '-'}
           />
-          <Fact
+          <Row
             label="audio"
             value={
               detail?.audio
@@ -417,39 +411,18 @@ export const PlayerPanel = ({ sessionId, onClose }: Props) => {
             }
           />
           {detail?.audio?.filled ? (
-            <Fact
+            <Row
               label="audio filled"
               value={`${detail.audio.filled} samples`}
               tone="warn"
             />
           ) : null}
-          <Fact
+          <Row
             label="offset"
-            value={
-              detail?.calibration.offset_s === null ||
-              detail?.calibration.offset_s === undefined
-                ? 'unmeasured'
-                : `${(detail.calibration.offset_s * 1000).toFixed(1)} ms`
-            }
+            value={offset(detail?.calibration.offset_s)}
           />
         </div>
       </div>
     </section>
   );
 };
-
-/** One label-and-value line in the facts column. */
-const Fact = ({
-  label,
-  value,
-  tone,
-}: {
-  label: string;
-  value: string;
-  tone?: 'good' | 'warn' | 'bad';
-}) => (
-  <div className="row">
-    <span className="label">{label}</span>
-    <span className={`value ${tone ?? ''}`}>{value}</span>
-  </div>
-);

@@ -2,6 +2,8 @@ import { useState } from 'react';
 
 import { addMark, setRecording, type RecordingState } from '../lib/api';
 import { bytes, duration, rate } from '../lib/format';
+import { useAction } from '../lib/use-action';
+import { Row } from './row';
 
 type Props = {
   recording: RecordingState;
@@ -9,58 +11,31 @@ type Props = {
   onChanged: () => void;
 };
 
-/** One line of the readout, coloured when the number means something is wrong. */
-const Row = ({
-  label,
-  value,
-  tone,
-}: {
-  label: string;
-  value: string;
-  tone?: 'good' | 'warn' | 'bad';
-}) => (
-  <div className="row">
-    <span className="label">{label}</span>
-    <span className={`value ${tone ?? ''}`}>{value}</span>
-  </div>
-);
-
 /**
  * Start and stop recording, and show what the running session has captured.
  * Loss counts are shown even at zero, so a clean session is visibly clean.
  */
 export const RecordingPanel = ({ recording, writeRate, onChanged }: Props) => {
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const { busy, error, run } = useAction();
   const [name, setName] = useState('');
   const [label, setLabel] = useState('');
   const [lastMark, setLastMark] = useState<string | null>(null);
 
-  const toggle = async () => {
-    setBusy(true);
-    setError(null);
-    try {
+  const toggle = () =>
+    run(async () => {
       await setRecording(!recording.recording, name.trim() || undefined);
       onChanged();
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : String(cause));
-    } finally {
-      setBusy(false);
-    }
-  };
+    });
 
   // The label stays after marking. See docs/features.md "Marks".
   const mark = async () => {
     const text = label.trim();
     if (!text) return;
-    setError(null);
-    try {
+    await run(async () => {
       await addMark(text);
       setLastMark(text);
       onChanged();
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : String(cause));
-    }
+    });
   };
 
   const video = recording.video;

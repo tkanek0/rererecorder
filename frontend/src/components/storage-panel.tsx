@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 
 import { setSessionsDir, type Settings, type StorageStatus } from '../lib/api';
 import { bytes, duration } from '../lib/format';
+import { useAction } from '../lib/use-action';
 
 type Props = {
   storage: StorageStatus;
@@ -21,26 +22,18 @@ export const StoragePanel = ({
   onChanged,
 }: Props) => {
   const [draft, setDraft] = useState(storage.sessions_dir);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const { busy, error, run } = useAction();
 
   // Follow the server's value, except while a change is being applied.
   useEffect(() => {
     if (!busy) setDraft(storage.sessions_dir);
   }, [storage.sessions_dir, busy]);
 
-  const apply = async () => {
-    setBusy(true);
-    setError(null);
-    try {
+  const apply = () =>
+    run(async () => {
       await setSessionsDir(draft.trim());
       onChanged();
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : String(cause));
-    } finally {
-      setBusy(false);
-    }
-  };
+    });
 
   const changed = draft.trim() !== storage.sessions_dir;
   const used =

@@ -13,6 +13,7 @@ import { PlayerPanel } from './components/player-panel';
 import { RecordingPanel } from './components/recording-panel';
 import { SessionList } from './components/session-list';
 import { StoragePanel } from './components/storage-panel';
+import { errorMessage } from './lib/use-action';
 
 /** How often the status is polled, in milliseconds. */
 const POLL_MS = 1000;
@@ -48,7 +49,7 @@ export const App = () => {
         }
       } catch (cause) {
         if (!cancelled) {
-          setOffline(cause instanceof Error ? cause.message : String(cause));
+          setOffline(errorMessage(cause));
         }
       }
     };
@@ -128,7 +129,7 @@ export const App = () => {
           />
         </>
       ) : (
-        <section className="panel" style={{ gridColumn: '1 / -1' }}>
+        <section className="panel wide">
           <p className="note">{offline ?? 'connecting…'}</p>
         </section>
       )}

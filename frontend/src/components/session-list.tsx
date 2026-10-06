@@ -1,7 +1,8 @@
 import { useState } from 'react';
 
 import { deleteSession, type SessionSummary } from '../lib/api';
-import { clockTime, duration } from '../lib/format';
+import { clockTime, duration, offset } from '../lib/format';
+import { useAction } from '../lib/use-action';
 
 type Props = {
   sessions: SessionSummary[];
@@ -23,25 +24,21 @@ export const SessionList = ({
   onDeleted,
 }: Props) => {
   const [confirming, setConfirming] = useState<string | null>(null);
-  const [busy, setBusy] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [deleting, setDeleting] = useState<string | null>(null);
+  const { error, run } = useAction();
 
   const remove = async (sessionId: string) => {
-    setBusy(sessionId);
-    setError(null);
-    try {
+    setDeleting(sessionId);
+    await run(async () => {
       await deleteSession(sessionId);
       onDeleted();
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : String(cause));
-    } finally {
-      setBusy(null);
-      setConfirming(null);
-    }
+    });
+    setDeleting(null);
+    setConfirming(null);
   };
 
   return (
-    <section className="panel" style={{ gridColumn: '1 / -1' }}>
+    <section className="panel wide">
       <h2>sessions</h2>
       {error ? <p className="error">{error}</p> : null}
       {sessions.length === 0 ? (
@@ -83,9 +80,7 @@ export const SessionList = ({
                   <td>{session.audio ? duration(session.audio.seconds) : '-'}</td>
                   <td>
                     {/* Null until scripts/calibrate.py measures it; never shown as 0. */}
-                    {session.calibration.offset_s === null
-                      ? 'unmeasured'
-                      : `${(session.calibration.offset_s * 1000).toFixed(1)} ms`}
+                    {offset(session.calibration.offset_s)}
                   </td>
                   <td className="actions">
                     <button
@@ -100,7 +95,7 @@ export const SessionList = ({
                         <button
                           className="danger"
                           onClick={() => remove(session.session_id)}
-                          disabled={busy !== null}
+                          disabled={deleting !== null}
                         >
                           Delete for good
                         </button>
@@ -111,7 +106,7 @@ export const SessionList = ({
                     ) : (
                       <button
                         onClick={() => setConfirming(session.session_id)}
-                        disabled={live || busy !== null}
+                        disabled={live || deleting !== null}
                       >
                         Delete
                       </button>

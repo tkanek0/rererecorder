@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 
 import {
+  PREVIEW_LABELS,
   audioLevelsUrl,
   previewUrl,
   reconnectDevice,
@@ -15,6 +16,7 @@ import {
   type Settings,
   type StreamName,
 } from '../lib/api';
+import { useAction } from '../lib/use-action';
 
 type Props = {
   devices: Devices;
@@ -23,19 +25,7 @@ type Props = {
   onChanged: () => void;
 };
 
-/** What each camera preview is called on screen. */
-const PREVIEW_LABELS: Record<PreviewKind, string> = {
-  color: 'colour',
-  depth: 'depth',
-  ir1: 'infrared left',
-  ir2: 'infrared right',
-};
-
-const STREAMS: { name: StreamName; label: string }[] = [
-  { name: 'color', label: 'color' },
-  { name: 'depth', label: 'depth' },
-  { name: 'infrared', label: 'infrared' },
-];
+const STREAMS: StreamName[] = ['color', 'depth', 'infrared'];
 
 const CODEC_CHOICES: CodecChoice[] = ['compressed', 'raw'];
 
@@ -127,17 +117,14 @@ const CaptureControls = ({
   recording: boolean;
   onChanged: () => void;
 }) => {
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const { busy, error, run } = useAction();
 
   if (!settings) return null;
   const streams = settings.streams;
   const locked = !settings.writable || recording || busy;
 
-  const toggleStream = async (name: CaptureName) => {
-    setBusy(true);
-    setError(null);
-    try {
+  const toggleStream = (name: CaptureName) =>
+    run(async () => {
       const wanted: Partial<Record<CaptureName, boolean>> = {
         [name]: !streams[name],
       };
@@ -147,36 +134,19 @@ const CaptureControls = ({
       }
       await setStreams(wanted);
       onChanged();
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : String(cause));
-    } finally {
-      setBusy(false);
-    }
-  };
+    });
 
-  const chooseCodec = async (name: StreamName, choice: CodecChoice) => {
-    setBusy(true);
-    setError(null);
-    try {
+  const chooseCodec = (name: StreamName, choice: CodecChoice) =>
+    run(async () => {
       await setCodecs({ [name]: choice });
       onChanged();
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : String(cause));
-    } finally {
-      setBusy(false);
-    }
-  };
+    });
 
   return (
     <div className="capture">
       <div className="rows">
-        {STREAMS.map(({ name, label }) => {
-          const on =
-            name === 'color'
-              ? Boolean(streams.color)
-              : name === 'depth'
-                ? Boolean(streams.depth)
-                : streams.infrared;
+        {STREAMS.map((name) => {
+          const on = Boolean(streams[name]);
           return (
             <div className="row" key={name}>
               <span className="label">
@@ -187,7 +157,7 @@ const CaptureControls = ({
                     disabled={locked || (name === 'infrared' && !streams.depth)}
                     onChange={() => void toggleStream(name)}
                   />{' '}
-                  {label}
+                  {name}
                 </label>
               </span>
               <span className="value">
@@ -263,20 +233,8 @@ const ReconnectButton = ({
   name: DeviceName;
   recording: boolean;
 }) => {
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  const reconnect = async () => {
-    setBusy(true);
-    setError(null);
-    try {
-      await reconnectDevice(name);
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : String(cause));
-    } finally {
-      setBusy(false);
-    }
-  };
+  const { busy, error, run } = useAction();
+  const reconnect = () => run(() => reconnectDevice(name).then(() => undefined));
 
   return (
     <div className="reconnect">

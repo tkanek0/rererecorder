@@ -261,29 +261,6 @@ class MotionSample:
 
 
 @dataclass(frozen=True)
-class Motion:
-    """One sample from the inertial sensors.
-
-    The newest sample of each stream when the frame was assembled, for preview
-    only; recordings store :class:`MotionSample` (docs/decisions.md 12).
-
-    Attributes:
-        accel: Acceleration in m/s^2, including gravity, as (x, y, z).
-        gyro: Angular velocity in rad/s, as (x, y, z).
-    """
-
-    accel: tuple[float, float, float] | None
-    gyro: tuple[float, float, float] | None
-
-    def as_dict(self) -> dict[str, object]:
-        """Return a JSON-serialisable view of this sample."""
-        return {
-            "accel": list(self.accel) if self.accel else None,
-            "gyro": list(self.gyro) if self.gyro else None,
-        }
-
-
-@dataclass(frozen=True)
 class FrameSet:
     """One synchronised set of frames.
 
@@ -313,7 +290,6 @@ class FrameSet:
             ``(left, right)``, each ``(height, width)`` uint8 - or None if they
             were not recorded.
         calibration: Calibration in force for these images.
-        motion: Latest inertial sample, or None if motion is disabled.
         metadata: What the firmware reported about these frames, per stream:
             ``{"depth": {"actual_exposure": 32783, ...}, "color": {...}}``.
             Reading it costs nothing measurable at 30 fps.
@@ -324,7 +300,6 @@ class FrameSet:
     color: np.ndarray | None
     depth: np.ndarray | None
     calibration: Calibration
-    motion: Motion | None
     color_timestamp_ms: float | None = None
     depth_timestamp_ms: float | None = None
     metadata: dict[str, dict[str, int]] | None = None

@@ -247,26 +247,8 @@ def _check_video(
         return None
     try:
         with sqlite3.connect(f"file:{paths.video}?mode=ro", uri=True) as connection:
-            columns = {
-                row[1] for row in connection.execute("PRAGMA table_info(frames)")
-            }
-            # Mirrors ArchiveSource._timestamp_columns across format versions.
-            if "received_monotonic" in columns:
-                monotonic_sql = "received_monotonic"
-            elif "capture_monotonic" in columns and "received_at" in columns:
-                monotonic_sql = "COALESCE(capture_monotonic, received_at)"
-            elif "received_at" in columns:
-                monotonic_sql = "received_at"
-            else:
-                check.fail(
-                    "the archive has no capture-time column, so its frames "
-                    "cannot be placed against the audio"
-                )
-                return None
-            metadata_sql = "metadata" if "metadata" in columns else "NULL"
             rows = connection.execute(
-                f"SELECT idx, {monotonic_sql}, {metadata_sql} FROM frames "
-                "ORDER BY idx"
+                "SELECT idx, received_monotonic, metadata FROM frames ORDER BY idx"
             ).fetchall()
     except sqlite3.Error as error:
         check.fail(f"the archive cannot be read: {error}")
@@ -380,10 +362,6 @@ def count_missing(numbers: list[int]) -> dict[str, int]:
 
 # -- the inertial sensor ------------------------------------------------------
 
-#: Sample rate below which the recording holds one sample per video frame
-#: rather than the sensor's own output (482/478 Hz); see docs/decisions.md 12.
-MIN_IMU_HZ = 100.0
-
 #: How far the magnitude of a still accelerometer may sit from gravity, in
 #: m/s^2, before it is worth remarking on. A moving camera fails it legitimately.
 GRAVITY_TOLERANCE = 0.5
@@ -432,14 +410,6 @@ def _check_imu(
 
     result: dict[str, object] = {"samples": len(samples), "rates": rates}
 
-    for stream, rate in rates.items():
-        if rate < MIN_IMU_HZ:
-            check.note(
-                f"the {stream} stream was recorded at {rate:.0f} Hz, which is "
-                f"video frame rate rather than the sensor's own - this "
-                f"recording holds a fraction of what the IMU measured"
-            )
-
     # Catches a timestamp domain mismatch, which is otherwise self-consistent.
     placed = [
         s.capture_monotonic for s in samples if s.capture_monotonic is not None
@@ -486,7 +456,7 @@ def _check_imu(
             [
                 s.capture_monotonic
                 for s in samples
-                if (s.stream == stream or stream == "both")
+                if s.stream == stream
                 and s.capture_monotonic is not None
                 and (
                     window is None

@@ -93,7 +93,7 @@ reassembly for display.
 
 ## 5. Compress depth with zlib, not PNG16
 
-**Chosen:** `zlib` level 1, with `png16` available.
+**Chosen:** `zlib` level 1, or `raw` (decision 22).
 
 **Why:** measured on 1280x720 depth from this camera, zlib is both faster and
 smaller - 12.2 ms and 580 KB against 24.1 ms and 646 KB. PNG's row predictors
@@ -140,19 +140,17 @@ own pool.
 
 ---
 
-## 8. `format_version 2` and the `.rrdb` suffix
+## 8. A format version that a reader matches exactly, and the `.rrdb` suffix
 
-**Chosen:** bump the version, change the suffix, keep reading v1.
+**Chosen:** `video.rrdb` and `session.json` each carry a `format_version`,
+bumped whenever their layout changes, and a reader opens only its own version.
 
-**Why:** v2 splits colour across three columns and may store depth as zlib, so
-the meaning of existing columns changed. A v1 reader opening one would misread
-it - better that it refuses, which realsense-playground does for any version but
-its own. Keeping `.rsdb` would have invited exactly that mistake.
-
-Note the contrast with `capture_monotonic`, which was **added** without moving
-the version: every reader selects columns by name, so an older one ignores it and
-reads the rest correctly. Bumping there would have broken compatibility in both
-directions to describe a change that harms neither.
+**Why:** a changed layout read by an older reader is misread silently - v2
+split colour across three columns and stored depth as zlib, so the same
+columns meant something else. Refusing is better than guessing, and with no
+backward compatibility to keep (CLAUDE.md, Design principles), refusing is also
+all a reader has to do. The suffix differs from realsense-playground's `.rsdb`
+for the same reason.
 
 ---
 
@@ -251,10 +249,8 @@ version 3, and about 30 KB/s - 0.06% of the video. The samples start up to 0.7 s
 before the first frame and have gaps while the sensor settles; `rrr.inspection`
 looks for gaps only inside the video's own span for that reason.
 
-`FrameSet.motion` still exists, holding the newest buffered sample of each
-stream, because a preview or a quick attitude estimate wants one number per
-frame. It is not written to the archive - storing a fourteenth of the data
-twice - and its docstring says what it is.
+Inertial samples reach a consumer only through the archive's `imu` table and
+`ArchiveSource.motion_samples`; a `FrameSet` carries none.
 
 ---
 
@@ -567,8 +563,7 @@ scalar, plus a value that quietly stopped being more accurate than arrival
 time whenever the domain was not `global_time` - are replaced by
 `color_timestamp_ms`, `depth_timestamp_ms` and `received_monotonic`, the one
 field every set is guaranteed to have and the axis the audio recording is
-also on. The reader still opens v1-v3 files, mapping their columns onto the
-same three names.
+also on.
 
 **Alternatives:** widen the threshold for Windows; keep discarding but stop
 counting it; build a custom colour-primary re-pairing scheme instead of
@@ -682,8 +677,7 @@ budget).
 (mirroring the existing `.root` setter), refusing with `RecorderBusy` while
 recording. `rrr.recorder.config.codec_for(stream, choice)` is the one place
 "compressed" is translated into an actual codec name per stream (`zlib` for
-depth, `png` for colour and infrared - `png16` stays reachable only through
-`RRR_DEPTH_CODEC` for whoever wants it specifically).
+depth, `png` for colour and infrared).
 
 **Alternatives:** a per-recording-start parameter instead of a persistent
 setting (rejected: `sessions_dir` already established the "setting, changed

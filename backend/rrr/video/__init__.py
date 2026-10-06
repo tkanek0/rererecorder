@@ -7,18 +7,7 @@ whose types this package uses but does not re-export. See docs/design.md
 "Module boundaries".
 """
 
-from .archive import LEGACY_SUFFIX as ARCHIVE_LEGACY_SUFFIX
-from .archive import SUFFIX as ARCHIVE_SUFFIX
-from .archive import ArchiveSource, ArchiveWriter, WriterStats, join_yuyv, split_yuyv
+from .archive import ArchiveSource, ArchiveWriter
 from .hub import FrameHub
 
-__all__ = [
-    "ARCHIVE_LEGACY_SUFFIX",
-    "ARCHIVE_SUFFIX",
-    "ArchiveSource",
-    "ArchiveWriter",
-    "FrameHub",
-    "WriterStats",
-    "join_yuyv",
-    "split_yuyv",
-]
+__all__ = ["ArchiveSource", "ArchiveWriter", "FrameHub"]

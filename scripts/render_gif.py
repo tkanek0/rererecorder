@@ -29,7 +29,7 @@ import av.filter
 import cv2
 import numpy as np
 from realsense_adapter import StreamError, color_to_bgr
-from rrr.playback import audio_timeline, frame_times, read_mono, select_audio
+from rrr.playback import audio_timeline, read_mono, select_audio
 from rrr.timeline import AudioTimeline, SessionError, SessionPaths, read_manifest
 from rrr.video import ArchiveSource
 from rrr.visualization import (
@@ -191,12 +191,8 @@ def render(
     output.parent.mkdir(parents=True, exist_ok=True)
 
     with ArchiveSource(paths.video) as archive:
-        times, measured = frame_times(archive, manifest.video.fps)
-        clock_description = (
-            "recorded monotonic video and audio clocks"
-            if measured
-            else "nominal video rate; audio starts at frame zero"
-        )
+        times = archive.frame_times()
+        clock_description = "recorded monotonic video and audio clocks"
         if not times:
             raise ValueError("the video archive is empty")
         start = times[0][1]

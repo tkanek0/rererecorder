@@ -28,7 +28,6 @@ from rrr.playback import (
     Direction,
     audio_timeline,
     direction_at,
-    frame_times,
     in_colour_camera,
     read_directions,
     resample_onto_video,
@@ -159,12 +158,8 @@ def render(
 
     try:
         with ArchiveSource(paths.video) as archive:
-            times, measured = frame_times(archive, manifest.video.fps)
-            clock_description = (
-                "recorded monotonic video and audio clocks"
-                if measured
-                else "nominal video rate; audio starts at frame zero"
-            )
+            times = archive.frame_times()
+            clock_description = "recorded monotonic video and audio clocks"
             if not times:
                 raise ValueError("the video archive is empty")
 

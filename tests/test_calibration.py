@@ -128,7 +128,6 @@ def test_a_recording_can_have_infrared_without_an_inertial_sensor(
         aligned=False,
         infrared=_full().infrared,
         depth_to_infrared=_full().depth_to_infrared,
-        motion=None,
     )
     _write(path, partial, make_frames)
 

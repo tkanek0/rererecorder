@@ -89,7 +89,6 @@ def session(tmp_path: Path, calibration: Calibration) -> SessionPaths:
                     color=None,
                     depth=np.zeros((HEIGHT, WIDTH), np.uint16),
                     calibration=calibration,
-                    motion=None,
                     timestamp_domain="global_time",
                     infrared=(image, image),
                 ),

@@ -74,7 +74,6 @@ def session(tmp_path: Path) -> SessionPaths:
                     depth=None,
                     color_format="rgb8",
                     calibration=calibration,
-                    motion=None,
                     timestamp_domain="global_time",
                 )
             )

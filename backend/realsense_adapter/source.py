@@ -23,7 +23,6 @@ from .types import (
     Extrinsics,
     FrameSet,
     Intrinsics,
-    Motion,
     MotionCalibration,
     MotionIntrinsics,
     MotionSample,
@@ -762,8 +761,6 @@ class LiveSource:
             frame in it had already been delivered. Colour/depth skew never
             discards a set (docs/decisions.md 21).
         """
-        motion = self._latest_motion() if self._config.motion else None
-
         # Taken before the align. Held, not copied, until the checks below
         # pass; librealsense reference-counts the handles.
         infrared_frames: tuple[rs.frame, rs.frame] | None = None
@@ -839,7 +836,6 @@ class LiveSource:
             color=color,
             depth=depth,
             calibration=self.calibration,
-            motion=motion,
             metadata=metadata or None,
             timestamp_domain=self._timestamp_domain,
             color_format=self._config.color_format,
@@ -917,26 +913,6 @@ class LiveSource:
             self._metadata_fields[stream] = known
             logger.debug("%s frames carry %d metadata fields", stream, len(known))
         return known
-
-    def _latest_motion(self) -> Motion | None:
-        """The newest buffered sample of each inertial stream.
-
-        Returns:
-            The pair, or None if nothing has arrived yet. Peeks; never drains.
-        """
-        with self._motion_lock:
-            if not self._motion:
-                return None
-            accel: tuple[float, float, float] | None = None
-            gyro: tuple[float, float, float] | None = None
-            for sample in reversed(self._motion):
-                if accel is None and sample.stream == "accel":
-                    accel = sample.values
-                elif gyro is None and sample.stream == "gyro":
-                    gyro = sample.values
-                if accel is not None and gyro is not None:
-                    break
-        return Motion(accel=accel, gyro=gyro)
 
 
 def list_devices() -> list[DeviceInfo]:

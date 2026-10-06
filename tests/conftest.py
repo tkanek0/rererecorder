@@ -10,7 +10,7 @@ from collections.abc import Callable
 
 import numpy as np
 import pytest
-from realsense_adapter import Calibration, Extrinsics, FrameSet, Intrinsics, Motion
+from realsense_adapter import Calibration, Extrinsics, FrameSet, Intrinsics
 
 #: The D455 at its native depth resolution, measured on the device.
 WIDTH, HEIGHT = 848, 480
@@ -64,7 +64,6 @@ def make_frames(calibration: Calibration) -> Callable[..., FrameSet]:
     def build(
         depth: np.ndarray | None = None,
         color: np.ndarray | None = None,
-        motion: Motion | None = None,
         index: int = 1,
         timestamp_domain: str = "global_time",
         color_format: str = "rgb8",
@@ -75,7 +74,6 @@ def make_frames(calibration: Calibration) -> Callable[..., FrameSet]:
         Args:
             depth: Raw uint16 depth, or None.
             color: Colour image in ``color_format``, or None.
-            motion: Inertial sample, or None.
             index: Frame counter. Also sets the frame's place in time, at 30 fps.
             timestamp_domain: What the timestamp is supposed to mean.
             color_format: ``"rgb8"`` or ``"yuyv"``.
@@ -96,7 +94,6 @@ def make_frames(calibration: Calibration) -> Callable[..., FrameSet]:
             color=color,
             depth=depth,
             calibration=calibration,
-            motion=motion,
             timestamp_domain=timestamp_domain,
             color_format=color_format,
             infrared=infrared,

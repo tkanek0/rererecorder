@@ -1,254 +1,291 @@
 """The archive: what goes in must come out, including when it was taken.
 
-Besides the lossless round trip, ``received_monotonic`` (what audio is compared
-against) and each stream's own timestamp must survive the file.
+Every codec is checked by decoding and comparing, not by trusting the word
+"lossless". See docs/decisions.md 3-5, 8, 12 and 22.
 """
 
 from __future__ import annotations
 
+import json
+import os
 import sqlite3
+import subprocess
+import sys
 from collections.abc import Callable
 from pathlib import Path
 
 import numpy as np
 import pytest
-from realsense_adapter import Calibration, DeviceInfo, FrameSet, Motion, StreamConfig
+from realsense_adapter import (
+    Calibration,
+    DeviceInfo,
+    FrameSet,
+    LiveSource,
+    StreamConfig,
+    StreamError,
+)
+from realsense_adapter.types import MotionSample, color_to_bgr, color_to_rgb
 from rrr.timeline import ClockPair
 from rrr.video import ArchiveSource, ArchiveWriter
+from rrr.video.archive import FORMAT_VERSION, join_yuyv, split_yuyv
 
-from .conftest import ARRIVAL_LAG_S, FPS, HEIGHT, MONO, OFFSET, REAL, WIDTH
+from .conftest import FPS, HEIGHT, MONO, OFFSET, REAL, WIDTH
+
+COMPRESSED = {"depth": "zlib", "color": "png", "infrared": "png"}
+RAW = {"depth": "raw", "color": "raw", "infrared": "raw"}
 
 
-@pytest.fixture
-def written(
+def _write(
+    path: str,
+    calibration: Calibration,
+    frames: list[FrameSet],
+    *,
+    color_format: str = "rgb8",
+    codecs: dict[str, str] | None = None,
+    motion: list[MotionSample] | None = None,
+) -> None:
+    with ArchiveWriter(
+        path,
+        calibration=calibration,
+        config=StreamConfig(color_format=color_format, infrared=True, motion=True),
+        codecs=codecs,
+        device=DeviceInfo(
+            name="Intel RealSense D455",
+            serial="311322302077",
+            firmware="5.17.3.10",
+            usb_type="3.2",
+        ),
+        clock_anchor=ClockPair(MONO, REAL),
+    ) as writer:
+        for frame_set in frames:
+            assert writer.append(frame_set, timeout=10.0)
+        if motion:
+            assert writer.append_motion(motion)
+        assert writer.drain()
+
+
+def _frames(
+    make_frames: Callable[..., FrameSet], color_format: str, count: int = 3
+) -> list[FrameSet]:
+    """Incompressible images, the full 16-bit depth range and an unmeasured band."""
+    rng = np.random.default_rng(0)
+    frames = []
+    for i in range(count):
+        depth = rng.integers(0, 65536, (HEIGHT, WIDTH), dtype=np.uint16)
+        depth[:40] = 0
+        depth[50, 50] = 65535
+        color = (
+            rng.integers(0, 65536, (HEIGHT, WIDTH), dtype=np.uint16)
+            if color_format == "yuyv"
+            else rng.integers(0, 256, (HEIGHT, WIDTH, 3), dtype=np.uint8)
+        )
+        infrared = tuple(
+            rng.integers(0, 256, (HEIGHT, WIDTH), dtype=np.uint8) for _ in range(2)
+        )
+        frame_set = make_frames(
+            index=i + 1,
+            depth=depth,
+            color=color,
+            color_format=color_format,
+            infrared=infrared,
+        )
+        frames.append(
+            FrameSet(
+                **{**frame_set.__dict__, "metadata": {"depth": {"frame_counter": i}}}
+            )
+        )
+    return frames
+
+
+@pytest.mark.parametrize(
+    ("color_format", "codecs"),
+    [("rgb8", COMPRESSED), ("yuyv", COMPRESSED), ("rgb8", RAW), ("yuyv", RAW)],
+)
+def test_every_stream_and_its_time_survive_the_file(
     tmp_path: Path,
     calibration: Calibration,
     make_frames: Callable[..., FrameSet],
-) -> Callable[..., tuple[str, list[FrameSet]]]:
-    """Return a factory that writes frame sets to an archive and closes it."""
-
-    def build(count: int = 5, seed: int = 0, **writer_kwargs):
-        rng = np.random.default_rng(seed)
-        originals = [
-            make_frames(
-                index=i + 1,
-                # Full 16-bit range, an unmeasured band and incompressible
-                # colour, so a quietly lossy codec fails here.
-                depth=np.concatenate(
-                    [
-                        np.zeros((40, WIDTH), np.uint16),
-                        rng.integers(0, 65536, (HEIGHT - 40, WIDTH), dtype=np.uint16),
-                    ]
-                ),
-                color=rng.integers(0, 256, (HEIGHT, WIDTH, 3), dtype=np.uint8),
-                motion=Motion(accel=(0.01 * i, -9.65, -0.94), gyro=(0.1, 0.2, 0.3)),
-            )
-            for i in range(count)
-        ]
-        for frames in originals:
-            frames.depth[10, 10] = 65535
-
-        path = str(tmp_path / "video.rrdb")
-        with ArchiveWriter(
-            path,
-            calibration=calibration,
-            config=StreamConfig(color_format="rgb8"),
-            codecs={"depth": "png16"},
-            device=DeviceInfo(
-                name="Intel RealSense D455",
-                serial="311322302077",
-                firmware="5.17.3.10",
-                usb_type="3.2",
-            ),
-            **writer_kwargs,
-        ) as writer:
-            for frames in originals:
-                assert writer.append(frames, timeout=10.0)
-            assert writer.drain()
-        return path, originals
-
-    return build
-
-
-# -- the time axis ------------------------------------------------------------
-
-
-def test_capture_time_survives_the_file(written) -> None:
-    """The one number the audio can be compared with has to come back exactly."""
-    path, originals = written()
-
-    with ArchiveSource(path) as archive:
-        assert archive.has_monotonic
-        for original, restored in zip(originals, archive.frames(), strict=True):
-            assert restored.received_monotonic == pytest.approx(
-                original.received_monotonic, abs=1e-9
-            )
-
-
-def test_each_streams_own_timestamp_survives(written) -> None:
-    """Checked against MONO + n/30, so a writer storing the wrong column fails."""
-    path, _ = written(count=5)
-
-    with ArchiveSource(path) as archive:
-        for restored in archive.frames():
-            expected_ms = (MONO + restored.index / FPS + OFFSET) * 1000.0
-            assert restored.color_timestamp_ms == pytest.approx(expected_ms, abs=1e-3)
-            assert restored.depth_timestamp_ms == pytest.approx(expected_ms, abs=1e-3)
-
-
-def test_intervals_between_frames_survive(written) -> None:
-    """30 fps in must be 30 fps out, on the monotonic axis."""
-    path, _ = written(count=10)
-
-    with ArchiveSource(path) as archive:
-        times = [frames.received_monotonic for frames in archive.frames()]
-    gaps = np.diff(times)
-    assert gaps == pytest.approx(1.0 / FPS, abs=1e-6)
-
-
-def test_the_domain_and_an_anchor_are_recorded(written) -> None:
-    path, _ = written(clock_anchor=ClockPair(MONO, REAL))
-
-    with ArchiveSource(path) as archive:
-        assert archive.timestamp_domain == "global_time"
-        anchor = archive.clock_anchor
-        assert anchor is not None
-        assert anchor.offset == pytest.approx(OFFSET, abs=1e-6)
-
-
-def test_a_hardware_clock_recording_says_so(
-    tmp_path, calibration, make_frames
+    color_format: str,
+    codecs: dict[str, str],
 ) -> None:
-    """A recording the audio cannot be lined up against must be marked as such."""
     path = str(tmp_path / "video.rrdb")
-    with ArchiveWriter(
-        path, calibration=calibration, config=StreamConfig(color_format="rgb8")
-    ) as writer:
-        frames = make_frames(
-            index=1,
-            depth=np.zeros((HEIGHT, WIDTH), np.uint16),
-            timestamp_domain="hardware_clock",
-        )
-        assert writer.append(frames, timeout=10.0)
-        assert writer.drain()
+    originals = _frames(make_frames, color_format)
+    _write(path, calibration, originals, color_format=color_format, codecs=codecs)
 
     with ArchiveSource(path) as archive:
-        assert archive.timestamp_domain == "hardware_clock"
-        restored = next(archive.frames())
-        # Stored as-is whatever the domain; the domain says the SDK timestamps
-        # compare only with each other.
-        assert restored.received_monotonic == pytest.approx(
-            MONO + 1 / FPS + ARRIVAL_LAG_S, abs=1e-9
-        )
-
-
-# -- the lossless round trip, re-checked after the writer changed -------------
-
-
-def test_depth_survives_exactly(written) -> None:
-    """A depth value that changed is a measurement destroyed."""
-    path, originals = written()
-
-    with ArchiveSource(path) as archive:
-        for original, restored in zip(originals, archive.frames(), strict=True):
-            assert np.array_equal(original.depth, restored.depth)
-
-
-def test_colour_survives_exactly(written) -> None:
-    path, originals = written()
-
-    with ArchiveSource(path) as archive:
-        for original, restored in zip(originals, archive.frames(), strict=True):
-            assert np.array_equal(original.color, restored.color)
-
-
-def test_metadata_survives(written) -> None:
-    path, originals = written()
-
-    with ArchiveSource(path) as archive:
-        for original, restored in zip(originals, archive.frames(), strict=True):
-            assert restored.metadata == original.metadata
-
-
-def test_a_frames_own_motion_is_not_stored(written) -> None:
-    """FrameSet.motion is a per-frame convenience; inertial data goes to `imu`."""
-    path, _ = written()
-
-    with ArchiveSource(path) as archive:
-        assert next(archive.frames()).motion is None
-        assert list(archive.motion_samples()) == []
-
-
-def test_calibration_and_device_survive(written, calibration) -> None:
-    path, _ = written()
-
-    with ArchiveSource(path) as archive:
-        assert archive.calibration.as_dict() == calibration.as_dict()
-        assert archive.device.serial == "311322302077"
-
-
-# -- compatibility, both ways -------------------------------------------------
-
-
-def test_an_upstream_archive_without_the_new_columns_still_reads(written) -> None:
-    """An upstream or v1-v3 file lacks the newer timing columns but still opens."""
-    path, originals = written(count=3)
-
-    # Rebuild as the upstream writer left it: v1, old columns, no codec record.
-    with sqlite3.connect(path) as connection:
-        connection.executescript(
-            """
-            CREATE TABLE old AS
-                SELECT idx, depth_timestamp_ms AS timestamp_ms,
-                       received_monotonic AS received_at, depth, color, metadata
-                FROM frames;
-            DROP TABLE frames;
-            ALTER TABLE old RENAME TO frames;
-            """
-        )
-        connection.execute("UPDATE meta SET value = '1' WHERE key = 'format_version'")
-        connection.execute("DELETE FROM meta WHERE key = 'codecs'")
-
-    with ArchiveSource(path) as archive:
-        # received_at alone still places a frame against audio.
-        assert archive.has_monotonic is True
         restored = list(archive.frames())
+        assert archive.meta["format_version"] == FORMAT_VERSION
+        assert archive.meta["codecs"] == codecs
+        assert archive.calibration.as_dict() == calibration.as_dict()
+        assert archive.device is not None and archive.device.serial == "311322302077"
+        assert archive.timestamp_domain == "global_time"
+        assert archive.clock_anchor is not None
+        assert archive.clock_anchor.offset == pytest.approx(OFFSET, abs=1e-6)
+        assert archive.frame_times() == [
+            (f.index, pytest.approx(f.received_monotonic, abs=1e-9)) for f in originals
+        ]
+        assert list(archive.motion_samples()) == []
+        assert archive.motion_rate() == {}
 
-    assert len(restored) == 3
-    assert np.array_equal(restored[0].depth, originals[0].depth)
-    assert restored[0].color_timestamp_ms is None
-    assert restored[0].depth_timestamp_ms is None
-    # Without the newer columns, arrival time is the best answer.
-    assert restored[0].received_monotonic == pytest.approx(
-        originals[0].received_monotonic, abs=1e-9
-    )
+    for original, back in zip(originals, restored, strict=True):
+        assert back.received_monotonic == pytest.approx(
+            original.received_monotonic, abs=1e-9
+        )
+        expected_ms = (MONO + back.index / FPS + OFFSET) * 1000.0
+        assert back.color_timestamp_ms == pytest.approx(expected_ms, abs=1e-3)
+        assert back.depth_timestamp_ms == pytest.approx(expected_ms, abs=1e-3)
+        assert back.color_format == color_format
+        assert np.array_equal(back.depth, original.depth)
+        assert np.array_equal(back.color, original.color)
+        assert back.infrared is not None and original.infrared is not None
+        assert np.array_equal(back.infrared[0], original.infrared[0])
+        assert np.array_equal(back.infrared[1], original.infrared[1])
+        assert back.metadata == original.metadata
 
-
-def test_written_files_declare_the_current_version(written) -> None:
-    """Each version changed what a structure means, so old readers refuse it.
-
-    See docs/decisions.md 8, 12 and 21.
-    """
-    path, _ = written()
-    with ArchiveSource(path) as archive:
-        assert archive.meta["format_version"] == 4
-
-
-def test_the_file_is_readable_as_plain_sql(written) -> None:
-    """No SDK, no library: the container is SQLite and stays inspectable."""
-    path, originals = written(count=4)
-
+    # No SDK, no library: the container is SQLite and stays inspectable.
     with sqlite3.connect(f"file:{path}?mode=ro", uri=True) as connection:
         rows = connection.execute(
-            "SELECT idx, color_timestamp_ms, depth_timestamp_ms, received_monotonic "
-            "FROM frames ORDER BY idx"
+            "SELECT idx, received_monotonic FROM frames ORDER BY idx"
         ).fetchall()
+    assert [row[0] for row in rows] == [f.index for f in originals]
 
-    assert len(rows) == 4
-    for (idx, color_ms, depth_ms, monotonic), original in zip(
-        rows, originals, strict=True
-    ):
-        assert idx == original.index
-        assert color_ms == pytest.approx(original.color_timestamp_ms)
-        assert depth_ms == pytest.approx(original.depth_timestamp_ms)
-        assert monotonic == pytest.approx(original.received_monotonic)
+
+def test_one_stream_can_be_read_alone(
+    tmp_path: Path, calibration: Calibration, make_frames: Callable[..., FrameSet]
+) -> None:
+    path = str(tmp_path / "video.rrdb")
+    originals = _frames(make_frames, "rgb8", count=2)
+    _write(path, calibration, originals)
+
+    with ArchiveSource(path) as archive:
+        depth_only = archive.frame_at(2, only="depth")
+        assert archive.frame_at(99) is None
+        assert archive.bounds() == (
+            1,
+            2,
+            pytest.approx(originals[0].received_monotonic),
+            pytest.approx(originals[1].received_monotonic),
+        )
+    assert depth_only is not None
+    assert np.array_equal(depth_only.depth, originals[1].depth)
+    assert depth_only.color is None and depth_only.infrared is None
+
+
+def test_every_inertial_sample_survives_and_is_placed_on_the_clock(
+    tmp_path: Path, calibration: Calibration, make_frames: Callable[..., FrameSet]
+) -> None:
+    """480 Hz in, 480 Hz out, on the audio's axis. See docs/decisions.md 12."""
+    start_ms = (REAL + 1.0) * 1000.0
+    samples = [
+        MotionSample(stream, start_ms + n * 1000.0 / rate, 0.01 * n, -9.63, -0.91)
+        for n in range(500)
+        for stream, rate in (("accel", 482.0), ("gyro", 478.0))
+    ]
+    path = str(tmp_path / "video.rrdb")
+    _write(path, calibration, _frames(make_frames, "rgb8", count=1), motion=samples)
+
+    with ArchiveSource(path) as archive:
+        restored = list(archive.motion_samples())
+        rates = archive.motion_rate()
+
+    assert len(restored) == 1000
+    accel = [s for s in restored if s.stream == "accel"]
+    assert accel[7].x == pytest.approx(0.07) and accel[7].y == pytest.approx(-9.63)
+    assert accel[0].capture_monotonic == pytest.approx(
+        accel[0].timestamp_ms / 1000.0 - OFFSET, abs=1e-6
+    )
+    assert rates == {
+        "accel": pytest.approx(482.0, rel=0.01),
+        "gyro": pytest.approx(478.0, rel=0.01),
+    }
+
+
+@pytest.mark.parametrize("stream", ["depth", "color", "infrared"])
+def test_an_unknown_codec_is_refused(
+    tmp_path: Path, calibration: Calibration, stream: str
+) -> None:
+    with pytest.raises(ValueError, match=f"{stream} codec"):
+        ArchiveWriter(
+            str(tmp_path / "x.rrdb"),
+            calibration=calibration,
+            config=StreamConfig(),
+            codecs={stream: "jpeg"},
+        )
+
+
+def test_a_file_it_cannot_read_is_refused_rather_than_guessed(
+    tmp_path: Path, calibration: Calibration, make_frames: Callable[..., FrameSet]
+) -> None:
+    """Another format version, or a shapeless blob with no calibration to shape it."""
+    path = str(tmp_path / "video.rrdb")
+    _write(path, calibration, _frames(make_frames, "rgb8", count=1))
+
+    with sqlite3.connect(path) as connection:
+        raw = json.loads(
+            connection.execute(
+                "SELECT value FROM meta WHERE key = 'calibration'"
+            ).fetchone()[0]
+        )
+        raw["depth"] = None
+        connection.execute(
+            "UPDATE meta SET value = ? WHERE key = 'calibration'", (json.dumps(raw),)
+        )
+    with ArchiveSource(path) as archive, pytest.raises(StreamError, match="shape"):
+        next(archive.frames())
+
+    with sqlite3.connect(path) as connection:
+        connection.execute(
+            "UPDATE meta SET value = ? WHERE key = 'format_version'",
+            (str(FORMAT_VERSION - 1),),
+        )
+    with pytest.raises(StreamError, match="format version"):
+        ArchiveSource(path).open()
+
+
+def test_the_yuyv_split_separates_luma_from_chroma_and_is_inverse() -> None:
+    # Y=1, U=2 and Y=3, V=4 in successive pixels.
+    y, u, v = split_yuyv(np.array([[0x0201, 0x0403]], dtype=np.uint16))
+    assert (y.tolist(), u.tolist(), v.tolist()) == ([[1, 3]], [[2]], [[4]])
+
+    color = np.random.default_rng(0).integers(0, 65536, (48, 424), dtype=np.uint16)
+    assert np.array_equal(join_yuyv(*split_yuyv(color)), color)
+
+
+def test_colour_conversions_agree_across_recorded_formats(
+    make_frames: Callable[..., FrameSet],
+) -> None:
+    """YUYV and RGB recordings of the same grey come out the same, in either order."""
+    # Y=128 with neutral chroma: grey 130, since YUYV is BT.601 video range.
+    yuyv = np.full((2, 4), 0x8080, dtype=np.uint16)
+    rgb = np.full((2, 4, 3), 130, dtype=np.uint8)
+    from_yuyv = make_frames(color=yuyv, color_format="yuyv")
+    from_rgb = make_frames(color=rgb)
+
+    assert color_to_rgb(from_rgb) is rgb
+    for convert in (color_to_bgr, color_to_rgb):
+        a, b = convert(from_yuyv), convert(from_rgb)
+        assert a is not None and b is not None
+        assert a.shape == (2, 4, 3) and np.abs(a.astype(int) - b).max() <= 1
+    assert color_to_bgr(make_frames(color=None)) is None
+    assert color_to_rgb(make_frames(color=None)) is None
+
+
+def test_startup_discards_are_counted_apart_from_losses() -> None:
+    """A duplicate before the first delivery is the syncer settling, not a fault."""
+    source = LiveSource(StreamConfig())
+    source._count_skip()
+    assert (source.skipped_warmup, source.skipped_duplicate) == (1, 0)
+    source._index = 1
+    source._count_skip()
+    assert (source.skipped_warmup, source.skipped_duplicate) == (1, 1)
+
+
+def test_the_adapter_imports_nothing_from_rrr_and_ignores_the_environment() -> None:
+    """The camera stays usable without the recorder; rrr passes settings in."""
+    code = (
+        "import sys, realsense_adapter as a;"
+        "assert not [m for m in sys.modules if m == 'rrr' or m.startswith('rrr.')];"
+        "assert a.DEFAULT_EMITTER == 'on' and a.StreamConfig().emitter == 'on'"
+    )
+    env = {**os.environ, "RRR_EMITTER": "off"}
+    subprocess.run([sys.executable, "-c", code], check=True, env=env)

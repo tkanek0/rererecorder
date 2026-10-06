@@ -139,7 +139,6 @@ def session(tmp_path: Path) -> SessionPaths:
                     color_format="yuyv",
                     depth=rng.integers(0, 4000, (HEIGHT, WIDTH), dtype=np.uint16),
                     calibration=calibration,
-                    motion=None,
                     timestamp_domain="global_time",
                     metadata={
                         "color": {"actual_exposure": 100 + n},
@@ -521,7 +520,6 @@ def test_a_session_with_only_video_exports(tmp_path) -> None:
                 depth_timestamp_ms=REAL * 1000.0,
                 received_monotonic=MONO,
                 color=None,
-                motion=None,
                 depth=np.zeros((HEIGHT, WIDTH), np.uint16),
                 calibration=calibration,
                 timestamp_domain="global_time",

@@ -9,8 +9,9 @@ from dataclasses import replace
 import inspect_session as inspect_cli
 import numpy as np
 from realsense_adapter import Calibration, FrameSet, StreamConfig
+from rrr.inspection import inspect_session
 from rrr.inspection.checks import Check, _check_video, count_missing
-from rrr.timeline import SessionManifest, SessionPaths, VideoTrack
+from rrr.timeline import SessionManifest, SessionPaths, VideoTrack, read_manifest
 from rrr.video import ArchiveWriter
 
 from .conftest import HEIGHT, WIDTH
@@ -100,3 +101,18 @@ def test_the_script_reports_a_whole_session_as_json(session, capsys) -> None:  #
     assert report["session_id"] == session.session_id
     assert report["video"]["frames"] == FRAMES
     assert status == (1 if report["problems"] else 0)
+
+
+def test_a_session_the_recorder_flagged_does_not_pass(session) -> None:  # noqa: F811
+    """What the recorder knew went wrong must not read as "every check agreed"."""
+    manifest = read_manifest(session)
+    assert inspect_session(session, manifest).doa["readings"] > 0
+
+    open(session.doa, "w").close()
+    flagged = replace(manifest, errors=["video: no frames within 15s"])
+    problems = inspect_session(session, flagged).problems
+    assert "the recorder reported: video: no frames within 15s" in problems
+    assert "the direction was recorded and holds no readings" in problems
+
+    empty = SessionManifest(session_id=manifest.session_id)
+    assert "neither device was recorded" in inspect_session(session, empty).problems

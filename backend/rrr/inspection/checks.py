@@ -114,11 +114,12 @@ def inspect_session(paths: SessionPaths, manifest: SessionManifest) -> Inspectio
         The findings. Every check runs before anything is judged.
     """
     check = Check()
+    _check_recorded(manifest, check)
     audio = _check_audio(paths, manifest, check)
     video = _check_video(paths, manifest, check)
     imu = _check_imu(paths, manifest, video, check)
     overlap = _check_overlap(audio, video, manifest, check)
-    doa = _check_doa(paths, audio, check)
+    doa = _check_doa(paths, manifest, audio, check)
     marks = _check_events(paths, audio, video, check)
     return Inspection(
         session_id=manifest.session_id,
@@ -131,6 +132,19 @@ def inspect_session(paths: SessionPaths, manifest: SessionManifest) -> Inspectio
         problems=check.problems,
         notes=check.notes,
     )
+
+
+def _check_recorded(manifest: SessionManifest, check: Check) -> None:
+    """Fail a session whose recorder said something went wrong, or that is empty."""
+    if manifest.video is None and manifest.audio is None:
+        check.fail("neither device was recorded")
+    for error in manifest.errors:
+        check.fail(f"the recorder reported: {error}")
+
+
+def _outside(times: list[float], first: float, last: float, slack: float) -> int:
+    """How many of ``times`` fall more than ``slack`` outside ``[first, last]``."""
+    return sum(1 for t in times if t < first - slack or t > last + slack)
 
 
 # -- audio --------------------------------------------------------------------
@@ -417,13 +431,11 @@ def _check_imu(
     if not placed:
         check.fail("inertial samples carry no clock, so they cannot be placed")
     elif video is not None and "first_monotonic" in video:
-        slack = 2.0
         first, last = min(placed), max(placed)
         result["first_monotonic"] = first
         result["last_monotonic"] = last
-        if (
-            first < video["first_monotonic"] - slack
-            or last > video["last_monotonic"] + slack
+        if _outside(
+            [first, last], video["first_monotonic"], video["last_monotonic"], 2.0
         ):
             check.fail(
                 f"inertial samples span {last - first:.1f} s but sit outside "
@@ -522,24 +534,31 @@ def _check_overlap(
 
 
 def _check_doa(
-    paths: SessionPaths, audio: dict[str, object] | None, check: Check
+    paths: SessionPaths,
+    manifest: SessionManifest,
+    audio: dict[str, object] | None,
+    check: Check,
 ) -> dict[str, object] | None:
-    """Check the direction sidecar's times land inside the audio.
+    """Check the direction was recorded, and that its times land inside the audio.
 
     Args:
         paths: Where the session lives.
+        manifest: What the recorder said.
         audio: What the audio check measured.
         check: Where findings go.
 
     Returns:
-        What was measured, or None if there is no direction track.
+        What was measured, or None if no direction was recorded.
     """
+    if not manifest.doa:
+        return None
     try:
         with open(paths.doa, encoding="utf-8") as handle:
             times = [json.loads(line)["t"] for line in handle if line.strip()]
     except OSError:
-        return None
+        times = []
     if not times:
+        check.fail("the direction was recorded and holds no readings")
         return {"readings": 0}
 
     result: dict[str, object] = {
@@ -550,13 +569,9 @@ def _check_doa(
             (len(times) - 1) / (times[-1] - times[0]) if times[-1] > times[0] else None
         ),
     }
+    # Outside the audio would mean the two are on different clocks.
     if audio is not None and "first_monotonic" in audio:
-        # Outside the audio would mean the two are on different clocks.
-        slack = 1.0
-        if (
-            times[0] < audio["first_monotonic"] - slack
-            or times[-1] > audio["last_monotonic"] + slack
-        ):
+        if _outside(times, audio["first_monotonic"], audio["last_monotonic"], 1.0):
             check.fail(
                 "direction readings fall outside the audio they are supposed to "
                 "describe"
@@ -605,9 +620,7 @@ def _check_events(
     if bounds:
         first = min(float(track["first_monotonic"]) for track in bounds)
         last = max(float(track["last_monotonic"]) for track in bounds)
-        outside = [t for t in times if t < first or t > last]
+        outside = _outside(times, first, last, 0.0)
         if outside:
-            check.fail(
-                f"{len(outside)} of {len(times)} marks fall outside the recording"
-            )
+            check.fail(f"{outside} of {len(times)} marks fall outside the recording")
     return result

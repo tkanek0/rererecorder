@@ -227,6 +227,10 @@ goes back to zero is a stream that restarted mid-recording. Both fail the
 check. Without UVC metadata the counter is the host's own and proves nothing,
 so the losses are reported as not counted rather than as zero.
 
+What the recorder itself knew went wrong is not left to the files to reveal:
+every entry in `session.json`'s `errors` fails the check, as does a session
+with neither device or a direction track with no readings.
+
 ## Reading a recording
 
 ```python

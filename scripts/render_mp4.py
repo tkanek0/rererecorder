@@ -245,8 +245,8 @@ def _encode(
         video_stream.height = height
         video_stream.pix_fmt = "yuv420p"
         video_stream.time_base = VIDEO_TIME_BASE
-        # x264 quantises PTS to the codec time base; at 1/fps, ordinary frame
-        # jitter (31/47 ms) collapses two frames onto one DTS, which MP4 rejects.
+        # x264 quantises PTS to the codec time base; at 1/fps, frame jitter
+        # collapses two frames onto one DTS, which MP4 rejects.
         video_stream.codec_context.time_base = VIDEO_TIME_BASE
         video_stream.options = {"crf": str(crf), "preset": "medium"}
         audio_stream = None

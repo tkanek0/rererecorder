@@ -50,7 +50,7 @@ export type StreamConfig = {
 export type VideoState = {
   frames: number;
   dropped: number;
-  /** Inertial samples written - about 960 a second, against 30 frames. */
+  /** Inertial samples written. */
   motion: number;
   motion_overrun: number;
   skipped_duplicate: number;

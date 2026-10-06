@@ -93,7 +93,7 @@ async def _poll(
 
 @router.get("/stream/{kind}.mjpg")
 def stream(kind: str, request: Request) -> StreamingResponse:
-    """Serve one stream as MJPEG, at most 15 Hz idle and 10 Hz while recording.
+    """Serve one stream as MJPEG, at the preview rate caps in :mod:`.config`.
 
     Args:
         kind: ``color``, ``depth``, ``ir1`` or ``ir2``.
@@ -101,8 +101,6 @@ def stream(kind: str, request: Request) -> StreamingResponse:
 
     Raises:
         HTTPException: 404 for an unknown stream.
-
-    The caps are measured in docs/windows-native.md "A devices panel".
     """
     kind = requested_kind(kind)
     width = requested_width(request.query_params)

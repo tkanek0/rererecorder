@@ -7,8 +7,7 @@ settled: docs/decisions.md 22.
     uv run python scripts/sqlite_write_benchmark.py
     uv run python scripts/sqlite_write_benchmark.py --dir data/ --frames 3600
 
-No device needed. Not part of `pytest`: the answer is about the disk, not the
-code.
+Not part of `pytest`: the answer is about the disk, not the code.
 """
 
 from __future__ import annotations

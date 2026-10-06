@@ -1,9 +1,8 @@
 """The ``.rrdb`` recording format: SQLite holding losslessly compressed frames.
 
 Stores pixels, calibration, stream configuration, sensor options, inertial
-samples and per-frame metadata. Lossless codecs instead of rosbag2's raw pixels:
-220 GB/hour for colour and depth at 848x480/30 there, about 91 GB/hour here.
-See docs/features.md "Recording" and docs/decisions.md 4, 5, 8, 22.
+samples and per-frame metadata. See docs/features.md "Recording" and
+docs/decisions.md 4, 5, 8, 22.
 """
 
 from __future__ import annotations
@@ -44,8 +43,7 @@ logger = logging.getLogger(__name__)
 #: Bumped whenever the schema changes; a reader opens only its own version.
 FORMAT_VERSION = 4
 
-#: PNG effort. Level 1: 13 ms depth, 19 ms colour; level 6 saves 17% at three
-#: times the time, which 30 fps cannot afford.
+#: PNG effort: the fastest level, as 30 fps allows no more (docs/decisions.md 22).
 PNG_LEVEL = 1
 
 #: Each stream's compressed codec; ``"raw"`` is the alternative for each
@@ -538,8 +536,7 @@ def _motion_calibration(raw: dict[str, Any] | None) -> MotionCalibration | None:
     """Rebuild the inertial calibration from its stored form.
 
     Args:
-        raw: The stored mapping, or None for an archive written before the
-            inertial calibration was recorded.
+        raw: The stored mapping, or None if motion was not recorded.
 
     Returns:
         The calibration, or None if the archive has none.
@@ -555,7 +552,7 @@ def _motion_calibration(raw: dict[str, Any] | None) -> MotionCalibration | None:
 
 
 def _pair(raw: Any, build) -> tuple[Any, Any]:
-    """Rebuild a left/right pair that older archives do not carry."""
+    """Rebuild a left/right pair, or ``(None, None)`` if none was stored."""
     if not isinstance(raw, (list, tuple)) or len(raw) != 2:
         return (None, None)
     return (build(raw[0]), build(raw[1]))
@@ -720,7 +717,7 @@ class ArchiveSource:
             index: The archive's own ``idx``, as :meth:`bounds` reports the
                 range of.
             only: Decode just one stream - ``"depth"``, ``"color"`` or
-                ``"infrared"`` - leaving the rest None (11 ms instead of 30).
+                ``"infrared"`` - leaving the rest None.
 
         Returns:
             The set, or None if there is no frame with that index.

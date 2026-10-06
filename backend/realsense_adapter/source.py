@@ -133,8 +133,8 @@ def _motion_intrinsics(profile: rs.stream_profile) -> MotionIntrinsics | None:
     )
 
 
-#: Every metadata field the SDK defines. A stream supports a subset (22 on a
-#: D455's depth), probed once per stream and cached.
+#: Every metadata field the SDK defines. A stream supports a subset, probed
+#: once per stream and cached.
 _METADATA_FIELDS = tuple(rs.frame_metadata_value.__members__.values())
 
 
@@ -470,8 +470,7 @@ class LiveSource:
     def options(self) -> dict[str, float]:
         """Read every sensor option the device exposes, with its current value.
 
-        48 values on a D455, costing 14 ms: read once per recording, not per
-        frame.
+        Read once per recording, not per frame.
 
         Returns:
             ``"Sensor Name/option_name"`` to value. Options that refuse to be
@@ -504,8 +503,7 @@ class LiveSource:
         Args:
             profile: The started pipeline's profile, for the device.
 
-        A failure is logged and swallowed, so video still records. Opens each
-        stream at its highest offered rate (400 Hz nominal on a D455).
+        A failure is logged and swallowed, so video still records.
         """
         try:
             sensor = next(
@@ -624,8 +622,8 @@ class LiveSource:
         Args:
             profile: The started pipeline's profile.
 
-        Already on by default (librealsense 2.58.3, D455) but set explicitly
-        in case something turned it off. A failure is logged, not raised.
+        Set explicitly in case something turned it off. A failure is logged,
+        not raised.
         """
         for sensor in profile.get_device().query_sensors():
             name = sensor.get_info(rs.camera_info.name)

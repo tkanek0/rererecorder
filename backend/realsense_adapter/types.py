@@ -292,7 +292,6 @@ class FrameSet:
         calibration: Calibration in force for these images.
         metadata: What the firmware reported about these frames, per stream:
             ``{"depth": {"actual_exposure": 32783, ...}, "color": {...}}``.
-            Reading it costs nothing measurable at 30 fps.
     """
 
     index: int

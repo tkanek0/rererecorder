@@ -84,7 +84,7 @@ def read_clocks() -> ClockPair:
     """Read both host clocks, bounding how far apart the readings were taken.
 
     The realtime read sits between two monotonic reads; their midpoint is kept
-    and their gap (typically under 10 us) becomes ``uncertainty``.
+    and their gap becomes ``uncertainty``.
 
     Returns:
         The pair.

@@ -203,9 +203,8 @@ const CaptureControls = ({
 };
 
 /**
- * An `<img>` showing an MJPEG stream, which closes the stream on unmount.
- * Chrome keeps a removed `<img>`'s multipart connection open, and leaked ones
- * exhaust its six-per-host limit; clearing `src` in the effect cleanup closes it.
+ * An `<img>` showing an MJPEG stream, which closes the stream on unmount:
+ * Chrome keeps a removed `<img>`'s connection open, against a per-host limit.
  */
 const LiveImage = ({ src, alt }: { src: string; alt: string }) => {
   const image = useRef<HTMLImageElement>(null);

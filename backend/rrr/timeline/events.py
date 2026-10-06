@@ -1,8 +1,7 @@
 """Marks made by a person while a session was recording.
 
-JSON lines (:class:`~rrr.timeline.jsonl.JsonlWriter`), flushed on every write. **A mark is accurate to a person's
-reaction time, not to a sample**: never align against it. See
-docs/decisions.md 16.
+JSON lines, flushed on every write. A mark is accurate to a person's reaction
+time, not to a sample: never align against it. See docs/decisions.md 16.
 """
 
 from __future__ import annotations

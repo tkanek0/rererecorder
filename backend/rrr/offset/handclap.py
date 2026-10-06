@@ -201,7 +201,6 @@ def _find_claps(paths: SessionPaths) -> list[float]:
     if not len(samples):
         return []
 
-    # Channel 0 is the processed one; the raw microphones are what clap.
     channels = samples.shape[1]
     mics = samples[:, list(CHANNEL_MICS)] if channels > max(CHANNEL_MICS) else samples
     signal = np.abs(mics.astype(np.float32)).mean(axis=1)

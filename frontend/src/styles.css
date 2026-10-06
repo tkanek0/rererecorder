@@ -75,10 +75,8 @@ header .sub {
   display: grid;
   gap: 10px;
   grid-template-columns: 1fr 1fr;
-  /* Without this, a grid track sized 1fr still refuses to shrink an <img>
-     below its intrinsic width (a replaced element's default min-width is
-     "auto", not 0) - which is what let two 640px previews overflow the
-     page instead of scaling down to fit their column. */
+  /* A replaced element's min-width is "auto", so a 1fr track would not
+     shrink an <img> below its intrinsic width. */
   min-width: 0;
 }
 
@@ -244,15 +242,12 @@ th {
 
 /* -- devices ----------------------------------------------------------- */
 
-/* Spans the row height of Recording+Storage stacked beside it in the other
-   column, so the layout reads as one row (Devices | Recording/Storage) above
-   Sessions, rather than the three interleaving. */
+/* Spans Recording and Storage stacked in the other column. */
 .panel.devices {
   grid-row: span 2;
 }
 
-/* RealSense above ReSpeaker, each as wide as the panel - not side by side,
-   which left both squeezed into less than half the available width. */
+/* RealSense above ReSpeaker, each as wide as the panel. */
 .device-grid {
   display: grid;
   gap: 12px;
@@ -269,8 +264,7 @@ th {
   padding: 12px 16px;
 }
 
-/* The capture controls describe the whole device, not just its info column -
-   a third row spanning both, set off from the identity/preview row above. */
+/* The capture controls span the whole card, as a row of their own. */
 .device-card .capture {
   grid-column: 1 / -1;
   margin-top: 4px;
@@ -297,9 +291,7 @@ th {
   grid-template-columns: 1fr 1fr;
 }
 
-/* The mic radial is a fixed-aspect diagram, not an image filling a frame -
-   centering it in flex rather than stretching it is what keeps it from
-   reading as "a small icon lost in a lot of empty space". */
+/* The mic radial is a fixed-aspect diagram: centred, not stretched. */
 .device-card .visual:not(.previews) {
   display: flex;
   justify-content: center;
@@ -363,8 +355,7 @@ button.close {
   border-radius: 4px;
   aspect-ratio: 16 / 10;
   object-fit: contain;
-  /* Bounded by the window, not by the frame: at 960 px wide the 16:10 box is
-     600 px tall, which pushed the transport controls off screen. */
+  /* Bounded by the window so the transport controls stay on screen. */
   max-height: 50vh;
 }
 

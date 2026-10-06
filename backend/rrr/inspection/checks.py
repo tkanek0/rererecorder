@@ -33,12 +33,11 @@ LENGTH_TOLERANCE_MS = 16.0
 RATE_WARN_PPM = 100.0
 
 #: Residual past which the audio time axis is not a straight line, in
-#: milliseconds. Measured jitter is 0.03 ms rms on Linux, so 1 ms is 30x that.
+#: milliseconds; far above the ADC timestamps' own jitter. See docs/decisions.md 26.
 RESIDUAL_WARN_MS = 1.0
 
 #: Shortest recording whose fitted sample rate is worth reporting, in seconds.
-#: Measured: 4 s sessions fitted +51, +11 and +15 ppm and a 10 s one -14 ppm -
-#: scatter from the short fit, not the crystal.
+#: Shorter fits scatter by tens of ppm, which is the fit, not the crystal.
 MIN_RATE_SPAN_S = 30.0
 
 
@@ -322,8 +321,8 @@ def _check_video(
                 f"of frames at each"
             )
     if not missing:
-        # Without UVC metadata the SDK's counter is the host's own, and gapless
-        # by construction: docs/windows-native.md, "The actual fix".
+        # Without UVC metadata the counter is the host's own: docs/features.md
+        # "The command line".
         check.note(
             "no device frame counters, so frames lost before the recorder are "
             "not counted"
@@ -456,8 +455,8 @@ def _check_imu(
                 f"not"
             )
 
-    # Only inside the video's span: the sensor's start-up gaps (12-70 ms,
-    # measured) all fall before the first frame. See docs/decisions.md 12.
+    # Only inside the video's span, past the sensor's start-up gaps. See
+    # docs/decisions.md 12.
     window = (
         (video["first_monotonic"], video["last_monotonic"])
         if video is not None and "first_monotonic" in video

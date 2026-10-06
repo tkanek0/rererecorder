@@ -22,8 +22,8 @@ from rrr.timeline import AudioClockPoint, JsonlWriter
 logger = logging.getLogger(__name__)
 
 #: How far capture time may run past what the samples account for before it is
-#: called a gap, in blocks. Far above the measured 0.35 ms ADC jitter, and below
-#: the smallest real gap: a driver drops whole callbacks, so at least one block.
+#: called a gap, in blocks: above the ADC timestamps' jitter (~0.35 ms), below
+#: the smallest real gap, since a driver drops whole callbacks.
 GAP_THRESHOLD_BLOCKS = 0.5
 
 #: Seconds between clock points in the ordinary case. Every gap gets a point

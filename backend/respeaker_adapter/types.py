@@ -15,7 +15,7 @@ import numpy as np
 from . import config
 
 #: Below this a signal is silence rather than a level; well under the raw
-#: microphones' noise floor (about -45 dBFS in a quiet room).
+#: microphones' noise floor.
 SILENCE = 1e-7
 
 

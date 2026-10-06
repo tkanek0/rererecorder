@@ -665,7 +665,7 @@ pointed at.
 | `cpu-diag` | colour + depth + infrared, compressed (`png`/`zlib`, the defaults) | 26.1 s | 355 | 559 | 17.7 | An early diagnostic run, stopped once the problem was evident rather than run to completion. Supports the "~18 fps" figure for the full compressed set in decision 22 and "Known limits". |
 | `decision21-verify` | colour + depth + infrared, compressed | interrupted before a final report; 1,123 frames and 2,083 dropped by 71 s | - | - | ~16 (falling) | A larger capture of the same compressed-full-set problem, from the same investigation session as `cpu-diag`. What it was measuring turned out to be decision 22's own finding - real-content encoding, not synthetic noise, is the true bottleneck - see "The actual fix" and "Putting decision 21 into practice" above. |
 
-Reproducing any of these no longer needs a bespoke script: `scripts/soak_record.py --session <name> --seconds <n> [stream/codec flags]` runs the recording and prints the same pass/fail verdict this table summarises by hand.
+Reproducing any of these no longer needs a bespoke script: `scripts/record.py --seconds <n> --min-fps 29.5 [stream/codec flags]` exits with status 2 when the combination does not hold.
 
 ### Audio-only runs (2026-09-14, §7's resolution)
 

@@ -36,31 +36,24 @@ also why no script may be named after a standard library module:
 
 ## Performance and data loss
 
-Reusable versions of the ad hoc checks behind decisions 21, 22 and 23 - not
-automated tests. Each is meant to be rerun by hand: after a driver update, on a
-different machine, or when a future change to `FrameHub`/`VideoWriter` needs the
-same question asked again. None is named `test_*.py`, so `pytest` never collects
-them: the camera admits one process at a time, and a suite that needed it could
-not run beside the server (`docs/design.md`, Module boundaries).
+Checks to rerun by hand after a driver update, on a different machine, or when
+`FrameHub`/`VideoWriter` changes. None is named `test_*.py`, so `pytest` never
+collects them: the camera admits one process at a time (`docs/design.md`,
+Module boundaries). Each exits non-zero on failure.
 
-| Script | Needs a device? | What it reproduces |
+| Command | Needs a device? | What it reproduces |
 |---|---|---|
-| `soak_record.py` | Yes | "Does this combination of streams and codecs hold close to 30 fps with nothing dropped, for as long as it runs?" - decisions 21/22/23's core question, for any combination `record.py` accepts. |
-| `sqlite_write_benchmark.py` | No | Decision 22's SQLite/WAL insert-throughput finding: compressed-size blobs (~600 KB) insert well inside budget, raw-size blobs (~1.8 MB) do not - independent of any encoding cost. |
+| `record.py --min-fps <fps>` | Yes | Whether a stream/codec combination holds its rate with nothing dropped (decisions 21-23): exit status 2 on any drop or a lower rate. |
+| `sqlite_write_benchmark.py` | No | Decision 22's SQLite/WAL insert throughput: compressed-size blobs (~600 KB) insert well inside budget, raw-size blobs (~1.8 MB) do not. |
 
 ```bash
-# the combination decision 23 settled on for this Windows machine
-uv run python scripts/soak_record.py --session soak-color-raw \
-    --seconds 600 --no-depth --no-infrared --color-codec raw
+# colour alone, raw - the combination decision 23 settled on for Windows
+uv run python scripts/record.py --seconds 600 --no-depth --no-infrared \
+    --color-codec raw --min-fps 29.5
 
 # the full six-image set, compressed - decision 22's worst case
-uv run python scripts/soak_record.py --session soak-full-compressed \
-    --seconds 60
+uv run python scripts/record.py --seconds 60 --min-fps 29.5
 
 # no camera needed
 uv run python scripts/sqlite_write_benchmark.py
 ```
-
-Every one exits non-zero on failure, so a shell script chaining several of
-these together (or a future device-equipped CI runner) can trust the exit code
-rather than parsing the printed numbers.

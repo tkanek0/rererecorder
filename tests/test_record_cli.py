@@ -5,8 +5,9 @@ from __future__ import annotations
 import argparse
 
 import pytest
-from record import _build_codecs, _build_streams
+from record import _build_codecs, _build_streams, _status
 from rrr.recorder import config
+from rrr.timeline import SessionManifest, VideoTrack
 
 
 def _args(**overrides: object) -> argparse.Namespace:
@@ -74,3 +75,20 @@ def test_compressed_maps_to_each_streams_own_default_algorithm() -> None:
         )
     )
     assert codecs == {"color": "png", "depth": "zlib", "infrared": "png"}
+
+
+@pytest.mark.parametrize(
+    ("track", "min_fps", "status"),
+    [
+        (VideoTrack(frames=300, fps=30.0), None, 0),
+        (VideoTrack(frames=0), None, 1),
+        (VideoTrack(frames=300, dropped=1, fps=30.0), None, 2),
+        (VideoTrack(frames=300, fps=30.0), 29.5, 0),
+        (VideoTrack(frames=300, fps=20.0), 29.5, 2),
+    ],
+)
+def test_exit_status_reports_nothing_recorded_and_losses(
+    track: VideoTrack, min_fps: float | None, status: int
+) -> None:
+    manifest = SessionManifest(session_id="s", video=track)
+    assert _status(manifest, min_fps) == status

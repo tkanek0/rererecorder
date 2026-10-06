@@ -3,6 +3,7 @@
     uv run python scripts/record.py --seconds 20
     uv run python scripts/record.py --session kitchen-test --no-doa
     uv run python scripts/record.py --no-depth --no-infrared --color-codec raw
+    uv run python scripts/record.py --seconds 600 --min-fps 29.5
 
 The same :class:`~rrr.recorder.SessionRecorder` the server uses, with a progress
 line instead of a browser, and no web stack needed.
@@ -79,6 +80,12 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--quiet", action="store_true", help="no progress line")
     parser.add_argument(
+        "--min-fps",
+        type=float,
+        default=None,
+        help="count a video rate below this as a loss (exit status 2)",
+    )
+    parser.add_argument(
         "--verbose",
         action="store_true",
         help="log every discarded frame set and why",
@@ -122,7 +129,7 @@ def main(argv: list[str] | None = None) -> int:
         recorder.close()
 
     _report(manifest, paths.directory)
-    return _status(manifest)
+    return _status(manifest, args.min_fps)
 
 
 def _build_streams(args: argparse.Namespace) -> StreamConfig:
@@ -318,11 +325,12 @@ def _overlap(manifest: SessionManifest) -> float | None:
     return max(0.0, end - start)
 
 
-def _status(manifest: SessionManifest) -> int:
+def _status(manifest: SessionManifest, min_fps: float | None = None) -> int:
     """Turn a finished session into a process exit status.
 
     Args:
         manifest: The finished session.
+        min_fps: Video rate below which the session counts as lossy, or None.
 
     Returns:
         0 if both tracks recorded cleanly, 1 if nothing was recorded, 2 if
@@ -337,6 +345,12 @@ def _status(manifest: SessionManifest) -> int:
     if manifest.audio is not None and not manifest.audio.samples:
         return 1
     if manifest.video is not None and manifest.video.dropped:
+        return 2
+    if (
+        min_fps is not None
+        and manifest.video is not None
+        and (manifest.video.fps or 0.0) < min_fps
+    ):
         return 2
     if manifest.audio is not None and manifest.audio.filled:
         return 2

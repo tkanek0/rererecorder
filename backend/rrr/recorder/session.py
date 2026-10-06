@@ -442,8 +442,12 @@ class SessionRecorder:
         """
         if self._manifest is None:
             return
-        for label, writer in (("video", self._video), ("audio", self._audio)):
-            error = writer.stats.error if writer is not None else None
+        reported = (
+            ("video", self._video.stats.error if self._video else None),
+            ("audio", self._audio.stats.error if self._audio else None),
+            ("doa", self._doa.error if self._doa and self._audio else None),
+        )
+        for label, error in reported:
             if error and f"{label}: {error}" not in self._manifest.errors:
                 self._manifest.errors.append(f"{label}: {error}")
         if self._video is not None:

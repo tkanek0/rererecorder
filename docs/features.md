@@ -270,7 +270,8 @@ The array has been seen to stop delivering audio mid-recording while its PCM
 still reads `RUNNING`, with nothing in the kernel log; what triggers it is not
 known. Two seconds without a block count as a failure: the recording carries on
 with the camera, `session.json` names the error, and the page's Reconnect opens
-the array again once the recording is stopped.
+the array again once the recording is stopped. A failed direction readout is
+named in `errors` the same way, and so is anything else a device reports.
 
 ## Marks
 

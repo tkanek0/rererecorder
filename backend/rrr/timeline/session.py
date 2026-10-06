@@ -6,10 +6,12 @@ docs/design.md "A session is a directory" and "What it refuses to claim".
 
 from __future__ import annotations
 
+import dataclasses
 import json
 import os
 import re
 from dataclasses import dataclass, field
+from typing import Self
 
 from .clock import ClockPair
 
@@ -38,8 +40,22 @@ class SessionError(Exception):
     """Raised for a session that cannot be named, found or read."""
 
 
+class _Stored:
+    """A flat record kept in ``session.json`` as an object of its fields."""
+
+    def as_dict(self) -> dict[str, object]:
+        """Return a JSON-serialisable view of this record."""
+        return dataclasses.asdict(self)  # type: ignore[call-overload]
+
+    @classmethod
+    def from_dict(cls, raw: dict[str, object]) -> Self:
+        """Rebuild a record from its stored form, ignoring keys it does not have."""
+        names = {f.name for f in dataclasses.fields(cls)}  # type: ignore[arg-type]
+        return cls(**{key: value for key, value in raw.items() if key in names})
+
+
 @dataclass(frozen=True)
-class VideoTrack:
+class VideoTrack(_Stored):
     """What was recorded from the camera.
 
     Attributes:
@@ -86,40 +102,9 @@ class VideoTrack:
             return None
         return self.motion / (last - first)
 
-    def as_dict(self) -> dict[str, object]:
-        """Return a JSON-serialisable view of this track."""
-        return {
-            "frames": self.frames,
-            "dropped": self.dropped,
-            "motion": self.motion,
-            "motion_overrun": self.motion_overrun,
-            "skipped_warmup": self.skipped_warmup,
-            "skipped_duplicate": self.skipped_duplicate,
-            "first_monotonic": self.first_monotonic,
-            "last_monotonic": self.last_monotonic,
-            "timestamp_domain": self.timestamp_domain,
-            "fps": round(self.fps, 3) if self.fps is not None else None,
-        }
-
-    @staticmethod
-    def from_dict(raw: dict[str, object]) -> VideoTrack:
-        """Rebuild a track from its stored form."""
-        return VideoTrack(
-            frames=int(raw.get("frames", 0)),
-            dropped=int(raw.get("dropped", 0)),
-            motion=int(raw.get("motion", 0)),
-            motion_overrun=int(raw.get("motion_overrun", 0)),
-            skipped_warmup=int(raw.get("skipped_warmup", 0)),
-            skipped_duplicate=int(raw.get("skipped_duplicate", 0)),
-            first_monotonic=_optional_float(raw.get("first_monotonic")),
-            last_monotonic=_optional_float(raw.get("last_monotonic")),
-            timestamp_domain=str(raw.get("timestamp_domain", "unknown")),
-            fps=_optional_float(raw.get("fps")),
-        )
-
 
 @dataclass(frozen=True)
-class AudioTrack:
+class AudioTrack(_Stored):
     """What was recorded from the array.
 
     Attributes:
@@ -147,35 +132,12 @@ class AudioTrack:
         return self.samples / self.rate if self.rate else 0.0
 
     def as_dict(self) -> dict[str, object]:
-        """Return a JSON-serialisable view of this track."""
-        return {
-            "rate": self.rate,
-            "channels": self.channels,
-            "samples": self.samples,
-            "seconds": round(self.seconds, 3),
-            "filled": self.filled,
-            "overruns": self.overruns,
-            "first_monotonic": self.first_monotonic,
-            "timeline": self.timeline,
-        }
-
-    @staticmethod
-    def from_dict(raw: dict[str, object]) -> AudioTrack:
-        """Rebuild a track from its stored form."""
-        timeline = raw.get("timeline")
-        return AudioTrack(
-            rate=int(raw.get("rate", 0)),
-            channels=int(raw.get("channels", 0)),
-            samples=int(raw.get("samples", 0)),
-            filled=int(raw.get("filled", 0)),
-            overruns=int(raw.get("overruns", 0)),
-            first_monotonic=_optional_float(raw.get("first_monotonic")),
-            timeline=timeline if isinstance(timeline, dict) else None,
-        )
+        """Return a JSON-serialisable view, with the length for whoever reads it."""
+        return {**super().as_dict(), "seconds": round(self.seconds, 3)}
 
 
 @dataclass(frozen=True)
-class SyncCalibration:
+class SyncCalibration(_Stored):
     """The measured offset between the two devices, or the absence of one.
 
     The residual between a microphone and a shutter that neither device
@@ -201,27 +163,6 @@ class SyncCalibration:
     def measured(self) -> bool:
         """Whether an offset is actually known."""
         return self.offset_s is not None
-
-    def as_dict(self) -> dict[str, object]:
-        """Return a JSON-serialisable view of this calibration."""
-        return {
-            "offset_s": self.offset_s,
-            "uncertainty_s": self.uncertainty_s,
-            "method": self.method,
-            "measured_at": self.measured_at,
-            "note": self.note,
-        }
-
-    @staticmethod
-    def from_dict(raw: dict[str, object]) -> SyncCalibration:
-        """Rebuild a calibration from its stored form."""
-        return SyncCalibration(
-            offset_s=_optional_float(raw.get("offset_s")),
-            uncertainty_s=_optional_float(raw.get("uncertainty_s")),
-            method=_optional_str(raw.get("method")),
-            measured_at=_optional_float(raw.get("measured_at")),
-            note=_optional_str(raw.get("note")),
-        )
 
 
 @dataclass(frozen=True)
@@ -378,8 +319,7 @@ class SessionManifest:
         version = raw.get("format_version")
         if version != FORMAT_VERSION:
             raise SessionError(
-                f"session format {version} is not the one this reads "
-                f"({FORMAT_VERSION})"
+                f"session format {version} is not the one this reads ({FORMAT_VERSION})"
             )
         video = raw.get("video")
         audio = raw.get("audio")
@@ -406,6 +346,7 @@ class SessionManifest:
             rig=Rig.from_dict(rig) if isinstance(rig, dict) else Rig(),
             errors=[str(entry) for entry in raw.get("errors") or []],
         )
+
 
 @dataclass(frozen=True)
 class SessionPaths:
@@ -599,11 +540,6 @@ def listing(root: str) -> list[SessionManifest]:
         anchor = manifest.started_at.realtime if manifest.started_at else 0.0
         found.append((anchor, manifest))
     return [manifest for _, manifest in sorted(found, key=lambda item: -item[0])]
-
-
-def _optional_float(value: object) -> float | None:
-    """Read a float that is allowed to be absent."""
-    return None if value is None else float(value)  # type: ignore[arg-type]
 
 
 def _optional_floats(value: object, count: int) -> tuple[float, ...] | None:

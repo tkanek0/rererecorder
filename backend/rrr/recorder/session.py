@@ -11,6 +11,7 @@ from __future__ import annotations
 import logging
 import threading
 import time
+from dataclasses import asdict
 from typing import Any
 
 from realsense_adapter import FrameSource, LiveSource, StreamConfig
@@ -383,32 +384,10 @@ class SessionRecorder:
             "seconds": self._elapsed(),
             "size_bytes": self._paths.size_bytes() if self._paths else 0,
             "video": (
-                None
-                if video is None
-                else {
-                    "frames": video.frames,
-                    "dropped": video.dropped,
-                    "skipped_duplicate": video.skipped_duplicate,
-                    "skipped_warmup": video.skipped_warmup,
-                    "motion": video.motion,
-                    "motion_overrun": video.motion_overrun,
-                    "fps": round(video.fps, 2) if video.fps else None,
-                    "timestamp_domain": video.timestamp_domain,
-                    "error": video.error,
-                }
+                None if video is None else {**asdict(video), "fps": video.fps}
             ),
             "audio": (
-                None
-                if audio is None
-                else {
-                    "seconds": round(audio.seconds, 2),
-                    "filled": audio.filled,
-                    "gaps": audio.gaps,
-                    "dropped_by_reader": audio.dropped_by_reader,
-                    "overruns": audio.overruns,
-                    "clock_points": audio.clock_points,
-                    "error": audio.error,
-                }
+                None if audio is None else {**asdict(audio), "seconds": audio.seconds}
             ),
             "marks": self._marks,
             "errors": list(self._manifest.errors) if self._manifest else [],
@@ -452,28 +431,16 @@ class SessionRecorder:
                 self._manifest.errors.append(f"{label}: {error}")
         if self._video is not None:
             stats = self._video.stats
-            self._manifest.video = VideoTrack(
-                frames=stats.frames,
-                dropped=stats.dropped,
-                motion=stats.motion,
-                motion_overrun=stats.motion_overrun,
-                skipped_warmup=stats.skipped_warmup,
-                skipped_duplicate=stats.skipped_duplicate,
-                first_monotonic=stats.first_monotonic,
-                last_monotonic=stats.last_monotonic,
-                timestamp_domain=stats.timestamp_domain,
-                fps=stats.fps,
+            self._manifest.video = VideoTrack.from_dict(
+                {**asdict(stats), "fps": stats.fps}
             )
         if self._audio is not None and self._tap is not None:
-            stats = self._audio.stats
-            self._manifest.audio = AudioTrack(
-                rate=self._tap.rate,
-                channels=self._tap.channels,
-                samples=stats.samples,
-                filled=stats.filled,
-                overruns=stats.overruns,
-                first_monotonic=stats.first_monotonic,
-                timeline=self._timeline_report(),
+            self._manifest.audio = AudioTrack.from_dict(
+                {
+                    **asdict(self._audio.stats),
+                    "channels": self._tap.channels,
+                    "timeline": self._timeline_report(),
+                }
             )
             self._manifest.doa = self._doa is not None
 

@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import struct
 
+import usb.backend.libusb1
 import usb.core
 import usb.util
 
@@ -53,13 +54,15 @@ class Tuning:
     Not thread-safe: one control transfer at a time per device.
     """
 
-    def __init__(self, device: usb.core.Device) -> None:
+    def __init__(self, device: usb.core.Device, backend: object) -> None:
         """Wrap an already-located USB device.
 
         Args:
             device: The array, as returned by :func:`usb.core.find`.
+            backend: The libusb context it was found through, kept alive with it.
         """
         self._device = device
+        self._backend = backend
 
     def _read_int(self, parameter: tuple[int, int]) -> int:
         """Read one integer parameter.
@@ -88,8 +91,9 @@ class Tuning:
         return bool(self._read_int(_VOICEACTIVITY))
 
     def close(self) -> None:
-        """Release the USB handle."""
+        """Release the USB handle and the libusb context."""
         usb.util.dispose_resources(self._device)
+        self._backend = None
 
 
 def _translate(error: usb.core.USBError) -> Exception:
@@ -114,11 +118,18 @@ def find_tuning(
 
     Raises:
         DeviceNotFound: If no matching device is attached.
+
+    Each call enumerates through a libusb context of its own: pyusb's shared
+    one keeps the device list it first saw where no hotplug events arrive, as
+    in a container, so a replugged array would stay unreachable
+    (docs/decisions.md 29). ``_LibUSB`` is pyusb's private context wrapper.
     """
-    device = usb.core.find(idVendor=vendor_id, idProduct=product_id)
+    usb.backend.libusb1.get_backend()  # loads the library once
+    backend = usb.backend.libusb1._LibUSB(usb.backend.libusb1._lib)
+    device = usb.core.find(idVendor=vendor_id, idProduct=product_id, backend=backend)
     if device is None:
         raise DeviceNotFound(
             f"no USB device {vendor_id:04x}:{product_id:04x} - is the array "
             "plugged in?"
         )
-    return Tuning(device)
+    return Tuning(device, backend)

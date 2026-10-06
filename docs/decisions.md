@@ -255,8 +255,9 @@ Inertial samples reach a consumer only through the archive's `imu` table and
 
 ## 13. Both devices in one container, with the audio group granted
 
-**Chosen:** pass `/dev/bus/usb` and `/dev/snd`, and add the host's `audio`
-group to the container.
+**Chosen:** bind-mount `/dev/bus/usb` and `/dev/snd`, allow their device
+majors (189 for USB, 116 for ALSA) with `device_cgroup_rules`, and add the
+host's `audio` group to the container.
 
 **Why the group:** `/dev/snd/*` is `root:audio 0660`. On the host an ACL lets
 the desktop user in - `getfacl` shows `user:tkaneko:rw-` - but an ACL does not
@@ -265,8 +266,13 @@ follow into a container, and the uid there is not the one it names. Without
 which looks like an unplugged array. That failure mode is why the Makefile
 derives the id with `getent group audio` rather than hard-coding 29.
 
-**Why the whole bus:** the camera's device number changes every time it is
-re-enumerated, and a reset re-enumerates it, so passing one node would lose it.
+**Why mounted, not passed as devices:** a device's node changes every time it
+is re-enumerated - a replug, or a reset. `devices:` copies the nodes that exist
+when the container starts, so a replugged camera or array was unreachable from
+a running server until it restarted: the array's direction readout failed with
+`Errno 19 No such device` after a replug even through a fresh libusb context.
+A bind mount shows the host's current nodes, and the cgroup rules let them be
+opened.
 
 **Why the invoking user:** so recordings under `data/` are not owned by root.
 The camera stays reachable without any group, because the RealSense udev rule
@@ -911,6 +917,9 @@ while recording. Around it:
   the first status, after each hub failure and on Reconnect.
 - Reconnecting the array re-initialises PortAudio first, when its stream is
   not open, since PortAudio's device list is taken once at initialisation.
+- The direction readout enumerates through a libusb context of its own on every
+  opening; pyusb's shared one keeps the first device list it saw, so a
+  replugged array answered `Errno 5` from its old address.
 - A working stream that stops delivering is a failure too: the camera after
   5 s without a frame (`realsense_adapter`), the array after 2 s without a
   block. The array has been seen to stall with its PCM still `RUNNING`.
@@ -950,8 +959,10 @@ the device reconnected. What a device reopened mid-session would leave in the
 files was never measured, so Reconnect waits for the recording to end. A
 replugged device is invisible to the page until someone presses the button.
 Re-initialising PortAudio uses `sounddevice`'s private `_terminate` /
-`_initialize`, and has not yet been checked against an array actually
-replugged.
+`_initialize`, and the fresh libusb context pyusb's private `_LibUSB`. Checked
+on the hardware through the server in its container: the array moved to another
+port while the server ran, Reconnect, and the next recording had its audio and
+its direction at 15 Hz again.
 
 ---
 

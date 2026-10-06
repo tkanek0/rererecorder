@@ -9,11 +9,15 @@ services:
     build:
       context: .
     image: rererecorder:latest
-    # The whole bus, and the user and group below: docs/decisions.md 13.
-    devices:
+    # Bind-mounted rather than passed as devices, so a device plugged in
+    # later is reachable too; USB (189) and ALSA (116) may be opened.
+    # See docs/decisions.md 13.
+    device_cgroup_rules:
+      - "c 189:* rmw"
+      - "c 116:* rmw"
+    volumes:
       - /dev/bus/usb:/dev/bus/usb
       - /dev/snd:/dev/snd
-    volumes:
       # A link on the host, resolved there: docs/decisions.md 28.
       - ${RRR_DATA:-./data}:/data
       - .:/app

@@ -1,5 +1,9 @@
 # Running on Windows, natively and under WSL2
 
+A dated record of an investigation: class and file names are the code's as it
+stood then. How to run on Windows is in the README; the configuration to run
+with is "The operating conclusion" below.
+
 An investigation, started 2026-09-11, into whether this repository can record
 on a Windows laptop without Docker Desktop - either directly on Windows, or
 inside WSL2 with the two USB devices passed through. Four real bugs came out
@@ -205,7 +209,7 @@ name match - prefer a host API named `Windows WASAPI` whose reported
 device whose rate agrees (which is where Linux's single ALSA match is
 chosen, unchanged), then the first name match as a last resort. See
 `_resolve_device`'s own docstring for the ranking and
-`tests/test_audio_capture.py`'s device-resolution tests.
+`tests/test_respeaker_capture.py`'s device-resolution tests.
 
 ### Choosing WASAPI exposed a second bug: it needs COM on its own thread
 
@@ -270,7 +274,7 @@ traced to the recording's very first clock point, sample 0, which is
 necessarily timed by the coarser pre-calibration fallback since calibration
 itself has not decided anything yet at that instant. Every point after the
 first two sits under 0.4 ms. `RESIDUAL_WARN_MS = 1.0` was calibrated against
-Linux/ALSA's 0.03 ms jitter (see `backend/rrr/inspection/checks.py`), so this one-time,
+Linux/ALSA's 0.03 ms jitter (decisions.md 26), so this one-time,
 understood startup transient trips it on Windows; not adjusted, since it is
 not evidence of an ongoing problem and the repository's practice is to
 explain a flagged number rather than silence the check that found it.
@@ -413,7 +417,7 @@ this investigation found a way to tune from the Windows or the WSL2 side.
 
 ## Also found: the test suite itself assumes POSIX
 
-Fixing decision 20 exposed four `tests/test_audio_capture.py` failures of its
+Fixing decision 20 exposed four `tests/test_respeaker_capture.py` failures of its
 own making (a hard-coded `START` constant that only looked "near a real
 monotonic reading" on whatever machine and uptime it was written against -
 fixed alongside decision 20, `_feed` now takes a fresh `time.monotonic()`
@@ -491,7 +495,7 @@ counter, `++counter[key]` on every callback - which is by construction
 gapless and proves nothing about loss on its own. The zero-gaps result above
 holds regardless, because it is checked against the counter *not*
 incrementing when a frame is expected, which a tautological counter cannot
-fake; enabling metadata (`scripts/realsense_metadata_win10.ps1`, a registry
+fake; enabling metadata (librealsense's `scripts/realsense_metadata_win10.ps1`, a registry
 change under `HKLM\SYSTEM\...\DeviceClasses`) would let a device-verified
 count be checked directly, and was not needed once the loss question was
 settled otherwise.
@@ -698,8 +702,8 @@ degrade `hub.fps` into the 18-28 fps range even for colour alone, and
 degraded further once depth + infrared were also being captured - matching
 this document's own repeated finding that this CPU is the bottleneck for
 per-frame image work, preview encoding included. **Fixed:** two separate
-caps, `PREVIEW_MAX_HZ_RECORDING` (10, unchanged, not user-overridable - a
-dropped frame in a recording cannot be gotten back) and
+caps, `PREVIEW_MAX_HZ_RECORDING` (10, unchanged - a dropped frame in a
+recording cannot be gotten back) and
 `PREVIEW_MAX_HZ_IDLE` (15, chosen after this measurement), both real caps
 rather than "whatever the camera delivers." A direct A/B on this exact
 question - colour+raw+audio recording, live colour preview attached, ~110 s -

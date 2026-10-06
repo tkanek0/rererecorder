@@ -190,10 +190,10 @@ nothing and would need a lock.
 
 ---
 
-## 11. Store sessions on the SATA SSD
+## 11. Store sessions on a SATA SSD
 
-**Chosen:** `/mnt/dataspace02/rererecorder` by default in the container, with
-the directory changeable from the page.
+**Chosen:** the disk behind `data/` (decision 28) is a SATA SSD, and the
+directory can be changed from the page.
 
 **Why:** measured through the recorder's own access pattern - BLOBs in
 transactions with a WAL - the SATA drive sustains 198 MB/s against the 54 MB/s a
@@ -202,14 +202,12 @@ burst (290 MB/s) but **falls off after 3 GB** as its SLC cache fills, from 364
 to 242 MB/s, while the SATA drive held 195-207 MB/s for 6 GB without wavering.
 For long recordings the slower drive is the steadier one.
 
-**Since 28:** recordings go to the checkout's `data/`, which on this machine
-links to `/mnt/dataspace01/rererecorder` - `/dev/sdb1`, a second drive of the
-same model as `/dev/sdc1` above (Samsung 860 QVO 2TB). Measured on both, one
-after the other, with `scripts/sqlite_write_benchmark.py --frames 3600`,
-timed until the WAL is checkpointed and the file fsynced: 190 MB/s (2.2 GB of
-600 KB rows) and 200 MB/s (6.6 GB of 1.8 MB rows) on each, within 1% of each
-other and of the 198 MB/s above. Not measured: anything past 6.6 GB, which is
-where a QLC drive's write cache would run out; an hour of recording is 195 GB.
+`scripts/sqlite_write_benchmark.py --frames 3600` measures a disk the same way,
+timed until the WAL is checkpointed and the file fsynced: two drives of that
+model (Samsung 860 QVO 2TB) gave 190 MB/s for 600 KB rows and 200 MB/s for
+1.8 MB rows. Not measured: anything past 6.6 GB, which is where a QLC drive's
+write cache would run out; an hour of recording is 195 GB. A disk that cannot
+keep up shows as `dropped` frames, never as a failed recording.
 
 ---
 
@@ -334,33 +332,23 @@ unmeasured - which is the honest state, not a defect.
 
 ---
 
-## 15. One package, `rrr`, rather than six top-level ones
+## 15. One package, `rrr`, beside two device adapters
 
-**Chosen:** `rrr/{timeline,video,audio,recorder,server,tools}`, imported as
-`from rrr.video import ArchiveSource`.
+**Chosen:** `backend/rrr/` with subpackages by job - `timeline`, `devices`,
+`video`, `recorder`, `api`, `playback`, `inspection`, `offset`,
+`visualization` - imported as `from rrr.video import ArchiveSource`. The only
+other top-level packages are the device adapters, `realsense_adapter` and
+`respeaker_adapter`, which know nothing of `rrr` (decision 31).
 
 **Alternatives:** leaving `audio/`, `video/`, `timeline/`, `recorder/`,
-`server/` and `tools/` at the top level, as they were; a `src/rrr/` layout with
-a build backend.
+`server/` and `tools/` at the top level, as they once were.
 
 **Why:** recordings made here are meant to be read by other repositories, and
 those six names are ones any other project might also define. `import video` in
 a process that had this checkout on its path was a coin toss, and a name
 collision at that boundary looks like corrupted data rather than like a broken
 import. `rrr` is what the rest of the repository already calls itself - the
-`.rrdb` suffix, the `RRR_` environment prefix.
-
-**Why not `src/`:** (superseded by 27, which packages the project and moves
-it under `src/`; `tools` is gone since 31.) A `src/` layout earns its keep when the package is built and
-installed, so that tests run against the installed copy rather than the working
-tree. This project is not packaged - there is no `[build-system]`, and both the
-Makefile and the container run it from the checkout with the repository root on
-`PYTHONPATH`. Adding `src/` would mean adding a build backend and reordering the
-image's `uv sync` around the source copy, for no benefit here.
-
-**Cost:** every import statement, the Makefile, the Dockerfile's `CMD` and the
-documentation changed at once. Mechanical, and cheapest before anything outside
-this repository reads a session.
+`.rrdb` suffix, the `RRR_` environment prefix. How it is installed is 27.
 
 ---
 
@@ -626,7 +614,8 @@ the page, `scripts/record.py --<stream>-codec`, or `RRR_DEPTH_CODEC` /
 `RRR_COLOR_CODEC` / `RRR_INFRARED_CODEC`.
 
 **Alternatives:** a faster/weaker compression level (already at the fastest,
-`PNG_LEVEL = 1`); a different lossless codec entirely; accept the drop rate
+`PNG_LEVEL = 1` - level 6 saves 17% at three times the time, which
+30 fps cannot afford); a different lossless codec entirely; accept the drop rate
 as a machine limit and do nothing.
 
 **Why:** investigated in [windows-native.md](windows-native.md). Decision
@@ -840,32 +829,26 @@ since the check is still correctly describing a real, if harmless, number.
 
 ---
 
-## 27. Package the project, and move `rrr` under `src/`
+## 27. Package the project, with the source under `backend/`
 
-**Chosen:** `src/rrr/`, with a hatchling `[build-system]`. `uv sync` installs
-the project editable, so pytest, the Makefile and the container import the
-installed `rrr` and nobody sets `PYTHONPATH`.
+**Chosen:** `backend/` as the source root, named for its role next to
+`frontend/`, built by `uv_build` with `module-root = "backend"`. `uv sync`
+installs the project editable, so pytest, the Makefile and the container import
+the installed packages and nobody sets `PYTHONPATH`.
 
-**Alternatives:** keeping `rrr/` at the root, as 15 chose; moving it to `src/`
-without a build backend and putting `src` on `PYTHONPATH`.
+**Alternatives:** the packages at the repository root, run from the checkout
+with the root on `PYTHONPATH`; a `src/` directory put on the path without a
+build backend; hatchling.
 
-**Why:** 15 turned `src/` down because the project was not installed, and a
-`src/` layout that is only put on the path buys nothing. Installing it is what
-changes that answer: an import can no longer resolve against whatever happens to
-be the working directory. The path-only variant was rejected for exactly the
-reason 15 gave.
+**Why:** an installed package cannot resolve an import against whatever happens
+to be the working directory, and a source root that is only put on the path
+buys nothing. `uv_build` rather than hatchling because it is uv's own and states
+the root in one line. What goes in the package, and what in `scripts/`, is 31.
 
 **Cost:** the image installs in two steps - dependencies before the source is
 copied, so that layer survives a code change, then the project itself. The
 install is editable, so the development bind mount of the checkout over `/app`
 still runs the mounted source without a rebuild.
-
-**Amended (2026-10-02):** the source root is now `backend/`, named for its
-role next to `frontend/`, and the build backend is `uv_build` with
-`module-root = "backend"`. Still a `src/`-style layout in every respect that
-mattered above: installed editable, never put on the path. `uv_build` rather
-than hatchling because it is uv's own and states the root in one line. What
-goes in the package, and what in `scripts/`, is 31.
 
 ---
 
@@ -1011,15 +994,15 @@ from inside it.
 
 ## 31. A package that provides means, and scripts that decide what to write
 
-**Chosen:** the installed code is the means - recording (`rrr.recorder`,
-`rrr.api`), reading a recording on one clock (`rrr.playback`), cross-checks
+**Chosen:** the installed code is the means - recording (`rrr.devices`,
+`rrr.recorder`, `rrr.api`), reading a recording on one clock (`rrr.playback`), cross-checks
 (`rrr.inspection`), the offset measurement (`rrr.offset`) and drawing parts
 (`rrr.visualization`). What is done with them and written out lives in
 `scripts/`: `record.py`, `inspect_session.py`, `calibrate.py`, `export.py`,
 `validate_export.py`, `render_gif.py`, `render_mp4.py` and the performance
 checks. Scripts run as `uv run python scripts/<name>.py` against the installed
-package and are imported by nothing but their tests. A service the package
-itself provides is an entry point instead: `rrr-api`. `rrr.tools` is gone.
+package and are imported by nothing but their tests and each other. A service
+the package itself provides is an entry point instead: `rrr-api`.
 
 Device access that knows nothing of the recorder is a separate package beside
 `rrr`: `respeaker_adapter`, which reads no environment variable -
@@ -1034,7 +1017,7 @@ flowchart LR
     subgraph backend/
         RS[realsense_adapter]
         RA[respeaker_adapter]
-        RRR["rrr<br/>recorder, api, playback,<br/>inspection, offset, visualization"]
+        RRR["rrr<br/>devices, recorder, api, playback,<br/>inspection, offset, visualization"]
     end
     SC["scripts/<br/>what to write, and where"]
     EX["export/<br/>docs/export-format.md"]
@@ -1051,7 +1034,7 @@ PyPI already has from the device's makers.
 
 **Why:** a GIF renderer offered as an importable module was the symptom. The
 three converters - two renderers and the export - turned out to repeat the same
-reading (frame times with a nominal fallback, the audio clock, channel
+reading (frame times, the audio clock with a nominal fallback, channel
 selection, the offset), and that reading is what belongs in a package; the
 encoder or the directory layout at the end does not. Moving the tools whole
 would have left that repetition in place and put `sys.path` tricks between them.
@@ -1069,8 +1052,7 @@ can be copied to the reader's side.
 `pythonpath = ["scripts"]`, a path setting 27 otherwise avoids; it reaches only
 tests. A script may import a sibling (`export` imports `validate_export`), so no
 script may share a name with a standard library module - hence
-`inspect_session.py`. Every `python -m rrr.tools.*` in notes and shell history
-stopped working at once.
+`inspect_session.py`.
 
 ---
 
@@ -1082,76 +1064,12 @@ damaged session rather than a short one. Handled by watching the remaining-time
 figure for now.
 
 **Raspberry Pi is untested.** The image is built to be portable - RSUSB needs no
-kernel module and the frontend is prebuilt - but neither the aarch64 build nor
-the encoding throughput has been checked. Lossless at 54 MB/s will not fit: the
-18.3 ms per set is a sixteen-core figure.
+kernel module, and the page is served by vite in its own container - but
+neither the aarch64 build nor the encoding throughput has been checked.
+Lossless at 54 MB/s will not fit: the 18.3 ms per set is a sixteen-core figure.
 
-**Native Windows keeps every colour, depth and infrared frame, with no fixed
-cross-sensor sync.** Media Foundation does not achieve `global_time`, so
-colour and depth are timestamped independently rather than through one
-drift-corrected clock (decision 21). A downstream consumer that needs a
-synchronised pair filters `color_timestamp_ms` / `depth_timestamp_ms` itself.
-WSL2 with librealsense built for `FORCE_RSUSB_BACKEND` was also measured: it
-does restore `global_time` (skew under 1 ms), but `usbipd-win`'s USB/IP
-tunnel could not sustain the full four-stream bandwidth in testing - a
-different limitation, not a better answer, for the platform this repository
-otherwise runs on. Both are written up in
-[windows-native.md](windows-native.md).
-
-**Native Windows cannot hold 30 fps recording depth or infrared, on this
-machine.** Colour alone does, losslessly, using `raw` (decision 22) -
-measured at 29.99 fps with zero dropped frames over ten minutes, and again at
-29.69 fps over a 73-minute run through the actual server path with a live
-preview attached concurrently (0.87% dropped, the only measurable cost of
-going through the server rather than the CLI). Adding depth and/or infrared
-measurably degrades it (colour+depth or colour+infrared: ~24 fps; all three,
-compressed: ~18 fps) - raw does not fix this for more than colour alone,
-since the full set is then disk-bound rather than CPU-bound (decision 22).
-
-**Operate with colour alone and the raw codec on this machine** - decision 23
-makes that a first-class choice from the CLI or the page rather than a set of
-environment variables to remember. This is closed as the operating answer for
-now, not because the cause is fully understood: a minimal `LiveSource` +
-`ArchiveWriter` wiring with neither `FrameHub` nor `VideoWriter` involved
-reaches a clean 30 fps for colour alone at the _compressed_ codec, where the
-real recording path through both classes reaches only ~25 fps at that same
-codec - an overhead on the order of the gap between "compressed colour alone"
-(~25 fps, measured through the real classes) and "colour alone, raw" (~30 fps,
-measured the same way) that was never isolated to a specific line despite
-targeted profiling (`dataclasses.replace`, the hub's locks, `_should_stop` /
-`_superseded`, and running the read/write loop on a bare background thread
-were each measured negligible or non-reproducing in isolation). Raw happens to
-remove enough compute that the real path clears its budget regardless, which
-is why this is closed rather than pursued further: the practical goal is met,
-and the remaining question is a research one about where the overhead lives,
-not a blocker to recording on this machine today. Worth reopening if a future
-measurement needs compressed colour, or the full set, to also hold 30 fps
-here.
-
-**Native Windows records the array's audio cleanly once decisions 24-26 are
-applied**, checked in three configurations, all through the real CLI or
-server (no synthetic data):
-
-| configuration                                                 | duration | fitted rate | filled                |
-| ------------------------------------------------------------- | -------- | ----------- | --------------------- |
-| audio alone (`--no-video`)                                    | 300.00 s | +1 ppm      | 422 samples (26 ms)   |
-| audio alone, through the server, polled at 1 Hz like the page | 300.62 s | +4 ppm      | 662 samples (41 ms)   |
-| audio with the camera recording at the same time (colour+raw) | 301.91 s | +16 ppm     | 1,216 samples (76 ms) |
-
-All three land the overwhelming majority of what they fill within the first
-~0.3-0.4 s of the recording - the calibration window itself (decision 26),
-which is timed from the coarser callback clock by design until it decides
-whether the array's clock can be trusted as-is or needs a fixed correction.
-Recording through the server or alongside the camera makes that startup
-window somewhat noisier (up to ~72 ms worst departure, vs ~20 ms alone) but
-does not introduce filled samples anywhere else in any of the three runs -
-no evidence of USB bandwidth or CPU contention with the camera, or of the
-server's own polling, costing anything once steady state is reached. The
-camera's own numbers are unaffected either way: 8,996 frames at 29.99 fps,
-0 dropped, in the combined run.
-
-Separately, direction of arrival fails outright here regardless of any of
-the above (`doa read failed: No backend available`) - a missing
-libusb-compatible driver binding for the array's control interface, not
-investigated as part of this work. See [windows-native.md](windows-native.md)
-§7.
+**Native Windows** keeps every frame but stamps colour and depth independently
+(Media Foundation does not achieve `global_time`), holds 30 fps only for colour
+alone with the `raw` codec, records the array's audio cleanly, and cannot read
+its direction. What was measured, and the configuration to operate with, are in
+[windows-native.md](windows-native.md), "The operating conclusion".

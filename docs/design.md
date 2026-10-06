@@ -47,7 +47,7 @@ flowchart TD
     N["backend/rrr/inspection/<br/>cross-checks"]
     O["backend/rrr/offset/<br/>handclap offset"]
     Z["backend/rrr/visualization/<br/>strips, compass"]
-    X["scripts/<br/>record, inspect_session, calibrate,<br/>export, render_gif, render_mp4"]
+    X["scripts/<br/>record, inspect, calibrate, export, render<br/>(scripts/README.md)"]
     W["frontend/<br/>vite + react"]
     T --> V
     D --> V
@@ -87,7 +87,7 @@ audio and direction are shared the same way: all three are one mechanism,
 ```mermaid
 flowchart LR
     CAM["D455"] --> HUB["FrameHub<br/>one reader thread"]
-    HUB -->|"latest() - newest only"| PRE["MJPEG preview<br/>10 fps, fine to skip"]
+    HUB -->|"latest() - newest only"| PRE["MJPEG preview<br/>at most 15 Hz, fine to skip"]
     HUB -->|"add_listener() - every set, in order"| REC["VideoWriter<br/>nothing may be lost"]
 ```
 
@@ -108,7 +108,7 @@ the audio could no longer be opened by anything that opens a WAV.
 ```
 data/sessions/2026-09-02_15-28-36/
     session.json        the manifest: clock anchors, calibration state, errors
-    video.rrdb          SQLite: frames, motion, calibration, sensor options
+    video.rrdb          SQLite: frames, inertial samples, calibration, sensor options
     audio.wav          every channel, int16, gaps filled with silence
     audio.clock.jsonl   measured capture time, once a second and at every gap
     doa.jsonl           the array's direction estimate

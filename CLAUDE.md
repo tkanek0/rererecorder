@@ -158,17 +158,8 @@ records; it does not estimate.
 Untested by anything automatic: `SessionRecorder` itself, which needs a device.
 That covers the mark sidecar's open-and-close lifecycle.
 
-Confirmed on the hardware (2026-09-07, firmware 5.17.3.10):
-
-- `depth_to_infrared[0]` is the identity, so depth really is computed in the
-  left imager's frame. The stereo baseline is **95.13 mm**.
-- The accelerometer and gyroscope report the same transform, so they are one
-  frame - now checked rather than assumed.
-- **This unit has no IMU calibration.** The correction reads back as the
-  identity with zero bias, which matches the 9.69 m/s^2 gravity `inspect`
-  already measured against a true 9.81. `rs-imu-calibration.py` writes one if
-  it turns out to matter.
-- All three emitter modes work, but only via the sequence in
-  `docs/decisions.md` 18 - the obvious orderings are refused by the firmware,
-  silently enough that a session would claim `alternating` while the projector
-  stayed on.
+Confirmed on the hardware (2026-09-07, firmware 5.17.3.10), with the numbers in
+`docs/features.md` "What the calibration holds" and "The projector": depth is
+computed in the left imager's frame, the inertial sensors share one frame, this
+unit has **no IMU calibration** (it reads back as identity), and the emitter
+modes work only through the sequence in `docs/decisions.md` 18.

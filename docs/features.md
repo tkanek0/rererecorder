@@ -4,8 +4,9 @@ What the recorder does today, and what it says about what it did.
 
 ## Recording
 
-Every stream the D455 produces, at the resolution its sensors produce it, with
-no frames lost.
+Every stream the D455 produces, at the resolution its sensors produce it. On
+the machine it was built on that loses no frames; where a machine cannot keep
+up, what was lost is counted ([Honesty about losses](#honesty-about-losses)).
 
 | Stream | Recorded as | Codec | Size |
 |---|---|---|---|
@@ -13,8 +14,8 @@ no frames lost.
 | colour 1280x800 YUYV | `frames.color_y` / `_u` / `_v` | PNG each | 761 KB/frame |
 | IR left 1280x720 y8 | `frames.ir1` | PNG | 220 KB/frame |
 | IR right 1280x720 y8 | `frames.ir2` | PNG | 226 KB/frame |
-| accel 482 Hz | `imu` | plain columns | 48 B/sample |
-| gyro 478 Hz | `imu` | plain columns | 48 B/sample |
+| accel 400 Hz | `imu` | plain columns | 48 B/sample |
+| gyro 400 Hz | `imu` | plain columns | 48 B/sample |
 | per-frame metadata | `frames.metadata` | JSON | 22 fields per stream |
 | calibration, device, 48 sensor options | `meta` | JSON | written once |
 
@@ -145,18 +146,17 @@ On Linux, `make up` starts both in containers, bound to `HOST` on `API_PORT` and
 `APP_PORT`. Elsewhere they are started natively, one command each - see the
 README.
 
-- **Preview** - colour and depth side by side, MJPEG at 10 fps. Depth is shown
+- **Preview** - colour and depth side by side, MJPEG at up to 15 Hz, 10 Hz
+  while recording. Depth is shown
   next to colour because the failure worth catching mid-recording is depth going
   blank while colour looks perfect.
-- **Recording** - start and stop, an optional session name, and the counts above
-  as they change.
+- **Recording** - start and stop, an optional session name, the counts above as
+  they change, and [marks](#marks).
 - **Storage** - free space and **how long that lasts**, computed from the rate
   the recording is actually achieving. Free bytes alone say little at 195 GB an
   hour: 200 GB reads as plenty and is one hour. The directory can be moved
   between sessions, not during one.
 - **Sessions** - every recording, newest first, with its losses. Play or delete.
-- **Recording** also takes a mark: a label, and Enter or the button, written to
-  `events.jsonl` with the time it landed on.
 - **Playback** - play, pause, step, seek, four video streams, six audio
   channels, 0.25x to 4x. The clock shown is each frame's own recorded time,
   read from a response header, because frames are not evenly spaced.
@@ -313,14 +313,15 @@ uv run python scripts/calibrate.py data/sessions/<name> --apply  # and record it
 
 That measures *when*. **Where** is a separate question, and it is not measured
 at all: `session.json` carries a `rig` block holding the transform from the
-array's frame to the camera's, the microphone positions on the array, and which
+array's frame to the depth stream's (the frame every other transform in a
+recording is expressed against), the microphone positions on the array, and which
 channel of the WAV each microphone is. Every field starts empty.
 
 ```json
 "rig": {
   "source": "unset",        // then "nominal" for design values, "measured" for this unit
-  "rotation": null,         // row-major 3x3, camera_from_array
-  "translation": null,      // metres, array origin in the camera frame
+  "rotation": null,         // row-major 3x3, depth_from_array
+  "translation": null,      // metres, array origin in the depth stream's frame
   "microphones": null,      // metres, in the array frame
   "channels": null,         // which WAV channel each microphone is
   "description": null,

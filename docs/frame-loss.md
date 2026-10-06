@@ -161,30 +161,15 @@ threshold is, 1280x800 is on the wrong side of it.
 
 ## What is still discarded, on purpose
 
-Two or three sets per recording, always within the same millisecond as
-`pipeline.start`:
-
-```
-04:31:38,724  discarding a set whose streams are 129.4 ms apart: {'color': 2, 'depth': 7, ...}
-04:31:38,724  discarding a set whose streams are 196.3 ms apart: {'color': 4, 'depth': 7, ...}
-04:31:38,792  discarding a set whose streams are 229.8 ms apart: {'color': 6, 'depth': 1, ...}
-        <- nothing for the remaining ten seconds
-```
-
-The syncer settling: one stale depth frame paired with successive colour frames,
-after which the depth counter restarts at 1. Counted as `skipped_warmup` rather
-than as a loss, because the frames that follow are provably continuous - four
-recordings checked, `MISSING 0` on both streams every time.
+Only a set whose every frame was delivered before - the syncer re-delivering
+one. Colour and depth disagreeing in time discards nothing (decisions.md 21).
+Before the first set reaches the recorder, a re-delivery is the syncer settling
+and is counted as `skipped_warmup`, not a loss; after it, as
+`skipped_duplicate`.
 
 ## Where it ended up
 
-```
-session 2026-09-02_06-28-36                    [Docker / RSUSB / SATA SSD]
-  video           1010 frames over 33.67 s = 29.97 fps
-  frame interval  33.4 ms median, 33.4 min, 33.5 max
-  arrival lag     16.8 ms median (12.7 to 22.5)
-  depth  1010 frames, MISSING 0
-  color  1010 frames, MISSING 0
-```
-
-An interval that varies by 0.1 ms, where V4L2 left 100 ms holes.
+A 34-second session through Docker and RSUSB onto a SATA SSD: 1010 frames at
+29.97 fps, `MISSING 0` on both streams, and a frame interval of 33.4 ms that
+varies by 0.1 ms, where V4L2 left 100 ms holes. The full inspection of it is in
+[features.md](features.md), "The command line".

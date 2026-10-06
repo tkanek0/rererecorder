@@ -16,8 +16,9 @@ import wave
 from dataclasses import dataclass
 
 import numpy as np
-from respeaker_adapter import AudioTap, BlockStamp, DoaTap
+from respeaker_adapter import BlockStamp
 
+from rrr.devices import AudioTap, DoaTap, Reading
 from rrr.timeline import AudioClockPoint, AudioClockWriter
 
 logger = logging.getLogger(__name__)
@@ -112,6 +113,8 @@ class AudioWriter:
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
         self._stats = AudioStats()
+        #: Direction readings received since the writer last wrote them.
+        self._readings: list[Reading] = []
 
     # -- control -----------------------------------------------------------
 
@@ -158,6 +161,8 @@ class AudioWriter:
         """Open everything, write until told to stop, and close in order."""
         self._tap.acquire()
         if self._doa is not None:
+            # Every reading, not the newest at each pass: none is lost.
+            self._doa.add_listener(self._on_reading)
             self._doa.acquire()
         try:
             os.makedirs(os.path.dirname(os.path.abspath(self._wav_path)), exist_ok=True)
@@ -182,6 +187,7 @@ class AudioWriter:
         finally:
             self._tap.release()
             if self._doa is not None:
+                self._doa.remove_listener(self._on_reading)
                 self._doa.release()
             logger.info(
                 "audio recording stopped: %s, %d samples, %d filled",
@@ -203,7 +209,6 @@ class AudioWriter:
         cursor = self._tap.cursor
         previous: BlockStamp | None = None
         last_point_at = 0.0
-        seen_reading = 0
 
         while not self._stop.is_set():
             chunk = self._tap.stream(cursor, timeout=READ_TIMEOUT_S)
@@ -263,9 +268,11 @@ class AudioWriter:
                     self._stats.samples += len(block)
                 previous = stamp
 
-            if directions is not None and self._doa is not None:
-                seen_reading = _write_directions(directions, self._doa, seen_reading)
+            if directions is not None:
+                self._write_readings(directions)
 
+        if directions is not None:
+            self._write_readings(directions)
         # Always close with a point at the end of the file. end_monotonic, not
         # monotonic: the position is one block past the last stamp's start, and
         # pairing it with the start would skew the fit by a block.
@@ -278,6 +285,27 @@ class AudioWriter:
             )
             with self._lock:
                 self._stats.clock_points = clock.count
+
+    def _on_reading(self, reading: Reading) -> None:
+        """Keep a direction reading for the writer thread. Runs on the poller's."""
+        with self._lock:
+            self._readings.append(reading)
+
+    def _write_readings(self, handle) -> None:
+        """Append the readings received since the last call to the sidecar."""
+        with self._lock:
+            readings, self._readings = self._readings, []
+        for reading in readings:
+            handle.write(
+                json.dumps(
+                    {
+                        "t": reading.captured_at,
+                        "angle": reading.angle,
+                        "voice": reading.voice_activity,
+                    }
+                )
+                + "\n"
+            )
 
     @staticmethod
     def _fill_for(
@@ -327,33 +355,6 @@ class AudioWriter:
         if end <= start:
             return None
         return chunk.samples[start:end]
-
-
-def _write_directions(handle, doa: DoaTap, seen: int) -> int:
-    """Append any new angle readings to the sidecar.
-
-    Args:
-        handle: Open text file to append JSON lines to.
-        doa: The tap to read from.
-        seen: Index of the last reading written.
-
-    Returns:
-        The new last-written index.
-    """
-    reading = doa.latest(timeout=0.0, after=seen)
-    if reading is None:
-        return seen
-    handle.write(
-        json.dumps(
-            {
-                "t": reading.captured_at,
-                "angle": reading.angle,
-                "voice": reading.voice_activity,
-            }
-        )
-        + "\n"
-    )
-    return reading.index
 
 
 def _to_int16(samples: np.ndarray) -> np.ndarray:

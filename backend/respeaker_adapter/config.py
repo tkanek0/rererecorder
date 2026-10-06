@@ -31,13 +31,6 @@ CHANNEL_MICS = (1, 2, 3, 4)
 #: Frames per callback: 16 ms.
 BLOCK_SIZE = 256
 
-#: Seconds of audio kept in memory for analysis.
-WINDOW_S = 10.0
-
-#: How long capture keeps running after the last consumer goes away, so one-shot
-#: reads do not reopen the device each time.
-IDLE_SHUTDOWN_S = 10.0
-
 # -- direction of arrival ----------------------------------------------------
 
 #: How often the chip is polled for its angle. A poll is two control transfers,

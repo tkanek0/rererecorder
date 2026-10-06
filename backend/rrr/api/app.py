@@ -31,9 +31,10 @@ from realsense_adapter import (
     StreamError,
     list_devices,
 )
-from respeaker_adapter import AudioTap, dbfs, rescan, rms
+from respeaker_adapter import dbfs, rescan, rms
 from respeaker_adapter import probe as probe_audio
 
+from rrr.devices import AudioTap, FrameHub
 from rrr.recorder import RecorderBusy, SessionRecorder
 from rrr.recorder import config as recording_config
 from rrr.timeline import (
@@ -42,7 +43,7 @@ from rrr.timeline import (
     listing,
     read_manifest,
 )
-from rrr.video import ArchiveSource, FrameHub
+from rrr.video import ArchiveSource
 
 from . import config, preview
 
@@ -57,10 +58,7 @@ class State:
     """
 
     def __init__(self) -> None:
-        self.hub = FrameHub(
-            self._open_camera,
-            idle_shutdown_s=config.IDLE_SHUTDOWN_S,
-        )
+        self.hub = FrameHub(self._open_camera, recording_config.IDLE_SHUTDOWN_S)
         self.recorder = SessionRecorder(
             recording_config.SESSIONS_ROOT,
             streams=recording_config.DEFAULT_STREAMS,
@@ -115,7 +113,7 @@ class State:
             logger.warning("shutting down with a recording running; stopping it")
             self.recorder.stop()
         self.recorder.close()
-        self.hub.stop()
+        self.hub.shutdown()
 
 
 state = State()

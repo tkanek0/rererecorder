@@ -12,7 +12,8 @@ from dataclasses import dataclass
 
 from realsense_adapter import FrameSet, StreamConfig
 
-from rrr.video import ArchiveWriter, FrameHub
+from rrr.devices import FrameHub
+from rrr.video import ArchiveWriter
 
 logger = logging.getLogger(__name__)
 

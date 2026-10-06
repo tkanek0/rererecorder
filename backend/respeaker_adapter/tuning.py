@@ -100,7 +100,7 @@ def _translate(error: usb.core.USBError) -> Exception:
     return error
 
 
-def find(
+def find_tuning(
     vendor_id: int = config.USB_VENDOR_ID, product_id: int = config.USB_PRODUCT_ID
 ) -> Tuning:
     """Locate the array and return a handle on its parameter interface.

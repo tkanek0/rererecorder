@@ -24,8 +24,8 @@ The recorder lives under one package, `rrr`; the two devices are reached
 through `realsense_adapter` and `respeaker_adapter`, separate packages beside it
 that import nothing from `rrr` and read no environment variable -
 `rrr.recorder.config` chooses their settings and passes them in. Dependencies
-run one way: `rrr.timeline` imports nothing but numpy, the adapters and
-`rrr.video` import no web framework, and nothing below `rrr.api` knows HTTP
+run one way: `rrr.timeline` imports nothing but numpy, the adapters,
+`rrr.devices` and `rrr.video` import no web framework, and nothing below `rrr.api` knows HTTP
 exists. The tools that work
 on recordings - record, inspect, calibrate, export, render - are thin scripts in
 `scripts/` on top of the package, and nothing in the package imports them
@@ -38,8 +38,9 @@ container and slow to install on a Pi.
 flowchart TD
     T["backend/rrr/timeline/<br/>clocks, session manifest<br/><i>numpy only</i>"]
     D["backend/realsense_adapter/<br/>D455: source, frame types<br/><i>pyrealsense2</i>"]
-    V["backend/rrr/video/<br/>shared pipeline, archive"]
-    A["backend/respeaker_adapter/<br/>ReSpeaker: taps, DOA<br/><i>sounddevice, pyusb</i>"]
+    V["backend/rrr/video/<br/>the .rrdb archive"]
+    E["backend/rrr/devices/<br/>each device shared by its consumers"]
+    A["backend/respeaker_adapter/<br/>ReSpeaker: capture, DOA readout<br/><i>sounddevice, pyusb</i>"]
     R["backend/rrr/recorder/<br/>writers, session orchestration"]
     S["backend/rrr/api/<br/>FastAPI, MJPEG, player"]
     P["backend/rrr/playback/<br/>a recording on one clock"]
@@ -50,8 +51,10 @@ flowchart TD
     W["frontend/<br/>vite + react"]
     T --> V
     D --> V
+    D --> E
+    A --> E
+    E --> R
     V --> R
-    A --> R
     R --> S
     S --> W
     V --> P
@@ -77,7 +80,9 @@ either could not run beside the server.
 ## The camera is shared, two different ways
 
 A RealSense device admits one process. One `FrameHub` owns it and hands frames
-out by two routes, because the two consumers want opposite things.
+out by two routes, because the two consumers want opposite things. The array's
+audio and direction are shared the same way: all three are one mechanism,
+`rrr.devices.SharedWorker`.
 
 ```mermaid
 flowchart LR

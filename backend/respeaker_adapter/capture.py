@@ -1,11 +1,4 @@
-"""Reading the array: one open device, one ring buffer, two ways out.
-
-The device is opened once (ALSA allows one process) and read on a background
-thread into a ring buffer, with two ways out:
-
-* :meth:`AudioTap.latest` returns the most recent N seconds, for analysis.
-* :meth:`AudioTap.stream` walks forward from a cursor and reports what was
-  dropped, for delivery and recording.
+"""Opening the array for capture, and finding it.
 
 Times come from PortAudio's ``inputBufferAdcTime``, not the callback's
 ``time.monotonic()``, which runs one block (16 ms at 256 samples) late; when
@@ -14,19 +7,17 @@ the host API does not fill it in, the callback time is used and logged.
 
 from __future__ import annotations
 
-import collections
 import logging
-import math
 import sys
-import threading
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Self
 
 import numpy as np
 
 from . import config
-from .types import BlockStamp, Chunk, DeviceNotFound, Window
+from .types import DeviceNotFound
 
 try:
     import sounddevice as sd
@@ -92,454 +83,175 @@ else:
         """No-op off Windows, matching :func:`_com_initialize`."""
 
 
-class AudioTap:
-    """Keep a rolling window of the array's audio available.
+class AdcClock:
+    """Places each block on CLOCK_MONOTONIC from PortAudio's ``inputBufferAdcTime``.
 
-    Reference counted: the device opens with the first consumer and closes
-    shortly after the last leaves. A failure is not retried until
-    :meth:`reconnect` (docs/decisions.md 29). Consumers must not modify
-    published arrays in place.
+    The reported time is used as-is, corrected by a fixed offset, or replaced
+    by the callback clock, as decided once over the first
+    :data:`_DOMAIN_CALIBRATION_BLOCKS` valid blocks, which are themselves timed
+    from the callback clock. See docs/decisions.md 20 and 26.
     """
 
-    def __init__(
-        self,
-        device: str = config.DEVICE_NAME,
-        rate: int = config.SAMPLE_RATE,
-        channels: int = config.CHANNELS,
-        block_size: int = config.BLOCK_SIZE,
-        window_s: float = config.WINDOW_S,
-    ) -> None:
-        """Initialise the tap without opening the device.
+    def __init__(self, rate: int) -> None:
+        """Start undecided.
 
         Args:
-            device: Substring matched against the input device's name.
-            rate: Sample rate to ask for.
-            channels: Channels to ask for. A device offering fewer is
-                reported rather than used.
-            block_size: Frames per callback.
-            window_s: Seconds of audio to keep.
+            rate: Sample rate in Hz.
         """
-        self._device = device
         self._rate = rate
-        self._channels = channels
-        self._block_size = block_size
-        self._capacity = max(1, int(window_s * rate))
+        self._warned = False
+        self._lags: list[float] = []
+        self._decided = False
+        #: Added to the reported time when it is stable but on another epoch.
+        self.offset = 0.0
+        #: Set when the reported time is not one clock; the callback's is used.
+        self.incoherent = False
 
-        self._lock = threading.Lock()
-        self._updated = threading.Condition(self._lock)
-        self._thread: threading.Thread | None = None
-        self._users = 0
-        self._released_at = 0.0
-        #: Set when capture fails, and kept until reconnect().
-        self._failed = False
-        #: Why capture last failed, cleared along with _failed.
-        self._error: str | None = None
-        self._overruns = 0
-
-        # _written counts samples ever written, so it doubles as the stream
-        # cursor and as a "has anything arrived yet" test.
-        self._ring = np.zeros((self._capacity, channels), dtype=np.float32)
-        self._position = 0
-        self._written = 0
-        self._index = 0
-        self._captured_at = 0.0
-
-        # One stamp per block, covering the whole ring plus two spare for the
-        # block being written and rounding.
-        self._stamps: collections.deque[BlockStamp] = collections.deque(
-            maxlen=math.ceil(self._capacity / max(1, block_size)) + 2
-        )
-        #: Whether the missing-ADC-time fallback has been logged (once only).
-        self._adc_warned = False
-        #: `now - reported` from the first valid blocks, for calibration.
-        self._domain_lags: list[float] = []
-        #: Whether calibration has decided.
-        self._domain_calibrated = False
-        #: Correction added to `reported` when the domain is stable-but-offset.
-        self._adc_offset = 0.0
-        #: Set when calibration finds the ADC clock incoherent; every later
-        #: block uses the callback clock (docs/decisions.md 20).
-        self._adc_bad_domain = False
-
-    # -- lifecycle ---------------------------------------------------------
-
-    def acquire(self) -> None:
-        """Register a consumer, opening the device unless it is open or failed."""
-        with self._lock:
-            self._users += 1
-            self._ensure_thread()
-
-    def reconnect(self) -> None:
-        """Clear a failure and, if anyone is waiting, open the device again.
-
-        Nothing calls this automatically (docs/decisions.md 29). A device
-        plugged in since PortAudio was initialised needs :func:`rescan` first.
-        """
-        with self._lock:
-            self._failed = False
-            self._error = None
-            if self._users > 0:
-                self._ensure_thread()
-
-    def _ensure_thread(self) -> None:
-        """Start the reader thread unless it is running or has failed.
-
-        Holds _lock.
-        """
-        if self._failed:
-            return
-        if self._thread is not None and self._thread.is_alive():
-            return
-        self._thread = threading.Thread(
-            target=self._run, name="audio-tap", daemon=True
-        )
-        self._thread.start()
-
-    def release(self) -> None:
-        """Deregister a consumer; the device closes after an idle period."""
-        with self._lock:
-            self._users = max(0, self._users - 1)
-            self._released_at = time.monotonic()
-
-    @property
-    def active(self) -> bool:
-        """Whether the reader thread is currently running."""
-        with self._lock:
-            return self._thread is not None and self._thread.is_alive()
-
-    @property
-    def failed(self) -> bool:
-        """Whether capture failed and is waiting for :meth:`reconnect`."""
-        with self._lock:
-            return self._failed
-
-    @property
-    def error(self) -> str | None:
-        """Why capture failed, while :attr:`failed` is set; else None."""
-        with self._lock:
-            return self._error
-
-    @property
-    def overruns(self) -> int:
-        """How often the driver reported dropped input since the last open."""
-        with self._lock:
-            return self._overruns
-
-    @property
-    def rate(self) -> int:
-        """Sample rate in Hz."""
-        return self._rate
-
-    @property
-    def channels(self) -> int:
-        """Number of channels being captured."""
-        return self._channels
-
-    @property
-    def block_size(self) -> int:
-        """Frames per callback, which is the resolution of a block stamp."""
-        return self._block_size
-
-    @property
-    def cursor(self) -> int:
-        """Total samples captured so far. A starting point for :meth:`stream`."""
-        with self._lock:
-            return self._written
-
-    def shutdown(self, timeout: float = 2.0) -> None:
-        """Stop capture now, without waiting out the idle period.
-
-        Call before exiting: the daemon reader thread would otherwise never
-        close the device, which can make the next open fail.
-
-        Args:
-            timeout: Seconds to wait for the thread to finish.
-        """
-        with self._lock:
-            self._users = 0
-            # Backdated so the idle check fires on the reader's next pass.
-            self._released_at = 0.0
-        thread = self._thread
-        if thread is not None:
-            thread.join(timeout)
-
-    def __enter__(self) -> Self:
-        """Acquire the tap for the duration of a ``with`` block."""
-        self.acquire()
-        return self
-
-    def __exit__(self, *exc: object) -> None:
-        """Release the tap."""
-        self.release()
-
-    # -- reading -----------------------------------------------------------
-
-    def latest(
-        self, seconds: float | None = None, timeout: float = 5.0, after: int = 0
-    ) -> Window | None:
-        """Return the most recent audio, waiting for new samples if necessary.
-
-        Args:
-            seconds: How much history to return, capped at what is kept. None
-                asks for everything available.
-            timeout: Seconds to wait for audio newer than ``after``.
-            after: Only return a window whose index exceeds this value.
-
-        Returns:
-            The window, or None if no new audio arrived within the timeout -
-            at once, without waiting, while the tap has failed.
-        """
-        with self._updated:
-            if not self._wait_for(lambda: self._index > after, timeout):
-                return None
-
-            available = min(self._written, self._capacity)
-            if available == 0:
-                return None
-            wanted = available if seconds is None else int(seconds * self._rate)
-            count = max(1, min(available, wanted))
-            return Window(
-                samples=self._unwrap(self._written - count, count),
-                rate=self._rate,
-                index=self._index,
-                captured_at=self._captured_at,
-            )
-
-    def stream(self, cursor: int, timeout: float = 1.0) -> Chunk | None:
-        """Return everything captured since ``cursor``.
-
-        Args:
-            cursor: Sample count to continue from, as returned by a previous
-                chunk or by :attr:`cursor`.
-            timeout: Seconds to wait for samples beyond ``cursor``.
-
-        Returns:
-            The chunk, or None if nothing new arrived within the timeout -
-            at once, without waiting, while the tap has failed.
-        """
-        with self._updated:
-            if not self._wait_for(lambda: self._written > cursor, timeout):
-                return None
-
-            available = min(self._written, self._capacity)
-            oldest = self._written - available
-            # A reader slower than the ring loses the difference; report it.
-            dropped = max(0, oldest - cursor)
-            start = max(cursor, oldest)
-            count = self._written - start
-            if count <= 0:
-                return None
-            return Chunk(
-                samples=self._unwrap(start, count),
-                rate=self._rate,
-                cursor=self._written,
-                dropped=dropped,
-                captured_at=self._captured_at,
-                # Every block this chunk overlaps, so a gap between two shows.
-                stamps=tuple(
-                    stamp for stamp in self._stamps if stamp.end_sample > start
-                ),
-            )
-
-    def _wait_for(self, ready, timeout: float) -> bool:
-        """Wait on the condition variable until ``ready()`` or the timeout.
-
-        The caller must hold ``self._updated``. Gives up at once while the tap
-        has failed.
-        """
-        deadline = time.monotonic() + timeout
-        while not ready():
-            if self._failed:
-                return False
-            remaining = deadline - time.monotonic()
-            if remaining <= 0:
-                return False
-            self._updated.wait(remaining)
-        return True
-
-    def _unwrap(self, start: int, count: int) -> np.ndarray:
-        """Copy ``count`` samples ending at the write head, oldest first.
-
-        Args:
-            start: Absolute sample index to begin at.
-            count: How many samples to copy.
-
-        Returns:
-            A fresh ``(count, channels)`` array. The caller must hold the lock.
-        """
-        begin = start % self._capacity
-        if begin + count <= self._capacity:
-            return self._ring[begin : begin + count].copy()
-        split = self._capacity - begin
-        return np.concatenate((self._ring[begin:], self._ring[: count - split]))
-
-    # -- reader thread -----------------------------------------------------
-
-    def _should_stop(self) -> bool:
-        with self._lock:
-            if self._users > 0:
-                return False
-            return time.monotonic() - self._released_at > config.IDLE_SHUTDOWN_S
-
-    def _publish(self, block: np.ndarray, adc_time: float) -> None:
-        """Append one callback's worth of samples to the ring buffer.
-
-        Args:
-            block: ``(n, channels)`` float32 samples, oldest first.
-            adc_time: ADC time of the block's first sample, on CLOCK_MONOTONIC.
-        """
-        if block.shape[0] == 0:
-            return
-        # A block larger than the ring keeps its newest part, which starts
-        # that much later.
-        if block.shape[0] > self._capacity:
-            adc_time += (block.shape[0] - self._capacity) / self._rate
-            block = block[-self._capacity :]
-
-        with self._updated:
-            count = block.shape[0]
-            self._stamps.append(
-                BlockStamp(sample=self._written, monotonic=adc_time, frames=count)
-            )
-            end = self._position + count
-            if end <= self._capacity:
-                self._ring[self._position : end] = block
-            else:
-                split = self._capacity - self._position
-                self._ring[self._position :] = block[:split]
-                self._ring[: count - split] = block[split:]
-            self._position = end % self._capacity
-            self._written += count
-            self._index += 1
-            self._captured_at = adc_time + count / self._rate
-            self._updated.notify_all()
-
-    def _callback(self, indata: np.ndarray, frames: int, time_info, status) -> None:
-        """PortAudio callback. Runs on PortAudio's thread, so it stays short."""
-        if status.input_overflow:
-            with self._lock:
-                self._overruns += 1
-        self._publish(
-            indata.astype(np.float32) * _INT16_SCALE,
-            self._adc_time(frames, time_info.inputBufferAdcTime),
-        )
-
-    def _adc_time(self, frames: int, reported: float) -> float:
-        """Return a usable ADC time for a block, calibrating once at the start.
+    def __call__(self, frames: int, reported: float) -> float:
+        """Return the ADC time of a block's first sample.
 
         Args:
             frames: Samples in the block.
-            reported: PortAudio's ``inputBufferAdcTime``.
+            reported: PortAudio's ``inputBufferAdcTime``; zero when the host
+                API does not fill it in.
 
         Returns:
-            The ADC time of the block's first sample, on the same clock as
-            ``time.monotonic()``.
-
-        The reported value is used as-is, corrected by a fixed offset, or
-        replaced by the callback clock, as decided over the first
-        :data:`_DOMAIN_CALIBRATION_BLOCKS` valid blocks, which are themselves
-        timed from the callback clock. See docs/decisions.md 20 and 26.
+            The time, on the same clock as ``time.monotonic()``.
         """
         expected_lag = frames / self._rate
         now = time.monotonic()
-
         if reported <= 0.0:
-            if not self._adc_warned:
+            if not self._warned:
                 logger.warning(
                     "PortAudio did not report inputBufferAdcTime; timing audio "
                     "from the callback instead, which is %.1f ms coarser",
                     expected_lag * 1000.0,
                 )
-                self._adc_warned = True
+                self._warned = True
             return now - expected_lag
-
-        if not self._domain_calibrated:
-            self._domain_lags.append(now - reported)
-            if len(self._domain_lags) < _DOMAIN_CALIBRATION_BLOCKS:
+        if not self._decided:
+            self._lags.append(now - reported)
+            if len(self._lags) < _DOMAIN_CALIBRATION_BLOCKS:
                 return now - expected_lag
-            self._domain_calibrated = True
-            lags = np.array(self._domain_lags)
-            mean_lag = float(lags.mean())
-            spread = float(lags.std())
-            if -expected_lag <= mean_lag <= 3.0 * expected_lag:
-                logger.info(
-                    "inputBufferAdcTime agrees with time.monotonic(): "
-                    "callback runs %.1f ms after the block's first sample on "
-                    "average over %d blocks (block is %.1f ms)",
-                    mean_lag * 1000.0,
-                    len(lags),
-                    expected_lag * 1000.0,
-                )
-            elif spread < _DOMAIN_STABILITY_S:
-                self._adc_offset = mean_lag - expected_lag
-                logger.warning(
-                    "inputBufferAdcTime is %.3f s from the callback clock on "
-                    "average over %d blocks, but stable there (+/-%.1f ms): "
-                    "correcting for the fixed offset rather than discarding "
-                    "the ADC clock's own timing",
-                    mean_lag,
-                    len(lags),
-                    spread * 1000.0,
-                )
-            else:
-                self._adc_bad_domain = True
-                logger.warning(
-                    "inputBufferAdcTime is %.3f s from the callback clock over "
-                    "%d blocks and not even stable there (+/-%.3f s): the two "
-                    "are not readable as one clock. Falling back to the "
-                    "callback clock for the rest of this recording, which is "
-                    "%.1f ms coarser",
-                    mean_lag,
-                    len(lags),
-                    spread,
-                    expected_lag * 1000.0,
-                )
-
-        if self._adc_bad_domain:
+            self._decide(expected_lag)
+        if self.incoherent:
             return now - expected_lag
-        return reported + self._adc_offset
+        return reported + self.offset
 
-    def _run(self) -> None:
-        logger.info("audio tap starting on device matching %r", self._device)
-        # Once per thread lifetime (docs/decisions.md 25).
-        com_ready = _com_initialize()
-        failure: str | None = None
+    def _decide(self, expected_lag: float) -> None:
+        """Judge the reported clock from the lags collected so far."""
+        self._decided = True
+        lags = np.array(self._lags)
+        mean_lag, spread = float(lags.mean()), float(lags.std())
+        if -expected_lag <= mean_lag <= 3.0 * expected_lag:
+            logger.info(
+                "inputBufferAdcTime agrees with time.monotonic(): the callback "
+                "runs %.1f ms after a block's first sample (block %.1f ms)",
+                mean_lag * 1000.0,
+                expected_lag * 1000.0,
+            )
+        elif spread < _DOMAIN_STABILITY_S:
+            self.offset = mean_lag - expected_lag
+            logger.warning(
+                "inputBufferAdcTime is %.3f s off the callback clock but stable "
+                "(+/-%.1f ms): correcting for the fixed offset",
+                mean_lag,
+                spread * 1000.0,
+            )
+        else:
+            self.incoherent = True
+            logger.warning(
+                "inputBufferAdcTime is %.3f s off the callback clock and not "
+                "stable (+/-%.3f s): not readable as one clock, so timing from "
+                "the callback instead",
+                mean_lag,
+                spread,
+            )
+
+
+class Capture:
+    """The array open for capture.
+
+    Every block goes to ``on_block`` as float32 in [-1, 1] with the ADC time of
+    its first sample, on PortAudio's thread. Open on the thread that will
+    close it; a WASAPI stream needs COM there (docs/decisions.md 25).
+    """
+
+    def __init__(
+        self,
+        on_block: Callable[[np.ndarray, float], None],
+        device: str = config.DEVICE_NAME,
+        rate: int = config.SAMPLE_RATE,
+        channels: int = config.CHANNELS,
+        block_size: int = config.BLOCK_SIZE,
+    ) -> None:
+        """Prepare a capture without opening the device.
+
+        Args:
+            on_block: Receives ``(samples, adc_time)`` for every block.
+            device: Substring matched against the input device's name.
+            rate: Sample rate to ask for.
+            channels: Channels to ask for. A device offering fewer is reported
+                rather than used.
+            block_size: Frames per callback.
+        """
+        self._on_block = on_block
+        self._device = device
+        self._rate = rate
+        self._channels = channels
+        self._block_size = block_size
+        self._clock = AdcClock(rate)
+        self._stream: sd.InputStream | None = None
+        self._com = False
+        #: Input overflows the driver reported since opening.
+        self.overruns = 0
+        #: ``time.monotonic()`` of the newest block, or of opening.
+        self.last_block_at = 0.0
+
+    def __enter__(self) -> Self:
+        """Open the device and start capturing.
+
+        Raises:
+            DeviceNotFound: If no usable device matches.
+            sounddevice.PortAudioError: If PortAudio refuses to open it.
+        """
+        self._com = _com_initialize()
+        index = _resolve_device(self._device, self._channels, self._rate)
+        # int16 is the endpoint's wire format; converted in the callback.
+        self._stream = sd.InputStream(
+            device=index,
+            channels=self._channels,
+            samplerate=self._rate,
+            dtype="int16",
+            blocksize=self._block_size,
+            callback=self._callback,
+        )
+        self.last_block_at = time.monotonic()
+        self._stream.start()
+        logger.info("capturing %d ch at %d Hz", self._channels, self._rate)
+        return self
+
+    def __exit__(self, *exc: object) -> None:
+        """Stop capturing and close the device."""
+        stream, self._stream = self._stream, None
         try:
-            if not self._should_stop():
-                try:
-                    index = _resolve_device(self._device, self._channels, self._rate)
-                    with self._lock:
-                        self._overruns = 0
-                    # int16 is the endpoint's wire format; convert here.
-                    with sd.InputStream(
-                        device=index,
-                        channels=self._channels,
-                        samplerate=self._rate,
-                        dtype="int16",
-                        blocksize=self._block_size,
-                        callback=self._callback,
-                    ):
-                        logger.info(
-                            "capturing %d ch at %d Hz", self._channels, self._rate
-                        )
-                        while not self._should_stop():
-                            time.sleep(0.1)
-                except Exception as error:  # noqa: BLE001 - reported, not raised
-                    logger.warning("capture failed, not retrying: %s", error)
-                    failure = str(error)
+            if stream is not None:
+                # Abort, not stop: a stalled stream has nothing left to drain.
+                stream.abort()
+                stream.close()
         finally:
-            if com_ready:
+            if self._com:
                 _com_uninitialize()
 
-        logger.info("audio tap stopped")
-        with self._updated:
-            if failure is not None:
-                self._failed = True
-                self._error = failure
-                # Detach so a reconnect during return starts a fresh reader.
-                if self._thread is threading.current_thread():
-                    self._thread = None
-            self._updated.notify_all()
+    def _callback(self, indata: np.ndarray, frames: int, time_info, status) -> None:
+        """PortAudio's callback. Runs on PortAudio's thread, so it stays short."""
+        self.last_block_at = time.monotonic()
+        if status.input_overflow:
+            self.overruns += 1
+        self._on_block(
+            indata.astype(np.float32) * _INT16_SCALE,
+            self._clock(frames, time_info.inputBufferAdcTime),
+        )
 
 
 #: Host API preferred on Windows, only together with a matching rate.
@@ -668,7 +380,7 @@ def rescan() -> None:
     """Make PortAudio enumerate devices again.
 
     PortAudio takes its device list once, at initialisation. Call only with
-    every tap stopped: an open stream would be pulled from under its reader.
+    no capture open: an open stream would be pulled from under its reader.
     Uses ``sounddevice``'s private ``_terminate`` / ``_initialize``, thin
     wrappers around ``Pa_Terminate`` / ``Pa_Initialize``.
     """

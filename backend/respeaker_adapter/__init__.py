@@ -1,36 +1,29 @@
 """Getting audio and a direction off a ReSpeaker USB Mic Array.
 
-Derived from respeaker-playground, but each capture block is stamped with
-PortAudio's ``inputBufferAdcTime`` (see :mod:`respeaker_adapter.capture`).
-Knows nothing about HTTP, the camera or ``rrr``, and reads no environment
-variable: every setting is an argument, defaulting to
-:mod:`respeaker_adapter.config`.
+Primitives only: open, read, close. Sharing a device between consumers, and
+what happens when it fails, belong to ``rrr.devices``. Knows nothing about HTTP,
+the camera or ``rrr``, and reads no environment variable: every setting is an
+argument, defaulting to :mod:`respeaker_adapter.config`.
 """
 
-from .capture import (
-    AudioTap,
-    probe,
-    rescan,
-)
-from .config import (
-    BLOCK_SIZE,
-    CHANNELS,
-    DEVICE_NAME,
-)
-from .doa import DoaTap, Reading
-from .types import BlockStamp, Chunk, DeviceNotFound, dbfs, rms
+from .capture import Capture, probe, rescan
+from .config import BLOCK_SIZE, CHANNELS, DEVICE_NAME, DOA_POLL_HZ, SAMPLE_RATE
+from .tuning import find_tuning
+from .types import BlockStamp, Chunk, DeviceNotFound, Window, dbfs, rms
 
 __all__ = [
     "BLOCK_SIZE",
     "CHANNELS",
     "DEVICE_NAME",
-    "AudioTap",
+    "DOA_POLL_HZ",
+    "SAMPLE_RATE",
     "BlockStamp",
+    "Capture",
     "Chunk",
     "DeviceNotFound",
-    "DoaTap",
-    "Reading",
+    "Window",
     "dbfs",
+    "find_tuning",
     "probe",
     "rescan",
     "rms",

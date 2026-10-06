@@ -86,8 +86,7 @@ The split and its inverse were checked byte-for-byte on every frame, not
 assumed.
 
 **Cost:** three columns instead of one, and a reader has to reassemble them.
-`rrr.video.archive.join_yuyv` does, and `rrr.api.preview.to_bgr_from_planes` skips the
-reassembly for display.
+`rrr.video.archive.join_yuyv` does.
 
 ---
 
@@ -525,7 +524,7 @@ costs nothing.
 
 ## 20. Fall back to the callback clock for the rest of a recording once the domain is known bad
 
-**Chosen:** in `backend/respeaker_adapter/capture.py`'s `_adc_time`, once the one-time check
+**Chosen:** in `respeaker_adapter.capture.AdcClock`, once the one-time check
 finds `inputBufferAdcTime` on a different clock than `time.monotonic()`, set
 a flag and use the `now - expected_lag` fallback for every later block in
 that recording, not just the one being checked.
@@ -746,10 +745,9 @@ rate, so tier 2 picks it exactly as tier 3 (the old behaviour) already did.
 
 ## 25. Initialise COM on the array's reader thread, for WASAPI's callback mode
 
-**Chosen:** `AudioTap._run` - the background thread that reads the array -
-calls `ctypes.windll.ole32.CoInitializeEx(None, COINIT_MULTITHREADED)` once,
-before its first stream open, and `CoUninitialize` once, when the thread
-exits. Windows only; `ctypes.windll` does not exist elsewhere, and no other
+**Chosen:** `respeaker_adapter.Capture`, on the thread that opens and closes
+the array, calls `ctypes.windll.ole32.CoInitializeEx(None, COINIT_MULTITHREADED)` once,
+before opening the stream, and `CoUninitialize` once it is closed. Windows only; `ctypes.windll` does not exist elsewhere, and no other
 platform's PortAudio backend was measured to need this.
 
 **Alternatives:** open the stream in blocking (read) mode instead of
@@ -783,7 +781,7 @@ actually depends on it.
 
 ## 26. Correct a stable clock-domain offset instead of discarding it
 
-**Chosen:** `AudioTap._adc_time` collects `now - reported` over the first 20
+**Chosen:** `AdcClock` collects `now - reported` over the first 20
 valid blocks (`_DOMAIN_CALIBRATION_BLOCKS`, ~0.3 s) instead of deciding from
 one, and uses the _spread_ (standard deviation) of that window to tell three
 cases apart: agrees with `time.monotonic()` (use `reported` as-is, decision
@@ -896,8 +894,9 @@ measured in 11 and matches the old one.
 
 ## 29. A failed device stays failed until someone presses Reconnect
 
-**Chosen:** `FrameHub`, `AudioTap` and `DoaTap` stop when their device fails -
-on opening, or when a working stream breaks - and stay stopped. A new consumer
+**Chosen:** every device - `FrameHub`, `AudioTap` and `DoaTap`, each a
+`rrr.devices.SharedWorker` - stops when it fails, on opening or when a working
+stream breaks, and stays stopped. A new consumer
 does not reopen them. `reconnect()` does, and the only callers are
 `POST /api/devices/{realsense|respeaker}/reconnect` (the page's Reconnect
 button) and, for the camera, a stream-settings change. Reconnect is refused
@@ -1008,8 +1007,8 @@ Device access that knows nothing of the recorder is a separate package beside
 `rrr.recorder.config` reads `RRR_AUDIO_*` and passes the values in. Likewise
 `realsense_adapter`, out of `rrr.video`: the live source, the stream
 configuration and the frame types, with `RRR_EMITTER` left to
-`rrr.recorder.config`. What stays in `rrr.video` is the recorder's own - the
-shared pipeline and the `.rrdb` archive, including its YUYV plane split.
+`rrr.recorder.config`. The adapters only open, read and close; sharing a device
+between consumers is `rrr.devices`, and `rrr.video` is the `.rrdb` archive.
 
 ```mermaid
 flowchart LR

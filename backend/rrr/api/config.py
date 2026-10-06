@@ -26,10 +26,6 @@ PORT = int(os.environ.get("RRR_API_PORT", "8040"))
 #: because an MJPEG response ends only when its client leaves.
 SHUTDOWN_TIMEOUT_S = int(os.environ.get("RRR_SHUTDOWN_TIMEOUT_S", "5"))
 
-#: How long the camera stays open after the last viewer leaves. Outlasts a page
-#: reload, since reopening costs a second plus auto-exposure settling.
-IDLE_SHUTDOWN_S = float(os.environ.get("RRR_IDLE_SHUTDOWN_S", "20"))
-
 # -- the preview -------------------------------------------------------------
 
 #: Width the preview is scaled to before encoding: the panel's own width.

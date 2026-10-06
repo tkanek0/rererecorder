@@ -7,6 +7,7 @@ counters. The tap is faked with prepared chunks.
 
 from __future__ import annotations
 
+import json
 import threading
 import time
 import wave
@@ -338,3 +339,45 @@ def test_a_tap_error_is_reported_not_raised(tmp_path) -> None:
     assert stats.error == "device disconnected"
     # And what had arrived before the failure is still on disk.
     assert _wav_frames(wav) == BLOCK
+
+
+def test_every_direction_reading_reaches_the_sidecar(tmp_path) -> None:
+    """Readings arrive through a listener, so none is lost between passes."""
+    from rrr.devices import Reading
+
+    class FakeDoa:
+        def __init__(self) -> None:
+            self.listeners: list = []
+
+        def add_listener(self, listener) -> None:
+            self.listeners.append(listener)
+
+        def remove_listener(self, listener) -> None:
+            self.listeners.remove(listener)
+
+        def acquire(self) -> None:
+            # A burst between two writer passes, as a stalled pass would see.
+            for n in range(5):
+                for listener in self.listeners:
+                    listener(Reading(angle=n, voice_activity=False, captured_at=START + n))
+
+        def release(self) -> None:
+            pass
+
+    tap, doa = FakeTap(), FakeDoa()
+    tap.queue(_chunk([FakeBlock(0, START, 1)]))
+    path = tmp_path / "doa.jsonl"
+    writer = AudioWriter(
+        tap,
+        wav_path=str(tmp_path / "audio.wav"),
+        clock_path=str(tmp_path / "audio.clock.jsonl"),
+        doa=doa,
+        doa_path=str(path),
+    )
+    writer.start()
+    tap.wait_until_drained()
+    writer.stop(timeout=5.0)
+
+    lines = path.read_text().splitlines()
+    assert [json.loads(line)["angle"] for line in lines] == [0, 1, 2, 3, 4]
+    assert doa.listeners == [], "detached when the recording stops"

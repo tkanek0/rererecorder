@@ -6,6 +6,7 @@ Values are measured on the real D455, not round figures: epoch-ms timestamps as
 
 from __future__ import annotations
 
+import time
 from collections.abc import Callable
 
 import numpy as np
@@ -100,3 +101,13 @@ def make_frames(calibration: Calibration) -> Callable[..., FrameSet]:
         )
 
     return build
+
+
+def wait_until(ready: Callable[[], bool], timeout: float = 2.0) -> bool:
+    """Poll ``ready`` until it holds or the timeout passes."""
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if ready():
+            return True
+        time.sleep(0.01)
+    return ready()

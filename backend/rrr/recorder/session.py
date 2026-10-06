@@ -14,8 +14,9 @@ import time
 from typing import Any
 
 from realsense_adapter import FrameSource, LiveSource, StreamConfig
-from respeaker_adapter import AudioTap, DoaTap
+from respeaker_adapter import CHANNELS, SAMPLE_RATE
 
+from rrr.devices import AudioTap, DoaTap, FrameHub
 from rrr.timeline import (
     AudioTimeline,
     AudioTrack,
@@ -27,7 +28,6 @@ from rrr.timeline import (
     VideoTrack,
     write_manifest,
 )
-from rrr.video import FrameHub
 
 from . import config
 from .audio_writer import AudioWriter
@@ -83,7 +83,7 @@ class SessionRecorder:
         self._record_audio = record_audio
         self._codecs = codecs
         self._owns_hub = hub is None
-        self._hub = hub or FrameHub(self._open_camera)
+        self._hub = hub or FrameHub(self._open_camera, config.IDLE_SHUTDOWN_S)
         self._tap = _make_audio_tap() if record_audio else None
         self._doa = _make_doa_tap() if record_audio and record_doa else None
 
@@ -279,7 +279,7 @@ class SessionRecorder:
         the process usually outlives, so this shuts the taps down instead.
         """
         if self._owns_hub:
-            self._hub.stop()
+            self._hub.shutdown()
         if self._tap is not None:
             self._tap.shutdown()
         if self._doa is not None:
@@ -517,7 +517,10 @@ def _summary(manifest: SessionManifest) -> str:
 def _make_audio_tap() -> AudioTap:
     """Open-on-demand audio tap with this application's configured settings."""
     return AudioTap(
+        config.IDLE_SHUTDOWN_S,
         device=config.AUDIO_DEVICE,
+        rate=SAMPLE_RATE,
+        channels=CHANNELS,
         block_size=config.AUDIO_BLOCK_SIZE,
         window_s=config.AUDIO_WINDOW_S,
     )
@@ -525,4 +528,4 @@ def _make_audio_tap() -> AudioTap:
 
 def _make_doa_tap() -> DoaTap:
     """Open-on-demand direction tap with this application's configured settings."""
-    return DoaTap(poll_hz=config.DOA_POLL_HZ)
+    return DoaTap(config.IDLE_SHUTDOWN_S, poll_hz=config.DOA_POLL_HZ)

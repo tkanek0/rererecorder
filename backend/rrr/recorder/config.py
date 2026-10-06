@@ -116,5 +116,10 @@ RECORD_DOA = _flag("RRR_DOA", True)
 #: settings are chosen here and passed in.
 AUDIO_DEVICE = os.environ.get("RRR_AUDIO_DEVICE", respeaker.DEVICE_NAME)
 AUDIO_BLOCK_SIZE = int(os.environ.get("RRR_AUDIO_BLOCK_SIZE", respeaker.BLOCK_SIZE))
-AUDIO_WINDOW_S = float(os.environ.get("RRR_AUDIO_WINDOW_S", respeaker.WINDOW_S))
+#: Seconds of audio kept in memory, for the level meter and a slow writer.
+AUDIO_WINDOW_S = float(os.environ.get("RRR_AUDIO_WINDOW_S", "10"))
 DOA_POLL_HZ = float(os.environ.get("RRR_AUDIO_DOA_POLL_HZ", respeaker.DOA_POLL_HZ))
+
+#: How long a device stays open after its last consumer leaves. Outlasts a page
+#: reload, since reopening the camera costs a second plus auto-exposure.
+IDLE_SHUTDOWN_S = float(os.environ.get("RRR_IDLE_SHUTDOWN_S", "20"))

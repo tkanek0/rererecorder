@@ -266,6 +266,12 @@ unit), and a dropped sample would shift everything after it. Gaps are filled
 with silence so that a file position keeps meaning a time, and the fill is
 recorded so the repair can be checked.
 
+The array has been seen to stop delivering audio mid-recording while its PCM
+still reads `RUNNING`, with nothing in the kernel log; what triggers it is not
+known. Two seconds without a block count as a failure: the recording carries on
+with the camera, `session.json` names the error, and the page's Reconnect opens
+the array again once the recording is stopped.
+
 ## Marks
 
 Everything else in a session is a measurement a device made. `events.jsonl` is
@@ -398,9 +404,6 @@ without a WAV is an error, not a silent omission.
 
 ## Not yet
 
-- **The array can stop delivering audio** half a second into a recording, on
-  Linux. Open; the evidence and the next experiment are in
-  [decisions.md](decisions.md), "Known limits".
 - **The offset between the two devices is unmeasured** until `scripts/calibrate.py`
   runs on a session (see [Aligning the two devices](#aligning-the-two-devices)).
 - **A Raspberry Pi.** The image is built to be portable but has not run on one,

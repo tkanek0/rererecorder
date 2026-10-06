@@ -110,6 +110,7 @@ class FakeCapture:
 def _audio(device: Device, monkeypatch) -> AudioTap:
     FakeCapture.device = device
     monkeypatch.setattr(audio_module, "Capture", FakeCapture)
+    monkeypatch.setattr(audio_module, "STALL_S", 0.1)
     return AudioTap(
         0.0, device="x", rate=RATE, channels=CHANNELS, block_size=BLOCK, window_s=1.0
     )
@@ -176,9 +177,7 @@ def test_a_failed_open_is_reported_and_not_retried(make) -> None:
     assert time.monotonic() - began < 0.5
 
 
-def test_a_device_that_breaks_while_open_is_not_reopened(make, request) -> None:
-    if request.node.callspec.id == "audio":
-        pytest.skip("the tap does not yet notice a stalled array")
+def test_a_device_that_breaks_while_open_is_not_reopened(make) -> None:
     device = Device()
     worker = make(device)
     worker.acquire()
@@ -278,3 +277,18 @@ def test_a_slow_reader_is_told_what_it_lost(tap: AudioTap) -> None:
     assert chunk.dropped == 100 * BLOCK - RATE
     assert chunk.stamps[0].sample <= chunk.first_sample
     assert chunk.stamps[-1].end_sample >= chunk.cursor
+
+
+def test_a_stalled_array_fails_the_tap_with_a_reason(monkeypatch) -> None:
+    """The PCM can stay RUNNING while nothing arrives; the tap notices itself."""
+    device = Device()
+    tap = _audio(device, monkeypatch)
+    tap.acquire()
+    cursor = tap.cursor
+    assert tap.stream(cursor, timeout=2.0) is not None
+    device.broken.set()
+
+    assert wait_until(lambda: tap.failed)
+    assert "no audio" in (tap.error or "")
+    assert tap.stream(tap.cursor, timeout=5.0) is None
+    tap.shutdown()

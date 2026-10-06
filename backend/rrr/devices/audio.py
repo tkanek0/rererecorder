@@ -19,6 +19,11 @@ from respeaker_adapter import BlockStamp, Capture, Chunk, Window
 
 from .worker import SharedWorker
 
+#: Seconds without a block after which capture counts as stalled. The array
+#: has been seen to stop delivering while its PCM still reads RUNNING
+#: (docs/features.md "The array").
+STALL_S = 2.0
+
 
 class AudioTap(SharedWorker[Window]):
     """Keep a rolling window of the array's audio available.
@@ -192,3 +197,9 @@ class AudioTap(SharedWorker[Window]):
             self._capture = capture
             while not self._should_stop():
                 time.sleep(0.1)
+                silent = time.monotonic() - capture.last_block_at
+                if silent > STALL_S:
+                    # Reported before closing, so readers learn of it even if
+                    # closing a stalled stream is slow.
+                    self._fail(f"the array delivered no audio for {silent:.1f} s")
+                    return

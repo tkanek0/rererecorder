@@ -911,6 +911,9 @@ while recording. Around it:
   the first status, after each hub failure and on Reconnect.
 - Reconnecting the array re-initialises PortAudio first, when its stream is
   not open, since PortAudio's device list is taken once at initialisation.
+- A working stream that stops delivering is a failure too: the camera after
+  5 s without a frame (`realsense_adapter`), the array after 2 s without a
+  block. The array has been seen to stall with its PCM still `RUNNING`.
 
 **Alternatives:** keep retrying every 2 s, with the pre-check making each try
 cheap (rejected: still a 0.1 s GIL stall every 2 s for as long as the camera is
@@ -1056,36 +1059,6 @@ stopped working at once.
 ---
 
 ## Known limits
-
-**The array stops delivering audio about half a second into a recording (open,
-2026-10-02).** Seen on Linux in the container, through both the server and
-`scripts/record.py`, and not yet explained:
-
-- `refactor-check-02`, through the server: 0.48 s of audio in a 27 s recording.
-  The capture PCM (`/proc/asound/card1/pcm0c/sub0/status`) stayed `RUNNING` but
-  its `hw_ptr` stopped advancing, with nothing in the kernel log. It froze right
-  after the DOA tap started polling. **Reconnect** did not bring it back.
-- `refactor-check-01`, through a server that had been up for 13 hours: no audio
-  samples at all, probably the same fault.
-- `refactor-check-03` and `-04`, through `scripts/record.py`: audio stopped
-  after 0.3-0.8 s, a 16 ms hole was filled every 48 ms from the first block, and
-  the fitted rate came out at +512102 ppm. The process then never exited: the
-  thread dump showed sounddevice's exit handler blocked in `Pa_Terminate`, which
-  is waiting on the stuck device. Everything else in the recording completed.
-
-Whether the refactor that moved the array into `respeaker_adapter` is involved
-is not established; the 13-hour server ran code from before it. To narrow it
-down, on a machine with the rig attached:
-
-1. Unplug and replug the array, so it starts from a clean state.
-2. Record 20 s with DOA on, then 20 s with `RRR_DOA=0`
-   (`docker compose run --rm api python scripts/record.py --seconds 20`,
-   with the same variables the Makefile's `COMPOSE` line sets).
-3. Compare the audio seconds and the fitted rate in the two reports, and run
-   `scripts/inspect_session.py` on both. If audio survives without DOA, the
-   control transfers that poll the angle are what wedges the array. If
-   `record.py` exits on its own, the hang at exit was a consequence, not a
-   second fault.
 
 **Nothing stops a recording when the disk fills.** At 195 GB an hour this will
 happen. `ArchiveWriter` logs a write failure and continues, which would leave a

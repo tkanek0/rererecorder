@@ -35,6 +35,7 @@ from rrr.timeline import (
     SessionManifest,
     SessionPaths,
     read_events,
+    read_jsonl,
     read_manifest,
 )
 from rrr.video import ArchiveSource
@@ -724,18 +725,13 @@ def _write_doa(
 
     A baseline only: the firmware's band, threshold and method are undocumented.
     """
-    if not os.path.exists(paths.doa):
+    try:
+        readings = read_jsonl(paths.doa, dict)
+    except FileNotFoundError:
         return {}
     count = 0
-    with (
-        _IndexWriter(destination, "doa", ("t_ns", "angle_deg", "voice")) as writer,
-        open(paths.doa, encoding="utf-8") as handle,
-    ):
-        for line in handle:
-            line = line.strip()
-            if not line:
-                continue
-            reading = json.loads(line)
+    with _IndexWriter(destination, "doa", ("t_ns", "angle_deg", "voice")) as writer:
+        for reading in readings:
             if not time_range.contains(float(reading["t"])):
                 continue
             writer.row((_ns(reading["t"]), reading["angle"], int(reading["voice"])))

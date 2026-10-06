@@ -18,8 +18,8 @@ from render_mp4 import _directions, main, render
 from rrr.playback import Direction
 from rrr.timeline import (
     AudioClockPoint,
-    AudioClockWriter,
     AudioTrack,
+    JsonlWriter,
     Rig,
     SessionManifest,
     SessionPaths,
@@ -87,9 +87,9 @@ def session(tmp_path: Path) -> SessionPaths:
         handle.setsampwidth(2)
         handle.setframerate(RATE)
         handle.writeframes(samples.tobytes())
-    with AudioClockWriter(paths.audio_clock) as clock:
-        clock.append(AudioClockPoint(0, START))
-        clock.append(AudioClockPoint(count, START + count / RATE))
+    with JsonlWriter(paths.audio_clock) as clock:
+        clock.append(AudioClockPoint(0, START).as_dict())
+        clock.append(AudioClockPoint(count, START + count / RATE).as_dict())
     Path(paths.doa).write_text(
         json.dumps({"t": START, "angle": 90, "voice": True}) + "\n"
     )

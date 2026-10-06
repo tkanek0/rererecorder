@@ -6,11 +6,11 @@ tested without hardware.
 
 from .audio_clock import (
     AudioClockPoint,
-    AudioClockWriter,
     AudioTimeline,
 )
 from .clock import ClockPair, ClockTrack, drift_ppm, read_clocks
-from .events import Event, EventWriter, read_events
+from .events import Event, read_events
+from .jsonl import JsonlWriter, read_jsonl
 from .session import (
     REVIEW_NAME,
     AudioTrack,
@@ -28,14 +28,13 @@ from .session import (
 __all__ = [
     "REVIEW_NAME",
     "AudioClockPoint",
-    "AudioClockWriter",
     "AudioTimeline",
     "AudioTrack",
     "ClockPair",
     "ClockTrack",
     "drift_ppm",
     "Event",
-    "EventWriter",
+    "JsonlWriter",
     "Rig",
     "SessionError",
     "SessionManifest",
@@ -45,6 +44,7 @@ __all__ = [
     "listing",
     "read_clocks",
     "read_events",
+    "read_jsonl",
     "read_manifest",
     "write_manifest",
 ]

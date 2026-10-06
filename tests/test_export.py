@@ -29,11 +29,10 @@ from realsense_adapter import (
 from realsense_adapter.types import MotionSample
 from rrr.timeline import (
     AudioClockPoint,
-    AudioClockWriter,
     AudioTrack,
     ClockPair,
     Event,
-    EventWriter,
+    JsonlWriter,
     Rig,
     SessionManifest,
     SessionPaths,
@@ -161,10 +160,10 @@ def session(tmp_path: Path) -> SessionPaths:
         out.setframerate(RATE)
         out.writeframes(audio.tobytes())
 
-    with AudioClockWriter(paths.audio_clock) as clock_writer:
+    with JsonlWriter(paths.audio_clock) as clock_writer:
         for block in range(0, len(audio) + 1, RATE // 4):
             clock_writer.append(
-                AudioClockPoint(sample=block, monotonic=MONO + block / RATE)
+                AudioClockPoint(sample=block, monotonic=MONO + block / RATE).as_dict()
             )
 
     with open(paths.doa, "w", encoding="utf-8") as handle:
@@ -174,14 +173,14 @@ def session(tmp_path: Path) -> SessionPaths:
                 + "\n"
             )
 
-    with EventWriter(paths.events) as marks:
+    with JsonlWriter(paths.events) as marks:
         marks.append(
             Event(
                 monotonic=MONO + 0.1,
                 realtime=REAL + 0.1,
                 label="speaker 45deg 2m",
                 data={"azimuth_deg": 45},
-            )
+            ).as_dict()
         )
 
     write_manifest(

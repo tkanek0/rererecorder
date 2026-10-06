@@ -1,17 +1,17 @@
 """Marks made by a person while a session was recording.
 
-JSON lines, flushed on every write. **A mark is accurate to a person's
+JSON lines (:class:`~rrr.timeline.jsonl.JsonlWriter`), flushed on every write. **A mark is accurate to a person's
 reaction time, not to a sample**: never align against it. See
 docs/decisions.md 16.
 """
 
 from __future__ import annotations
 
-import json
-import os
 import time
 from dataclasses import dataclass, field
-from typing import Any, Self
+from typing import Any
+
+from .jsonl import read_jsonl
 
 
 @dataclass(frozen=True)
@@ -80,78 +80,19 @@ class Event:
         )
 
 
-class EventWriter:
-    """Appends marks beside a recording, one JSON object per line."""
-
-    def __init__(self, path: str) -> None:
-        """Open the sidecar for writing.
-
-        Args:
-            path: File to create. Overwritten if it exists.
-        """
-        os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
-        # Held open across appends until close(), so not a with block.
-        self._handle = open(path, "w", encoding="utf-8")
-        self._path = path
-        self._count = 0
-
-    def __enter__(self) -> Self:
-        """Return the open writer."""
-        return self
-
-    def __exit__(self, *exc: object) -> None:
-        """Close the sidecar."""
-        self.close()
-
-    @property
-    def path(self) -> str:
-        """Where the sidecar is being written."""
-        return self._path
-
-    @property
-    def count(self) -> int:
-        """How many marks have been written."""
-        return self._count
-
-    def append(self, event: Event) -> None:
-        """Write one mark, and flush it.
-
-        Args:
-            event: The mark to record.
-        """
-        self._handle.write(json.dumps(event.as_dict()) + "\n")
-        self._handle.flush()
-        self._count += 1
-
-    def close(self) -> None:
-        """Flush and close."""
-        if not self._handle.closed:
-            self._handle.close()
-
-
 def read_events(path: str) -> list[Event]:
-    """Read a sidecar back.
+    """Read the marks back, in the order they were made.
 
     Args:
-        path: The file to read.
+        path: The sidecar.
 
     Returns:
-        Every mark, in the order it was written; an empty list if the file
-        does not exist.
+        The marks; none if nobody marked anything, so there is no file.
 
     Raises:
-        ValueError: If a line is not a readable event.
+        ValueError: If a line is not a readable mark.
     """
-    if not os.path.exists(path):
+    try:
+        return read_jsonl(path, Event.from_dict)
+    except FileNotFoundError:
         return []
-    events: list[Event] = []
-    with open(path, encoding="utf-8") as handle:
-        for number, line in enumerate(handle, start=1):
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                events.append(Event.from_dict(json.loads(line)))
-            except (json.JSONDecodeError, KeyError, TypeError, ValueError) as error:
-                raise ValueError(f"{path} line {number}: {error}") from error
-    return events

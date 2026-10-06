@@ -7,12 +7,11 @@ recorder filled with silence are recorded. See docs/features.md "The array".
 
 from __future__ import annotations
 
-import json
-import os
 from dataclasses import dataclass
-from typing import Self
 
 import numpy as np
+
+from .jsonl import read_jsonl
 
 
 @dataclass(frozen=True)
@@ -54,54 +53,6 @@ class AudioClockPoint:
             monotonic=float(raw["t"]),
             filled=int(raw.get("filled", 0)),
         )
-
-
-class AudioClockWriter:
-    """Appends clock points beside a recording, one JSON object per line."""
-
-    def __init__(self, path: str) -> None:
-        """Open the sidecar for writing.
-
-        Args:
-            path: File to create. Overwritten if it exists.
-        """
-        os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
-        # Held open across appends until close(), so not a with block.
-        self._handle = open(path, "w", encoding="utf-8")
-        self._path = path
-        self._count = 0
-
-    def __enter__(self) -> Self:
-        """Return the open writer."""
-        return self
-
-    def __exit__(self, *exc: object) -> None:
-        """Close the sidecar."""
-        self.close()
-
-    @property
-    def path(self) -> str:
-        """Where the sidecar is being written."""
-        return self._path
-
-    @property
-    def count(self) -> int:
-        """How many points have been written."""
-        return self._count
-
-    def append(self, point: AudioClockPoint) -> None:
-        """Write one point.
-
-        Args:
-            point: The measurement to record.
-        """
-        self._handle.write(json.dumps(point.as_dict()) + "\n")
-        self._count += 1
-
-    def close(self) -> None:
-        """Flush and close."""
-        if not self._handle.closed:
-            self._handle.close()
 
 
 @dataclass(frozen=True)
@@ -197,7 +148,7 @@ class AudioTimeline:
 
     @staticmethod
     def read(path: str, rate: int) -> AudioTimeline:
-        """Load a timeline from a sidecar written by :class:`AudioClockWriter`.
+        """Load a timeline from its sidecar.
 
         Args:
             path: The sidecar to read.
@@ -209,13 +160,7 @@ class AudioTimeline:
         Raises:
             ValueError: If the sidecar holds no usable points.
         """
-        points = []
-        with open(path, encoding="utf-8") as handle:
-            for line in handle:
-                line = line.strip()
-                if line:
-                    points.append(AudioClockPoint.from_dict(json.loads(line)))
-        return AudioTimeline(points, rate)
+        return AudioTimeline(read_jsonl(path, AudioClockPoint.from_dict), rate)
 
     @property
     def points(self) -> list[AudioClockPoint]:

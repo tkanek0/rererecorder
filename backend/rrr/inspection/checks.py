@@ -20,6 +20,7 @@ from rrr.timeline import (
     SessionManifest,
     SessionPaths,
     read_events,
+    read_jsonl,
 )
 from rrr.video import ArchiveSource
 
@@ -553,10 +554,12 @@ def _check_doa(
     if not manifest.doa:
         return None
     try:
-        with open(paths.doa, encoding="utf-8") as handle:
-            times = [json.loads(line)["t"] for line in handle if line.strip()]
-    except OSError:
+        times = read_jsonl(paths.doa, lambda raw: float(raw["t"]))
+    except FileNotFoundError:
         times = []
+    except ValueError as error:
+        check.fail(f"the direction track cannot be read: {error}")
+        return None
     if not times:
         check.fail("the direction was recorded and holds no readings")
         return {"readings": 0}

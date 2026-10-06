@@ -16,9 +16,9 @@ from realsense_adapter import Calibration, Extrinsics, Intrinsics, StreamConfig
 from rrr.offset import handclap
 from rrr.timeline import (
     AudioClockPoint,
-    AudioClockWriter,
     AudioTrack,
     ClockPair,
+    JsonlWriter,
     SessionManifest,
     SessionPaths,
     VideoTrack,
@@ -111,13 +111,13 @@ def session(tmp_path: Path, calibration: Calibration) -> SessionPaths:
         out.setframerate(RATE)
         out.writeframes(samples.tobytes())
 
-    with AudioClockWriter(paths.audio_clock) as clock_writer:
+    with JsonlWriter(paths.audio_clock) as clock_writer:
         for block in range(0, len(samples), RATE):
             clock_writer.append(
-                AudioClockPoint(sample=block, monotonic=MONO + block / RATE)
+                AudioClockPoint(sample=block, monotonic=MONO + block / RATE).as_dict()
             )
         clock_writer.append(
-            AudioClockPoint(sample=len(samples), monotonic=MONO + len(samples) / RATE)
+            AudioClockPoint(sample=len(samples), monotonic=MONO + len(samples) / RATE).as_dict()
         )
 
     write_manifest(

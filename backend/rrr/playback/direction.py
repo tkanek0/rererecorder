@@ -3,14 +3,13 @@
 from __future__ import annotations
 
 import bisect
-import json
 import math
 from dataclasses import dataclass
 
 import numpy as np
 from realsense_adapter import Extrinsics
 
-from rrr.timeline import Rig
+from rrr.timeline import Rig, read_jsonl
 
 
 @dataclass(frozen=True)
@@ -41,18 +40,15 @@ def read_directions(path: str, offset: float) -> list[Direction] | None:
         Angles are the firmware's: 0 deg is the array's +Y, increasing
         clockwise toward +X.
     """
-    readings: list[Direction] = []
     try:
-        with open(path, encoding="utf-8") as handle:
-            for line in handle:
-                raw = json.loads(line)
-                readings.append(
-                    Direction(
-                        time=float(raw["t"]) + offset,
-                        angle=float(raw["angle"]) % 360.0,
-                        voice=bool(raw.get("voice", False)),
-                    )
-                )
+        readings = read_jsonl(
+            path,
+            lambda raw: Direction(
+                time=float(raw["t"]) + offset,
+                angle=float(raw["angle"]) % 360.0,
+                voice=bool(raw["voice"]),
+            ),
+        )
     except FileNotFoundError:
         return None
     readings.sort(key=lambda reading: reading.time)

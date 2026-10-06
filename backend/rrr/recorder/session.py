@@ -22,7 +22,7 @@ from rrr.timeline import (
     AudioTrack,
     ClockTrack,
     Event,
-    EventWriter,
+    JsonlWriter,
     SessionManifest,
     SessionPaths,
     VideoTrack,
@@ -95,7 +95,7 @@ class SessionRecorder:
         self._clock_track = ClockTrack(interval_s=MONITOR_INTERVAL_S)
         self._video: VideoWriter | None = None
         self._audio: AudioWriter | None = None
-        self._events: EventWriter | None = None
+        self._events: JsonlWriter | None = None
         # Counted here so the number survives the event writer being closed.
         self._marks = 0
 
@@ -138,7 +138,7 @@ class SessionRecorder:
                 clock_samples=self._clock_track.samples,
             )
             # Opened up front so a mark never waits on creating the file.
-            self._events = EventWriter(paths.events)
+            self._events = JsonlWriter(paths.events)
             self._marks = 0
 
         errors: list[str] = []
@@ -265,7 +265,7 @@ class SessionRecorder:
             if self._events is None:
                 raise RuntimeError("nothing is recording, so there is nothing to mark")
             event = Event.now(label, data)
-            self._events.append(event)
+            self._events.append(event.as_dict())
             self._marks += 1
         logger.info("mark: %s", label)
         return event

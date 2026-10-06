@@ -7,8 +7,6 @@ the repair. See docs/features.md "The array".
 
 from __future__ import annotations
 
-import contextlib
-import json
 import logging
 import os
 import threading
@@ -19,7 +17,7 @@ import numpy as np
 from respeaker_adapter import BlockStamp
 
 from rrr.devices import AudioTap, DoaTap, Reading
-from rrr.timeline import AudioClockPoint, AudioClockWriter
+from rrr.timeline import AudioClockPoint, JsonlWriter
 
 logger = logging.getLogger(__name__)
 
@@ -168,18 +166,21 @@ class AudioWriter:
             os.makedirs(os.path.dirname(os.path.abspath(self._wav_path)), exist_ok=True)
             with (
                 wave.open(self._wav_path, "wb") as out,
-                AudioClockWriter(self._clock_path) as clock,
-                contextlib.ExitStack() as optional,
+                JsonlWriter(self._clock_path) as clock,
             ):
                 out.setnchannels(self._tap.channels)
                 out.setsampwidth(2)
                 out.setframerate(self._tap.rate)
-                directions = None
-                if self._doa is not None and self._doa_path is not None:
-                    directions = optional.enter_context(
-                        open(self._doa_path, "w", encoding="utf-8")
-                    )
-                self._pump(out, clock, directions)
+                directions = (
+                    JsonlWriter(self._doa_path)
+                    if self._doa is not None and self._doa_path is not None
+                    else None
+                )
+                try:
+                    self._pump(out, clock, directions)
+                finally:
+                    if directions is not None:
+                        directions.close()
         except Exception as error:  # noqa: BLE001 - reported through stats
             logger.exception("audio recording failed")
             with self._lock:
@@ -196,7 +197,9 @@ class AudioWriter:
                 self._stats.filled,
             )
 
-    def _pump(self, out: wave.Wave_write, clock: AudioClockWriter, directions) -> None:
+    def _pump(
+        self, out: wave.Wave_write, clock: JsonlWriter, directions: JsonlWriter | None
+    ) -> None:
         """Read the tap and write it out until asked to stop.
 
         Args:
@@ -255,7 +258,7 @@ class AudioWriter:
                             sample=self._stats.samples,
                             monotonic=stamp.monotonic,
                             filled=filled,
-                        )
+                        ).as_dict()
                     )
                     last_point_at = stamp.monotonic
                     with self._lock:
@@ -281,7 +284,7 @@ class AudioWriter:
                 AudioClockPoint(
                     sample=self._stats.samples,
                     monotonic=previous.end_monotonic(rate),
-                )
+                ).as_dict()
             )
             with self._lock:
                 self._stats.clock_points = clock.count
@@ -291,20 +294,17 @@ class AudioWriter:
         with self._lock:
             self._readings.append(reading)
 
-    def _write_readings(self, handle) -> None:
+    def _write_readings(self, sidecar: JsonlWriter) -> None:
         """Append the readings received since the last call to the sidecar."""
         with self._lock:
             readings, self._readings = self._readings, []
         for reading in readings:
-            handle.write(
-                json.dumps(
-                    {
-                        "t": reading.captured_at,
-                        "angle": reading.angle,
-                        "voice": reading.voice_activity,
-                    }
-                )
-                + "\n"
+            sidecar.append(
+                {
+                    "t": reading.captured_at,
+                    "angle": reading.angle,
+                    "voice": reading.voice_activity,
+                }
             )
 
     @staticmethod

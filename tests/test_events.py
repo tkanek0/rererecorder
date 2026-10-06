@@ -7,68 +7,30 @@ that marks survive.
 from __future__ import annotations
 
 import json
-import os
 
 import pytest
 from rrr.inspection.checks import Check, _check_events
-from rrr.timeline import SessionPaths
-from rrr.timeline.events import Event, EventWriter, read_events
+from rrr.timeline import Event, JsonlWriter, SessionPaths, read_events
 
 
-def test_a_mark_stamps_both_clocks() -> None:
-    event = Event.now("clap")
-    assert event.monotonic > 0
-    assert event.realtime > 1_700_000_000
-    assert event.label == "clap"
-    assert event.data == {}
-
-
-def test_marks_round_trip(tmp_path) -> None:
-    path = str(tmp_path / "events.jsonl")
+def test_marks_survive_in_order_each_on_disk_before_the_next(tmp_path) -> None:
+    """Flushed on every write: a crash must not cost the marks already made."""
+    path = str(tmp_path / "new" / "events.jsonl")
     written = [
         Event.now("speaker 45deg 2m", {"azimuth_deg": 45, "distance_m": 2.0}),
-        Event.now("clap"),
+        *(Event.now(f"run {index}") for index in range(3)),
     ]
-    with EventWriter(path) as writer:
+    with JsonlWriter(path) as writer:
         for event in written:
-            writer.append(event)
-        assert writer.count == 2
+            writer.append(event.as_dict())
+            with open(path, encoding="utf-8") as handle:
+                assert json.loads(handle.readlines()[-1])["label"] == event.label
+        assert writer.count == 4
 
     assert read_events(path) == written
-
-
-def test_each_mark_is_on_disk_before_the_next_one(tmp_path) -> None:
-    """Flushed on every write: a crash must not cost the marks already made."""
-    path = str(tmp_path / "events.jsonl")
-    with EventWriter(path) as writer:
-        writer.append(Event.now("first"))
-        with open(path, encoding="utf-8") as handle:
-            assert json.loads(handle.readline())["label"] == "first"
-
-
-def test_marks_keep_the_order_they_were_made(tmp_path) -> None:
-    path = str(tmp_path / "events.jsonl")
-    with EventWriter(path) as writer:
-        for index in range(5):
-            writer.append(Event.now(f"run {index}"))
-
-    assert [event.label for event in read_events(path)] == [
-        f"run {index}" for index in range(5)
-    ]
-
-
-def test_a_session_nobody_marked_reads_as_empty(tmp_path) -> None:
-    """No file at all is ordinary, not a failure."""
+    assert written[1].monotonic > 0 and written[1].realtime > 1_700_000_000
+    # No file at all is ordinary, not a failure.
     assert read_events(str(tmp_path / "absent.jsonl")) == []
-
-
-def test_blank_lines_are_skipped(tmp_path) -> None:
-    path = tmp_path / "events.jsonl"
-    path.write_text(
-        '{"monotonic": 1.0, "realtime": 2.0, "label": "a", "data": {}}\n\n\n'
-    )
-
-    assert [event.label for event in read_events(str(path))] == ["a"]
 
 
 @pytest.mark.parametrize(
@@ -84,29 +46,17 @@ def test_a_malformed_line_is_reported_with_its_number(tmp_path, line) -> None:
     """Written by a program, so a bad line is a bug and worth raising over."""
     path = tmp_path / "events.jsonl"
     path.write_text(
-        '{"monotonic": 1.0, "realtime": 2.0, "label": "a", "data": {}}\n' + line + "\n"
+        '{"monotonic": 1.0, "realtime": 2.0, "label": "a", "data": [1]}\n\n'
+        + line
+        + "\n"
     )
-
-    with pytest.raises(ValueError, match="line 2"):
+    with pytest.raises(ValueError, match="line 3"):
         read_events(str(path))
 
-
-def test_data_that_is_not_an_object_is_dropped(tmp_path) -> None:
-    """The label is the mark; a malformed extra must not cost it."""
-    path = tmp_path / "events.jsonl"
-    path.write_text(
-        '{"monotonic": 1.0, "realtime": 2.0, "label": "a", "data": [1, 2]}\n'
-    )
-
-    assert read_events(str(path))[0].data == {}
-
-
-def test_the_writer_makes_the_directory(tmp_path) -> None:
-    path = str(tmp_path / "new" / "events.jsonl")
-    with EventWriter(path) as writer:
-        writer.append(Event.now("x"))
-
-    assert os.path.exists(path)
+    # Blank lines are skipped, and a malformed extra does not cost the label.
+    path.write_text(path.read_text().splitlines()[0] + "\n\n")
+    [only] = read_events(str(path))
+    assert (only.label, only.data) == ("a", {})
 
 
 # -- what inspect makes of them ----------------------------------------------
@@ -114,10 +64,10 @@ def test_the_writer_makes_the_directory(tmp_path) -> None:
 
 def _session(tmp_path, times: list[float]) -> SessionPaths:
     paths = SessionPaths.create(str(tmp_path), "s")
-    with EventWriter(paths.events) as writer:
+    with JsonlWriter(paths.events) as writer:
         for index, monotonic in enumerate(times):
             writer.append(
-                Event(monotonic=monotonic, realtime=1e9 + monotonic, label=f"m{index}")
+                Event(monotonic=monotonic, realtime=1e9 + monotonic, label=f"m{index}").as_dict()
             )
     return paths
 

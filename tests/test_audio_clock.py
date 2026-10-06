@@ -7,15 +7,9 @@ name it.
 
 from __future__ import annotations
 
-from pathlib import Path
-
 import numpy as np
 import pytest
-from rrr.timeline.audio_clock import (
-    AudioClockPoint,
-    AudioClockWriter,
-    AudioTimeline,
-)
+from rrr.timeline import AudioClockPoint, AudioTimeline, JsonlWriter
 
 RATE = 16_000
 BLOCK = 1024
@@ -200,22 +194,14 @@ def test_writer_and_reader_round_trip(tmp_path) -> None:
         sample=original[5].sample, monotonic=original[5].monotonic, filled=512
     )
 
-    with AudioClockWriter(path) as writer:
+    with JsonlWriter(path) as writer:
         for point in original:
-            writer.append(point)
+            writer.append(point.as_dict())
         assert writer.count == 10
 
     timeline = AudioTimeline.read(path, RATE)
     assert timeline.points == original
     assert timeline.report().filled == 512
-
-
-def test_writer_omits_the_common_zero_filled_case(tmp_path) -> None:
-    """Most blocks fill nothing, and 56k entries an hour is worth keeping small."""
-    path = str(tmp_path / "audio.clock.jsonl")
-    with AudioClockWriter(path) as writer:
-        writer.append(AudioClockPoint(sample=0, monotonic=START))
-    assert "filled" not in Path(path).read_text(encoding="utf-8")
 
 
 def test_points_are_sorted_by_position() -> None:

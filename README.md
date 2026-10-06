@@ -38,6 +38,8 @@ npm --prefix frontend run dev        # the page, on http://localhost:5177
 
 The command-line tools - recording, checking, exporting, rendering - are in
 [docs/features.md](docs/features.md#the-command-line).
+Every setting is an environment variable, listed in
+[docs/features.md](docs/features.md#configuration).
 
 ## Where recordings go
 

@@ -25,9 +25,10 @@ Measured on a 34 second session: 1010 frames at 29.97 fps, `MISSING 0` on both
 streams, frame interval 33.4 ms median with a 0.1 ms spread, 1.8 GB written at
 53.9 MB/s.
 
-Turn it down with `RRR_DEPTH`, `RRR_COLOR`, `RRR_INFRARED` when a machine cannot
-keep up - see [frame-loss.md](frame-loss.md) for what each resolution costs in
-field of view and depth noise.
+Turn it down with `RRR_DEPTH`, `RRR_COLOR`, `RRR_INFRARED` or a `raw` codec when
+a machine cannot keep up ([Configuration](#configuration)); see
+[frame-loss.md](frame-loss.md) for what each resolution costs in field of view
+and depth noise.
 
 ### What the calibration holds
 
@@ -406,6 +407,39 @@ WAV on the video clock exactly as the MP4 does, and both default to the mix of
 the physical microphones rather than the processed channel, which the array has
 already beamformed and gain-controlled for speech recognition. Asking for either
 without a WAV is an error, not a silent omission.
+
+## Configuration
+
+Everything is read from the environment once, at start; the page can change the
+streams, codecs and directory between recordings. Flags take `1`/`0`. In the
+container, `compose.yaml` passes each of these through when it is set.
+
+| Variable | Default | What it sets |
+|---|---|---|
+| `RRR_SESSIONS_DIR` | `data/sessions` | where sessions are created ([decisions](decisions.md) 28) |
+| `RRR_DEPTH`, `RRR_COLOR` | `1280x720@30`, `1280x800@30` | a stream's `WIDTHxHEIGHT@FPS`, or `off` |
+| `RRR_INFRARED`, `RRR_MOTION` | `1`, `1` | the infrared pair, the inertial sensor |
+| `RRR_COLOR_FORMAT` | `yuyv` | `yuyv` or `rgb8` (decision 4) |
+| `RRR_ALIGN` | `0` | resample depth into the colour camera (decision 2) |
+| `RRR_EMITTER` | `on` | `on`, `off` or `alternating` ([The projector](#the-projector)) |
+| `RRR_DEPTH_CODEC`, `RRR_COLOR_CODEC`, `RRR_INFRARED_CODEC` | `compressed` | `compressed` or `raw` (decision 22) |
+| `RRR_SERIAL` | first found | which camera to open |
+| `RRR_VIDEO`, `RRR_AUDIO`, `RRR_DOA` | `1` | whether each device is recorded at all |
+| `RRR_AUDIO_DEVICE` | `ReSpeaker` | part of the array's name as PortAudio lists it |
+| `RRR_AUDIO_BLOCK_SIZE`, `RRR_AUDIO_WINDOW_S` | `256`, `10` | samples per capture block; seconds kept in memory |
+| `RRR_AUDIO_DOA_POLL_HZ` | `15` | how often the direction is read |
+| `RRR_IDLE_SHUTDOWN_S` | `20` | how long a device stays open after its last user leaves |
+| `RRR_API_HOST`, `RRR_API_PORT` | `0.0.0.0`, `8040` | where the control plane listens |
+| `RRR_PREVIEW_WIDTH`, `RRR_JPEG_QUALITY` | `640`, `80` | the live preview's size and quality |
+| `RRR_PREVIEW_MAX_HZ_IDLE`, `RRR_PREVIEW_MAX_HZ_RECORDING` | `15`, `10` | the live preview's rate |
+| `RRR_AUDIO_LEVEL_HZ`, `RRR_AUDIO_LEVEL_WINDOW_S` | `10`, `0.1` | the level meter's rate and window |
+| `RRR_ALLOW_ORIGINS` | `*` | origins the page may be served from |
+| `RRR_ALLOW_SETTINGS_WRITE` | `1` | whether the page may change settings |
+| `RRR_SHUTDOWN_TIMEOUT_S` | `5` | how long the server waits for open streams when stopping |
+| `VITE_CONTROL_PORT` | `8040` | the port the page looks for the control plane on |
+
+`make up` and `docker compose` also read `HOST`, `API_PORT` and `APP_PORT`
+(Makefile) and `RRR_DATA` and `RRR_CPUS` (`compose.yaml`).
 
 ## Not yet
 

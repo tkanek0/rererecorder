@@ -265,15 +265,15 @@ def test_startup_discards_are_counted_apart_from_losses() -> None:
     source = LiveSource(StreamConfig())
 
     # Before anything has been delivered: the pipeline is still settling.
-    source._count_skip("duplicate")
+    source._count_skip()
     assert source.skipped_warmup == 1
-    assert source.skipped == 0, "startup must not read as a mid-stream loss"
+    assert source.skipped_duplicate == 0, "startup must not read as a mid-stream loss"
 
     # Once a set has been delivered, the same discard means something else.
     source._index = 1
-    source._count_skip("duplicate")
+    source._count_skip()
     assert source.skipped_warmup == 1, "unchanged"
-    assert source.skipped == 1
+    assert source.skipped_duplicate == 1
     assert source.skipped_duplicate == 1
 
 

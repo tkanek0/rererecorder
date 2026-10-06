@@ -40,9 +40,6 @@ class StreamConfig:
         emitter: What the depth projector does - ``"on"``, ``"off"`` or
             ``"alternating"``. See EMITTER_MODES.
         motion: Enable the accelerometer and gyroscope.
-        record_path: rosbag2 file to write every frame to, or None. Must end
-            in ``.db3``; librealsense 2.56 rejects ``.bag``. Fixed at pipeline
-            start.
     """
 
     color: StreamSpec | None = DEFAULT_COLOR
@@ -52,7 +49,6 @@ class StreamConfig:
     emitter: str = DEFAULT_EMITTER
     align_to_color: bool = False
     motion: bool = False
-    record_path: str | None = None
 
     def __post_init__(self) -> None:
         """Reject a configuration that asks for nothing.
@@ -94,7 +90,6 @@ class StreamConfig:
             "emitter": self.emitter,
             "align_to_color": self.align_to_color,
             "motion": self.motion,
-            "record_path": self.record_path,
         }
 
     def with_changes(self, **changes: object) -> StreamConfig:

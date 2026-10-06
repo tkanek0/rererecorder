@@ -178,8 +178,6 @@ class LiveSource:
         self._serial = serial
         self._pipeline: rs.pipeline | None = None
         self._align: rs.align | None = None
-        self._recorder: rs.recorder | None = None
-        self._recording = False
         self._calibration: Calibration | None = None
         self._device: DeviceInfo | None = None
         self._index = 0
@@ -200,9 +198,7 @@ class LiveSource:
             maxlen=MOTION_BUFFER
         )
         self._motion_lock = threading.Lock()
-        self._motion_received = 0
         self._motion_overrun = 0
-        self._motion_domain = "unknown"
         self._timestamp_domain = "unknown"
 
     # -- lifecycle ---------------------------------------------------------
@@ -270,15 +266,6 @@ class LiveSource:
                     )
         # Motion is deliberately NOT enabled on the pipeline; see _open_motion
         # and docs/decisions.md 12.
-        if cfg.record_path:
-            # librealsense 2.56+ records rosbag2 (.db3), not .bag; say so here
-            # rather than leave it to the SDK's message.
-            if not cfg.record_path.endswith(".db3"):
-                raise StreamError(
-                    f"recordings must be named *.db3, got {cfg.record_path!r}"
-                )
-            rs_config.enable_record_to_file(cfg.record_path)
-
         try:
             profile = pipeline.start(rs_config)
         except RuntimeError as exc:  # noqa: BLE001 - closing must not raise
@@ -293,16 +280,10 @@ class LiveSource:
         self._device = self._read_device(profile)
         if cfg.motion:
             self._open_motion(profile)
-        if cfg.record_path:
-            # Recording starts with the pipeline; pause/resume via
-            # set_recording.
-            self._recorder = profile.get_device().as_recorder()
-            self._recording = True
         logger.info(
-            "live source open: %s, aligned=%s, recording=%s",
+            "live source open: %s, aligned=%s",
             self._device.serial if self._device else "?",
             cfg.aligns,
-            bool(cfg.record_path),
         )
 
     def close(self) -> None:
@@ -316,7 +297,6 @@ class LiveSource:
         # being torn down.
         self._close_motion()
         pipeline, self._pipeline = self._pipeline, None
-        self._recorder = None
         if pipeline is None:
             return
         try:
@@ -326,11 +306,6 @@ class LiveSource:
         logger.info("live source closed")
 
     # -- description -------------------------------------------------------
-
-    @property
-    def config(self) -> StreamConfig:
-        """The configuration this source was opened with."""
-        return self._config
 
     @property
     def calibration(self) -> Calibration:
@@ -522,66 +497,6 @@ class LiveSource:
                     continue
         return snapshot
 
-    def set_option(self, key: str, value: float) -> None:
-        """Set one sensor option, by the same key :meth:`options` reports it under.
-
-        Args:
-            key: ``"Sensor Name/option_name"`` - e.g.
-                ``"RGB Camera/enable_auto_exposure"``.
-            value: The value to set.
-
-        Raises:
-            StreamError: If the source is not open, no sensor has that name,
-                the option name is not one the SDK knows, or that sensor does
-                not support it.
-
-        A diagnostic escape hatch (``scripts/frame_number_gaps.py``);
-        ordinary recording configures everything through ``StreamConfig``.
-        """
-        if self._pipeline is None:
-            raise StreamError("open the source before changing its options")
-        sensor_name, _, option_name = key.partition("/")
-        try:
-            option = rs.option.__members__[option_name]
-        except KeyError:
-            raise StreamError(f"no such option {option_name!r}") from None
-        for sensor in self._pipeline.get_active_profile().get_device().sensors:
-            try:
-                name = str(sensor.get_info(rs.camera_info.name))
-            except RuntimeError:
-                continue
-            if name != sensor_name:
-                continue
-            if not sensor.supports(option):
-                raise StreamError(f"{sensor_name} does not support {option_name}")
-            sensor.set_option(option, value)
-            return
-        raise StreamError(f"no sensor named {sensor_name!r}")
-
-    # -- recording ---------------------------------------------------------
-
-    @property
-    def recording(self) -> bool | None:
-        """Whether the rosbag recorder is running, or None if there is none."""
-        return self._recording if self._recorder is not None else None
-
-    def set_recording(self, active: bool) -> None:
-        """Pause or resume writing to the rosbag.
-
-        Args:
-            active: True to write frames, False to stop writing them.
-
-        Raises:
-            StreamError: If the source was opened without ``record_path``.
-        """
-        if self._recorder is None:
-            raise StreamError("this source was not opened with a record_path")
-        if active:
-            self._recorder.resume()
-        else:
-            self._recorder.pause()
-        self._recording = active
-
     # -- motion ------------------------------------------------------------
 
     def _open_motion(self, profile: rs.pipeline_profile) -> None:
@@ -660,15 +575,10 @@ class LiveSource:
             z=float(data.z),
         )
         with self._motion_lock:
-            if self._motion_domain == "unknown":
-                self._motion_domain = str(
-                    frame.get_frame_timestamp_domain()
-                ).rsplit(".", 1)[-1]
             if len(self._motion) == self._motion.maxlen:
                 # A deque with maxlen discards silently; count it instead.
                 self._motion_overrun += 1
             self._motion.append(sample)
-            self._motion_received += 1
 
     def drain_motion(self) -> list[MotionSample]:
         """Take every inertial sample buffered since the last call.
@@ -683,22 +593,10 @@ class LiveSource:
         return samples
 
     @property
-    def motion_received(self) -> int:
-        """Inertial samples the sensor has delivered since it opened."""
-        with self._motion_lock:
-            return self._motion_received
-
-    @property
     def motion_overrun(self) -> int:
         """Samples discarded because nobody drained the buffer in time."""
         with self._motion_lock:
             return self._motion_overrun
-
-    @property
-    def motion_domain(self) -> str:
-        """What the inertial timestamps mean, once samples have arrived."""
-        with self._motion_lock:
-            return self._motion_domain
 
     # -- timestamps --------------------------------------------------------
 
@@ -719,23 +617,6 @@ class LiveSource:
     def skipped_warmup(self) -> int:
         """Sets discarded before the first good one, while the syncer settled."""
         return self._skipped_warmup
-
-    @property
-    def skipped(self) -> int:
-        """Sets discarded mid-stream.
-
-        Excludes warm-up sets, which are not a loss.
-        """
-        return self._skipped_duplicate
-
-    @property
-    def frame_numbers(self) -> dict[str, int]:
-        """The most recently delivered set's ``frame_number``, per stream.
-
-        For diagnosis only (``scripts/frame_number_gaps.py``); not carried
-        on ``FrameSet`` or written to the archive.
-        """
-        return dict(self._last_numbers)
 
     @staticmethod
     def _enable_global_time(profile: rs.pipeline_profile) -> None:
@@ -977,16 +858,13 @@ class LiveSource:
         """
         numbers = {name: frame.get_frame_number() for name, frame in frames.items()}
         if numbers == self._last_numbers:
-            self._count_skip("duplicate")
+            self._count_skip()
             return False
         self._last_numbers = numbers
         return True
 
-    def _count_skip(self, reason: str) -> None:
+    def _count_skip(self) -> None:
         """Record a discarded set, separating startup from the stream proper.
-
-        Args:
-            reason: ``"duplicate"``, currently the only reason.
 
         Before the first delivered set it counts as warm-up, after it as a
         duplicate.

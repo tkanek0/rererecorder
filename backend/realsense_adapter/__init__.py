@@ -12,7 +12,6 @@ from .config import (
     DEFAULT_COLOR_FORMAT,
     DEFAULT_DEPTH,
     DEFAULT_EMITTER,
-    EMITTER_MODES,
     StreamConfig,
     StreamSpec,
 )
@@ -36,7 +35,6 @@ __all__ = [
     "DEFAULT_COLOR_FORMAT",
     "DEFAULT_DEPTH",
     "DEFAULT_EMITTER",
-    "EMITTER_MODES",
     "Calibration",
     "DeviceInfo",
     "Extrinsics",

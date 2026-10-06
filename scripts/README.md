@@ -47,7 +47,6 @@ not run beside the server (`docs/design.md`, Module boundaries).
 |---|---|---|
 | `soak_record.py` | Yes | "Does this combination of streams and codecs hold close to 30 fps with nothing dropped, for as long as it runs?" - decisions 21/22/23's core question, for any combination `record.py` accepts. |
 | `sqlite_write_benchmark.py` | No | Decision 22's SQLite/WAL insert-throughput finding: compressed-size blobs (~600 KB) insert well inside budget, raw-size blobs (~1.8 MB) do not - independent of any encoding cost. |
-| `frame_number_gaps.py` | Yes | Decision 21's premise check: the SDK's own per-stream `frame_number` never skips, on this hardware, in either auto-exposure state - so the earlier discard policy was throwing away good frames, not protecting against lost ones. |
 
 ```bash
 # the combination decision 23 settled on for this Windows machine
@@ -60,10 +59,6 @@ uv run python scripts/soak_record.py --session soak-full-compressed \
 
 # no camera needed
 uv run python scripts/sqlite_write_benchmark.py
-
-# needs the camera and nothing else holding it
-uv run python scripts/frame_number_gaps.py --seconds 60
-uv run python scripts/frame_number_gaps.py --seconds 60 --auto-exposure off
 ```
 
 Every one exits non-zero on failure, so a shell script chaining several of

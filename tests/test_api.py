@@ -110,6 +110,21 @@ def test_status_carries_what_the_page_polls_for_without_opening_anything(
     assert body["storage"]["seconds_left"] is None
 
 
+def test_the_array_reads_as_recorded_only_while_a_session_records_it(client) -> None:
+    """The level meter opens the array as well; that is not a recording."""
+    from types import SimpleNamespace
+
+    recorder = api_app.state.recorder
+    recorder.tap = SimpleNamespace(active=True, failed=False, error=None, overruns=0)
+
+    def respeaker() -> dict:
+        return client.get("/api/status").json()["devices"]["respeaker"]
+
+    assert respeaker()["recording"] is False
+    _recording()
+    assert respeaker()["recording"] is True
+
+
 def test_frame_headers_are_readable_cross_origin(client) -> None:
     """The page is served from another port; unlisted headers stay hidden."""
     response = client.get("/api/status", headers={"Origin": "http://localhost:5177"})

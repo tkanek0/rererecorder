@@ -86,7 +86,8 @@ def _respeaker_device() -> dict[str, Any]:
         "rate": found.rate,
         "failed": bool(failures),
         "error": failures[0] if failures else found.error,
-        "recording": tap.active if tap else False,
+        # Open is not recorded: the page's level meter opens the array too.
+        "recording": bool(state.recorder.recording and tap and tap.active),
         "overruns": tap.overruns if tap else 0,
     }
 

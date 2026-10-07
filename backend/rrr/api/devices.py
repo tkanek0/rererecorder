@@ -77,7 +77,7 @@ def _respeaker_device() -> dict[str, Any]:
     found = probe_audio(recording_config.AUDIO_DEVICE)
     tap = state.recorder.tap
     doa = state.recorder.doa
-    failures = [t.error for t in (tap, doa) if t is not None and t.failed]
+    failures = [t.error for t in (tap, doa) if t.failed]
     return {
         "connected": found.connected,
         "name": found.name,
@@ -87,8 +87,12 @@ def _respeaker_device() -> dict[str, Any]:
         "failed": bool(failures),
         "error": failures[0] if failures else found.error,
         # Open is not recorded: the page's level meter opens the array too.
-        "recording": bool(state.recorder.recording and tap and tap.active),
-        "overruns": tap.overruns if tap else 0,
+        "recording": state.recorder.recording and tap.active,
+        "overruns": tap.overruns,
+        # Read-only here, like the camera's resolution: set by the environment.
+        "block_size": tap.block_size,
+        "doa_poll_hz": recording_config.DOA_POLL_HZ,
+        "doa_recorded": state.recorder.record_doa,
     }
 
 
@@ -125,11 +129,10 @@ def reconnect_device(name: str) -> dict[str, Any]:
         doa = state.recorder.doa
         # Re-initialising PortAudio (to see a newly plugged array) would pull
         # an open stream from under its reader, so only with the tap stopped.
-        if tap is None or not tap.active:
+        if not tap.active:
             rescan()
         for device in (tap, doa):
-            if device is not None:
-                device.reconnect()
+            device.reconnect()
     return _devices()
 
 

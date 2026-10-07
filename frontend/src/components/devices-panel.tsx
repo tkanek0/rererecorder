@@ -7,6 +7,7 @@ import {
   previewUrl,
   reconnectDevice,
   setCodecs,
+  setRecordAudio,
   setStreams,
   type AudioLevels,
   type CodecChoice,
@@ -250,6 +251,54 @@ const CaptureControls = ({
 };
 
 /**
+ * Whether the array is recorded. Disabled while recording.
+ */
+const ArrayControls = ({
+  settings,
+  recording,
+  onChanged,
+}: {
+  settings: Settings | null;
+  recording: boolean;
+  onChanged: () => void;
+}) => {
+  const { busy, error, run } = useAction();
+
+  if (!settings) return null;
+
+  const toggleAudio = (audio: boolean) =>
+    run(async () => {
+      await setRecordAudio(audio);
+      onChanged();
+    });
+
+  return (
+    <div className="capture">
+      <div className="rows">
+        <div className="row">
+          <span className="label">
+            <label>
+              <input
+                type="checkbox"
+                checked={settings.audio}
+                disabled={!settings.writable || recording || busy}
+                onChange={() => void toggleAudio(!settings.audio)}
+              />{' '}
+              audio (6 ch WAV)
+            </label>
+          </span>
+        </div>
+      </div>
+
+      {recording ? (
+        <p className="note">Stop recording to change what is recorded.</p>
+      ) : null}
+      {error ? <p className="error">{error}</p> : null}
+    </div>
+  );
+};
+
+/**
  * An `<img>` showing an MJPEG stream, which closes the stream on unmount:
  * Chrome keeps a removed `<img>`'s connection open, against a per-host limit.
  */
@@ -410,6 +459,13 @@ export const DevicesPanel = ({ devices, settings, recording, onChanged }: Props)
                   {respeaker.host_api}
                   <br />
                   {respeaker.rate ? respeaker.rate / 1000 : '?'} kHz · {respeaker.channels}ch
+                  <br />
+                  block {respeaker.block_size} (
+                  {respeaker.rate
+                    ? `${((respeaker.block_size / respeaker.rate) * 1000).toFixed(0)} ms`
+                    : '?'}
+                  ) · direction {respeaker.doa_poll_hz} Hz
+                  {respeaker.doa_recorded ? '' : ', not recorded'}
                 </>
               ) : (
                 (respeaker.error ?? 'not detected')
@@ -466,6 +522,12 @@ export const DevicesPanel = ({ devices, settings, recording, onChanged }: Props)
               </text>
             </svg>
           </div>
+
+          <ArrayControls
+            settings={settings}
+            recording={recording}
+            onChanged={onChanged}
+          />
         </div>
       </div>
 

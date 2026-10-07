@@ -119,6 +119,12 @@ export type RespeakerDeviceStatus = {
   error: string | null;
   recording: boolean;
   overruns: number;
+  /** Samples per capture block. Set by the environment, read-only here. */
+  block_size: number;
+  /** How often the chip's direction is read. */
+  doa_poll_hz: number;
+  /** Whether a recording of the array records the direction too. */
+  doa_recorded: boolean;
 };
 
 /** A device the page can ask the server to reconnect. */
@@ -204,6 +210,8 @@ export type Settings = {
   writable: boolean;
   streams: StreamConfig;
   codecs: Record<string, string>;
+  /** Whether the next recording records the array. */
+  audio: boolean;
 };
 
 /** A stream whose archive codec can be chosen from the page. */
@@ -313,6 +321,18 @@ export const setStreams = (
   request<Settings>('/api/settings', {
     method: 'PUT',
     body: JSON.stringify({ streams }),
+  });
+
+/**
+ * Choose whether the next recording records the array. The live view of it
+ * stays either way.
+ *
+ * @param audio Whether to record it. Refused while recording.
+ */
+export const setRecordAudio = (audio: boolean): Promise<Settings> =>
+  request<Settings>('/api/settings', {
+    method: 'PUT',
+    body: JSON.stringify({ audio }),
   });
 
 /**

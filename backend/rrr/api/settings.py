@@ -32,12 +32,13 @@ def get_settings() -> dict[str, Any]:
         # codecs are not (docs/decisions.md 23).
         "streams": state.streams.as_dict(),
         "codecs": state.codecs,
+        "audio": state.recorder.record_audio,
     }
 
 
 @router.put("/api/settings")
 async def put_settings(request: Request) -> dict[str, Any]:
-    """Change the recording directory, which streams are captured, or their codecs.
+    """Change the recording directory, what is captured, or how it is stored.
 
     Args:
         request: JSON body with any of:
@@ -47,6 +48,7 @@ async def put_settings(request: Request) -> dict[str, Any]:
             ``codecs``: an object with any of ``color``, ``depth``,
                 ``infrared`` mapped to ``"compressed"`` or ``"raw"``. See
                 ``rrr.recorder.config.with_codecs``.
+            ``audio``: whether to record the array.
 
     Returns:
         The settings afterwards.
@@ -59,7 +61,9 @@ async def put_settings(request: Request) -> dict[str, Any]:
         raise HTTPException(status_code=403, detail="settings are read-only")
 
     body = await request.json()
-    changing = [key for key in ("sessions_dir", "streams", "codecs") if key in body]
+    changing = [
+        key for key in ("sessions_dir", "streams", "codecs", "audio") if key in body
+    ]
     if not changing:
         raise HTTPException(status_code=400, detail="nothing to change")
     if state.recorder.recording:
@@ -74,6 +78,11 @@ async def put_settings(request: Request) -> dict[str, Any]:
         _apply_streams(body["streams"])
     if "codecs" in body:
         _apply_codecs(body["codecs"])
+    if "audio" in body:
+        if not isinstance(body["audio"], bool):
+            raise HTTPException(status_code=400, detail="audio must be a boolean")
+        state.recorder.record_audio = body["audio"]
+        logger.info("audio now %s", "recorded" if body["audio"] else "not recorded")
     return get_settings()
 
 

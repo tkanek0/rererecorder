@@ -70,7 +70,8 @@ class SessionRecorder:
             streams: What to ask the camera for.
             serial: Camera serial to open, or empty for whichever is found.
             record_video: Whether to record the camera at all.
-            record_audio: Whether to record the array at all.
+            record_audio: Whether to record the array at all. The taps exist
+                either way, for the page's live view; see :attr:`record_audio`.
             record_doa: Whether to record the direction beside the audio.
             codecs: Overrides for the archive's default codecs.
             hub: Frame hub to record from, or None to make one. The server
@@ -85,8 +86,10 @@ class SessionRecorder:
         self._codecs = codecs
         self._owns_hub = hub is None
         self._hub = hub or FrameHub(self._open_camera, config.IDLE_SHUTDOWN_S)
-        self._tap = _make_audio_tap() if record_audio else None
-        self._doa = _make_doa_tap() if record_audio and record_doa else None
+        self._record_doa = record_doa
+        # Opened only when something acquires them, so creating them is free.
+        self._tap = _make_audio_tap()
+        self._doa = _make_doa_tap()
 
         self._lock = threading.Lock()
         self._stop = threading.Event()
@@ -180,14 +183,14 @@ class SessionRecorder:
 
     def _start_audio(self, errors: list[str]) -> AudioWriter | None:
         """Start the array writer, reporting a failure rather than raising."""
-        if not self._record_audio or self._paths is None or self._tap is None:
+        if not self._record_audio or self._paths is None:
             return None
         writer = AudioWriter(
             self._tap,
             wav_path=self._paths.audio,
             clock_path=self._paths.audio_clock,
-            doa=self._doa,
-            doa_path=self._paths.doa if self._doa is not None else None,
+            doa=self._doa if self._record_doa else None,
+            doa_path=self._paths.doa if self._record_doa else None,
         )
         try:
             writer.start()
@@ -279,10 +282,8 @@ class SessionRecorder:
         """
         if self._owns_hub:
             self._hub.shutdown()
-        if self._tap is not None:
-            self._tap.shutdown()
-        if self._doa is not None:
-            self._doa.shutdown()
+        self._tap.shutdown()
+        self._doa.shutdown()
 
     # -- state -------------------------------------------------------------
 
@@ -348,13 +349,37 @@ class SessionRecorder:
         self._codecs = value
 
     @property
-    def tap(self) -> AudioTap | None:
-        """The audio tap this recorder reads, or None if audio is not recorded."""
+    def record_audio(self) -> bool:
+        """Whether the next recording records the array."""
+        return self._record_audio
+
+    @record_audio.setter
+    def record_audio(self, value: bool) -> None:
+        """Choose whether the next recording records the array.
+
+        Args:
+            value: Whether to record it.
+
+        Raises:
+            RecorderBusy: If a recording is running.
+        """
+        if self.recording:
+            raise RecorderBusy("cannot change the audio while recording")
+        self._record_audio = value
+
+    @property
+    def record_doa(self) -> bool:
+        """Whether a recording of the array records its direction too."""
+        return self._record_doa
+
+    @property
+    def tap(self) -> AudioTap:
+        """The array's audio tap, recorded from and shared with the live view."""
         return self._tap
 
     @property
-    def doa(self) -> DoaTap | None:
-        """The direction tap this recorder reads, or None if it reads none."""
+    def doa(self) -> DoaTap:
+        """The array's direction tap, recorded from and shared with the live view."""
         return self._doa
 
     @property
@@ -420,7 +445,7 @@ class SessionRecorder:
         reported = (
             ("video", self._video.stats.error if self._video else None),
             ("audio", self._audio.stats.error if self._audio else None),
-            ("doa", self._doa.error if self._doa and self._audio else None),
+            ("doa", self._doa.error if self._audio and self._record_doa else None),
         )
         for label, error in reported:
             if error and f"{label}: {error}" not in self._manifest.errors:
@@ -430,7 +455,7 @@ class SessionRecorder:
             self._manifest.video = VideoTrack.from_dict(
                 {**asdict(stats), "fps": stats.fps}
             )
-        if self._audio is not None and self._tap is not None:
+        if self._audio is not None:
             self._manifest.audio = AudioTrack.from_dict(
                 {
                     **asdict(self._audio.stats),
@@ -438,7 +463,7 @@ class SessionRecorder:
                     "timeline": self._timeline_report(),
                 }
             )
-            self._manifest.doa = self._doa is not None
+            self._manifest.doa = self._record_doa
 
     def _timeline_report(self) -> dict[str, object] | None:
         """Read back the clock sidecar and summarise the audio's time axis.
@@ -448,7 +473,7 @@ class SessionRecorder:
 
         Read from the file on purpose, so it checks what actually reached disk.
         """
-        if self._paths is None or self._tap is None:
+        if self._paths is None:
             return None
         try:
             timeline = AudioTimeline.read(self._paths.audio_clock, self._tap.rate)

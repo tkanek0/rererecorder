@@ -7,6 +7,7 @@ full, so a test would hang. Nothing here acquires the hub, so no camera opens.
 from __future__ import annotations
 
 import os
+from types import SimpleNamespace
 
 import pytest
 from fastapi.testclient import TestClient
@@ -33,8 +34,12 @@ class FakeRecorder:
         self.recording = False
         self.session_id: str | None = None
         self.marks: list[Event] = []
-        self.tap = None
-        self.doa = None
+        self.record_audio = True
+        self.record_doa = True
+        # Never opened: only their state is read, and Reconnect clears it.
+        idle = {"failed": False, "error": None, "reconnect": lambda: None}
+        self.tap = SimpleNamespace(**idle, active=False, overruns=0, block_size=256)
+        self.doa = SimpleNamespace(**idle)
 
     def state(self) -> dict[str, object]:
         return {
@@ -110,10 +115,7 @@ def test_status_carries_what_the_page_polls_for_without_opening_anything(
 
 def test_the_array_reads_as_recorded_only_while_a_session_records_it(client) -> None:
     """The level meter opens the array as well; that is not a recording."""
-    from types import SimpleNamespace
-
-    recorder = api_app.state.recorder
-    recorder.tap = SimpleNamespace(active=True, failed=False, error=None, overruns=0)
+    api_app.state.recorder.tap.active = True
 
     def respeaker() -> dict:
         return client.get("/api/status").json()["devices"]["respeaker"]
@@ -177,6 +179,9 @@ def test_settings_change_what_the_next_recording_does(client, tmp_path) -> None:
     assert body["codecs"]["color"] == "raw"
     assert body["codecs"]["depth"] != "raw", "an untouched stream keeps its codec"
 
+    assert client.put("/api/settings", json={"audio": False}).json()["audio"] is False
+    assert recorder.record_audio is False
+
 
 @pytest.mark.parametrize(
     "body",
@@ -189,6 +194,7 @@ def test_settings_change_what_the_next_recording_does(client, tmp_path) -> None:
         # Infrared is the depth sensor's own pair; it needs depth enabled.
         {"streams": {"depth": False, "infrared": True}},
         {"codecs": {"color": "lossy"}},
+        {"audio": "no"},
     ],
 )
 def test_an_unusable_setting_is_refused(client, body) -> None:
@@ -206,6 +212,7 @@ def test_an_unusable_setting_is_refused(client, body) -> None:
         ("PUT", "/api/settings", {"sessions_dir": "/tmp"}),
         ("PUT", "/api/settings", {"streams": {"depth": False}}),
         ("PUT", "/api/settings", {"codecs": {"color": "raw"}}),
+        ("PUT", "/api/settings", {"audio": False}),
         # Removing the file being written is not a recoverable mistake.
         ("DELETE", "/api/sessions/live", None),
     ],

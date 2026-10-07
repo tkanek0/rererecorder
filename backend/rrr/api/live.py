@@ -134,15 +134,8 @@ def audio_levels(request: Request) -> StreamingResponse:
         A ``text/event-stream`` response, one JSON object per update: ``mix``
         (the beamformed channel) and ``mic1``-``mic4`` (the raw microphones),
         each in dBFS or ``null`` for silence.
-
-    Raises:
-        HTTPException: 404 if this server was started with audio off.
     """
     tap = state.recorder.tap
-    if tap is None:
-        raise HTTPException(
-            status_code=404, detail="this server was started with audio off"
-        )
 
     def render(window: Window) -> str:
         mics = rms(window.mics)

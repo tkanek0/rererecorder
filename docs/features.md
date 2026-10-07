@@ -154,6 +154,8 @@ README.
   Either can be turned off for this viewer alone - remembered in the browser,
   never sent to the server - which closes its stream and spares the encoding.
   Only a stream being captured, and so recorded, can be previewed.
+- **The array** - each microphone's level, and whether the next recording
+  records the array at all.
 - **Recording** - start and stop, an optional session name, the counts above as
   they change, and [marks](#marks).
 - **Storage** - free space and **how long that lasts**, computed from the rate
@@ -418,8 +420,9 @@ without a WAV is an error, not a silent omission.
 ## Configuration
 
 Everything is read from the environment once, at start; the page can change the
-streams, codecs and directory between recordings. Flags take `1`/`0`. In the
-container, `compose.yaml` passes each of these through when it is set.
+streams, codecs, directory and whether the array is recorded between recordings.
+Flags take `1`/`0`. In the container, `compose.yaml` passes each of these
+through when it is set.
 
 | Variable | Default | What it sets |
 |---|---|---|
@@ -431,7 +434,7 @@ container, `compose.yaml` passes each of these through when it is set.
 | `RRR_EMITTER` | `on` | `on`, `off` or `alternating` ([The projector](#the-projector)) |
 | `RRR_DEPTH_CODEC`, `RRR_COLOR_CODEC`, `RRR_INFRARED_CODEC` | `compressed` | `compressed` or `raw` (decision 22) |
 | `RRR_SERIAL` | first found | which camera to open |
-| `RRR_VIDEO`, `RRR_AUDIO`, `RRR_DOA` | `1` | whether each device is recorded at all |
+| `RRR_VIDEO`, `RRR_AUDIO`, `RRR_DOA` | `1` | whether each is recorded at all; the page can change the audio's. The live views work either way |
 | `RRR_AUDIO_DEVICE` | `ReSpeaker` | part of the array's name as PortAudio lists it |
 | `RRR_AUDIO_BLOCK_SIZE`, `RRR_AUDIO_WINDOW_S` | `256`, `10` | samples per capture block; seconds kept in memory |
 | `RRR_AUDIO_DOA_POLL_HZ` | `15` | how often the direction is read |

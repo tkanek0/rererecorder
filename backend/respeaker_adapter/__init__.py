@@ -9,7 +9,7 @@ argument, defaulting to :mod:`respeaker_adapter.config`.
 from .capture import Capture, probe, rescan
 from .config import BLOCK_SIZE, CHANNELS, DEVICE_NAME, DOA_POLL_HZ, SAMPLE_RATE
 from .tuning import find_tuning
-from .types import BlockStamp, Chunk, DeviceNotFound, Window, dbfs, rms
+from .types import BlockStamp, Chunk, DeviceNotFound, Window, dbfs, rms, to_int16
 
 __all__ = [
     "BLOCK_SIZE",
@@ -27,4 +27,5 @@ __all__ = [
     "probe",
     "rescan",
     "rms",
+    "to_int16",
 ]

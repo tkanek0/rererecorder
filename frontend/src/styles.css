@@ -256,6 +256,7 @@ th {
 }
 
 .device-card {
+  position: relative;
   display: grid;
   grid-template-columns: 260px 1fr;
   align-items: center;
@@ -513,4 +514,38 @@ button.icon {
 
 .mic-radial .doa.voice line {
   stroke: var(--accent);
+}
+
+.mic-radial .doa {
+  pointer-events: none;
+}
+
+.mic-radial .pickable {
+  cursor: pointer;
+}
+
+.mic-radial .frame {
+  /* Painted, so that a click anywhere inside picks the channel. */
+  fill: transparent;
+  stroke: var(--line);
+}
+
+.mic-radial .pickable:hover .frame {
+  stroke: var(--dim);
+}
+
+/* Chosen while muted; heard once unmuted. */
+.mic-radial .frame.chosen {
+  stroke: var(--dim);
+  stroke-width: 2.5;
+}
+
+.mic-radial .frame.chosen.heard {
+  stroke: var(--warn);
+}
+
+.device-card button.listen {
+  position: absolute;
+  top: 10px;
+  right: 12px;
 }

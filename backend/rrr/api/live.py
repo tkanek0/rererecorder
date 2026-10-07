@@ -1,4 +1,4 @@
-"""The live views: MJPEG for the camera; levels and direction for the array."""
+"""The live views: MJPEG for the camera; levels, direction and sound for the array."""
 
 from __future__ import annotations
 
@@ -12,7 +12,7 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import StreamingResponse
 from realsense_adapter import FrameSet
-from respeaker_adapter import Window, dbfs, rms
+from respeaker_adapter import Window, dbfs, rms, to_int16
 
 from rrr.devices import SharedWorker
 
@@ -173,5 +173,52 @@ def array_state(request: Request) -> StreamingResponse:
     return StreamingResponse(
         events(),
         media_type="text/event-stream",
+        headers={"Cache-Control": "no-store"},
+    )
+
+
+@router.get("/stream/audio.pcm")
+def listen(request: Request, channel: int = 0) -> StreamingResponse:
+    """Stream one channel of the array as it is captured, to listen to.
+
+    Read forward from the moment of the request, as a recording reads it, so
+    nothing is skipped unless the client falls a whole ring behind.
+
+    Args:
+        request: Used to notice the client leaving.
+        channel: 0 for the processed channel, 1-4 for the microphones.
+
+    Returns:
+        Raw ``audio/L16`` (16-bit little-endian, mono) at the rate the
+        content type names, for as long as the client stays.
+
+    Raises:
+        HTTPException: 404 for a channel the array does not have.
+    """
+    tap = state.recorder.tap
+    if not 0 <= channel < tap.channels:
+        raise HTTPException(
+            status_code=404, detail=f"channel {channel} of {tap.channels}"
+        )
+
+    async def pcm() -> AsyncIterator[bytes]:
+        tap.acquire()
+        try:
+            cursor = tap.cursor
+            while not await request.is_disconnected():
+                chunk = await run_in_threadpool(tap.stream, cursor, _STREAM_WAIT_S)
+                if chunk is None:
+                    if tap.failed:
+                        await asyncio.sleep(_FAILED_WAIT_S)
+                    continue
+                cursor = chunk.cursor
+                yield to_int16(chunk.samples[:, channel]).tobytes()
+        finally:
+            tap.release()
+
+    return StreamingResponse(
+        pcm(),
+        # RFC 2586 names L16 big-endian; the page reads this one as little.
+        media_type=f"audio/L16; rate={tap.rate}; channels=1; endian=little",
         headers={"Cache-Control": "no-store"},
     )

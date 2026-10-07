@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Eye, EyeOff } from 'lucide-react';
+import { Eye, EyeOff, Volume2, VolumeX } from 'lucide-react';
 
 import {
   PREVIEW_LABELS,
@@ -20,6 +20,7 @@ import {
   type StreamName,
 } from '../lib/api';
 import { useAction } from '../lib/use-action';
+import { useLiveAudio } from '../lib/use-live-audio';
 import { PreviewModal } from './preview-modal';
 
 type Props = {
@@ -75,7 +76,6 @@ const usePreviewChoice = (): [PreviewChoice, (kind: Previewed) => void] => {
   return [choice, toggle];
 };
 
-
 const CODEC_CHOICES: CodecChoice[] = ['compressed', 'raw'];
 
 /** Read a codec name back as the two-way choice the page offers. */
@@ -86,12 +86,19 @@ const codecChoiceOf = (codec: string | undefined): CodecChoice =>
  * Each microphone's angle on the circle, in the chip's DOA convention.
  * Unverified: the spacing is safe, the rotation is a guess.
  */
-const MIC_LAYOUT: { key: keyof Omit<AudioLevels, 'mix'>; angleDeg: number }[] = [
-  { key: 'mic1', angleDeg: 45 },
-  { key: 'mic2', angleDeg: 135 },
-  { key: 'mic3', angleDeg: 225 },
-  { key: 'mic4', angleDeg: 315 },
+const MIC_LAYOUT: {
+  key: keyof Omit<AudioLevels, 'mix'>;
+  channel: number;
+  angleDeg: number;
+}[] = [
+  { key: 'mic1', channel: 1, angleDeg: 45 },
+  { key: 'mic2', channel: 2, angleDeg: 135 },
+  { key: 'mic3', channel: 3, angleDeg: 225 },
+  { key: 'mic4', channel: 4, angleDeg: 315 },
 ];
+
+/** The channel `mix` is metered from: the chip's processed one. */
+const MIX_CHANNEL = 0;
 
 /** dBFS range a meter maps onto 0..1. Below the floor reads as silence. */
 const LEVEL_FLOOR_DB = -60;
@@ -360,6 +367,12 @@ export const DevicesPanel = ({ devices, settings, recording, onChanged }: Props)
   const [previews, togglePreview] = usePreviewChoice();
   const closeEnlarged = useCallback(() => setEnlarged(null), []);
   const doa = levels.doa;
+  // What is heard is chosen on the radial: a microphone, or the centre for mix.
+  const [channel, setChannel] = useState(MIX_CHANNEL);
+  const [muted, setMuted] = useState(true);
+  const listenError = useLiveAudio(muted ? null : channel);
+  const heard = (candidate: number) =>
+    candidate === channel ? (muted ? 'chosen' : 'chosen heard') : '';
 
   return (
     <section className="panel devices">
@@ -450,6 +463,17 @@ export const DevicesPanel = ({ devices, settings, recording, onChanged }: Props)
 
         {/* -- ReSpeaker ---------------------------------------------------- */}
         <div className="device-card">
+          <button
+            className="icon listen"
+            onClick={() => setMuted(!muted)}
+            title={
+              muted
+                ? 'listen to the chosen channel - click the radial to choose'
+                : 'mute'
+            }
+          >
+            {muted ? <VolumeX size={16} /> : <Volume2 size={16} />}
+          </button>
           <div className="info">
             <h3>
               <span className={`dot ${respeaker.connected ? 'live' : ''}`} />
@@ -481,6 +505,7 @@ export const DevicesPanel = ({ devices, settings, recording, onChanged }: Props)
             {respeaker.failed || !respeaker.connected ? (
               <ReconnectButton name="respeaker" recording={recording} />
             ) : null}
+            {listenError ? <p className="error">{listenError}</p> : null}
             {respeaker.recording ? (
               <p className="note">
                 Being recorded.{respeaker.overruns ? ` ${respeaker.overruns} overruns.` : ''}
@@ -491,13 +516,19 @@ export const DevicesPanel = ({ devices, settings, recording, onChanged }: Props)
           <div className="visual">
             <svg className="mic-radial" viewBox="0 0 200 200">
               <circle cx={100} cy={100} r={RADIUS_OUTER} fill="none" stroke="var(--line)" />
-              {MIC_LAYOUT.map(({ key, angleDeg }) => {
+              {MIC_LAYOUT.map(({ key, channel: mic, angleDeg }) => {
                 const pos = micPosition(angleDeg, RADIUS_MICS);
                 const fraction = levelFraction(levels[key]);
                 const label = micPosition(angleDeg, RADIUS_MICS + 22);
                 return (
-                  <g key={key}>
-                    <circle cx={pos.x} cy={pos.y} r={DOT_MAX} fill="none" stroke="var(--line)" />
+                  <g key={key} className="pickable" onClick={() => setChannel(mic)}>
+                    <title>{`listen to ${key}`}</title>
+                    <circle
+                      className={`frame ${heard(mic)}`}
+                      cx={pos.x}
+                      cy={pos.y}
+                      r={DOT_MAX}
+                    />
                     <circle
                       cx={pos.x}
                       cy={pos.y}
@@ -513,14 +544,17 @@ export const DevicesPanel = ({ devices, settings, recording, onChanged }: Props)
                   </g>
                 );
               })}
-              {/* The chip's beamformed channel, at the centre. */}
-              <circle cx={100} cy={100} r={26} fill="none" stroke="var(--line)" />
-              <circle
-                cx={100}
-                cy={100}
-                r={8 + levelFraction(levels.mix) * 16}
-                fill={levelColor(levelFraction(levels.mix))}
-              />
+              {/* The chip's processed channel, at the centre. */}
+              <g className="pickable" onClick={() => setChannel(MIX_CHANNEL)}>
+                <title>listen to the processed channel</title>
+                <circle className={`frame ${heard(MIX_CHANNEL)}`} cx={100} cy={100} r={26} />
+                <circle
+                  cx={100}
+                  cy={100}
+                  r={8 + levelFraction(levels.mix) * 16}
+                  fill={levelColor(levelFraction(levels.mix))}
+                />
+              </g>
               <text x={100} y={100 + 40} textAnchor="middle">
                 mix {dbLabel(levels.mix)}
               </text>

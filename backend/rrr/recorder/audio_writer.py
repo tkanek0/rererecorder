@@ -14,7 +14,7 @@ import wave
 from dataclasses import dataclass
 
 import numpy as np
-from respeaker_adapter import BlockStamp
+from respeaker_adapter import BlockStamp, to_int16
 
 from rrr.devices import AudioTap, DoaTap, Reading
 from rrr.timeline import AudioClockPoint, JsonlWriter
@@ -264,7 +264,7 @@ class AudioWriter:
                     with self._lock:
                         self._stats.clock_points = clock.count
 
-                out.writeframes(_to_int16(block).tobytes())
+                out.writeframes(to_int16(block).tobytes())
                 with self._lock:
                     if self._stats.first_monotonic is None:
                         self._stats.first_monotonic = stamp.monotonic
@@ -355,8 +355,3 @@ class AudioWriter:
         if end <= start:
             return None
         return chunk.samples[start:end]
-
-
-def _to_int16(samples: np.ndarray) -> np.ndarray:
-    """Convert float32 in [-1, 1] back to the int16 the device sent."""
-    return np.clip(samples * 32768.0, -32768, 32767).astype("<i2")

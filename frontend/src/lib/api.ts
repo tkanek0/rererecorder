@@ -383,6 +383,16 @@ export const previewUrl = (kind: PreviewKind): string =>
 export const arrayStateUrl = (): string => `${controlBase()}/stream/array`;
 
 /**
+ * URL of one channel of the array as it is captured: raw 16-bit
+ * little-endian mono PCM, at the rate its content type names.
+ *
+ * @param channel 0 for the processed channel, 1-4 for the microphones.
+ * @returns The URL.
+ */
+export const listenUrl = (channel: number): string =>
+  `${controlBase()}/stream/audio.pcm?channel=${channel}`;
+
+/**
  * Fetch one session in full, enough to play it back.
  *
  * @param sessionId Directory name.

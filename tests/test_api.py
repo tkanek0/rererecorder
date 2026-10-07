@@ -1,7 +1,8 @@
 """The control plane's HTTP surface.
 
-The MJPEG preview is untested: it never ends, and TestClient buffers a body in
-full, so a test would hang. Nothing here acquires the hub, so no camera opens.
+The live streams are untested past their refusals: they never end, and
+TestClient buffers a body in full, so a test would hang. Nothing here acquires
+the hub, so no camera opens.
 """
 
 from __future__ import annotations
@@ -38,7 +39,9 @@ class FakeRecorder:
         self.record_doa = True
         # Never opened: only their state is read, and Reconnect clears it.
         idle = {"failed": False, "error": None, "reconnect": lambda: None}
-        self.tap = SimpleNamespace(**idle, active=False, overruns=0, block_size=256)
+        self.tap = SimpleNamespace(
+            **idle, active=False, overruns=0, block_size=256, channels=6
+        )
         self.doa = SimpleNamespace(**idle)
 
     def state(self) -> dict[str, object]:
@@ -299,3 +302,7 @@ def test_a_mark_is_written_and_counted_while_recording(client) -> None:
 def test_a_malformed_mark_is_refused(client, body) -> None:
     _recording()
     assert client.post("/api/events", json=body).status_code == 400
+
+
+def test_listening_refuses_a_channel_the_array_lacks(client) -> None:
+    assert client.get("/stream/audio.pcm?channel=6").status_code == 404

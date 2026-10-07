@@ -141,3 +141,15 @@ def rms(samples: np.ndarray) -> np.ndarray:
         A scalar array for mono input, otherwise one value per channel.
     """
     return np.sqrt(np.mean(np.square(samples, dtype=np.float64), axis=0))
+
+
+def to_int16(samples: np.ndarray) -> np.ndarray:
+    """Convert float32 in [-1, 1] back to the int16 the device sent.
+
+    Args:
+        samples: Samples of any shape.
+
+    Returns:
+        The same shape as little-endian int16.
+    """
+    return np.clip(samples * 32768.0, -32768, 32767).astype("<i2")

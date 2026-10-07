@@ -154,8 +154,9 @@ README.
   Either can be turned off for this viewer alone - remembered in the browser,
   never sent to the server - which closes its stream and spares the encoding.
   Only a stream being captured, and so recorded, can be previewed.
-- **The array** - each microphone's level, and whether the next recording
-  records the array at all.
+- **The array** - each microphone's level, the chip's direction estimate
+  (drawn in the same unmeasured convention as the microphones, so its zero is a
+  guess), and whether the next recording records the array at all.
 - **Recording** - start and stop, an optional session name, the counts above as
   they change, and [marks](#marks).
 - **Storage** - free space and **how long that lasts**, computed from the rate

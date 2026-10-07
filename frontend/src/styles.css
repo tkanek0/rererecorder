@@ -502,3 +502,15 @@ button.icon {
   background: #000;
   border-radius: 4px;
 }
+
+/* -- live array --------------------------------------------------------- */
+
+.mic-radial .doa line {
+  stroke: var(--dim);
+  stroke-width: 3;
+  stroke-linecap: round;
+}
+
+.mic-radial .doa.voice line {
+  stroke: var(--accent);
+}

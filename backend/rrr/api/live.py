@@ -1,4 +1,4 @@
-"""The live previews: MJPEG for the camera, server-sent levels for the array."""
+"""The live views: MJPEG for the camera; levels and direction for the array."""
 
 from __future__ import annotations
 
@@ -126,35 +126,52 @@ def stream(kind: str, request: Request) -> StreamingResponse:
     )
 
 
-@router.get("/stream/audio-levels")
-def audio_levels(request: Request) -> StreamingResponse:
-    """Stream each channel's current level, for a live meter.
+@router.get("/stream/array")
+def array_state(request: Request) -> StreamingResponse:
+    """Stream each channel's current level and the chip's direction, for a meter.
 
     Returns:
         A ``text/event-stream`` response, one JSON object per update: ``mix``
-        (the beamformed channel) and ``mic1``-``mic4`` (the raw microphones),
-        each in dBFS or ``null`` for silence.
+        (the processed channel) and ``mic1``-``mic4`` (the raw microphones),
+        each in dBFS or ``null`` for silence, and ``doa``, the newest
+        ``{"angle", "voice"}`` reading or ``null`` while there is none.
     """
     tap = state.recorder.tap
+    doa = state.recorder.doa
 
     def render(window: Window) -> str:
         mics = rms(window.mics)
-        levels = {"mix": dbfs(float(rms(window.processed)))}
+        levels: dict[str, Any] = {"mix": dbfs(float(rms(window.processed)))}
         levels.update(
             {f"mic{n + 1}": dbfs(float(level)) for n, level in enumerate(mics)}
         )
+        reading = doa.latest(timeout=0)
+        levels["doa"] = (
+            {"angle": reading.angle, "voice": reading.voice_activity}
+            if reading is not None
+            else None
+        )
         return f"data: {json.dumps(levels)}\n\n"
 
+    async def events() -> AsyncIterator[str]:
+        # Holds the direction for as long as the levels hold the audio.
+        doa.acquire()
+        try:
+            async for event in _poll(
+                request,
+                tap,
+                lambda after: tap.latest(
+                    config.AUDIO_LEVEL_WINDOW_S, _STREAM_WAIT_S, after
+                ),
+                lambda: config.AUDIO_LEVEL_HZ,
+                render,
+            ):
+                yield event  # type: ignore[misc]
+        finally:
+            doa.release()
+
     return StreamingResponse(
-        _poll(
-            request,
-            tap,
-            lambda after: tap.latest(
-                config.AUDIO_LEVEL_WINDOW_S, _STREAM_WAIT_S, after
-            ),
-            lambda: config.AUDIO_LEVEL_HZ,
-            render,
-        ),
+        events(),
         media_type="text/event-stream",
         headers={"Cache-Control": "no-store"},
     )

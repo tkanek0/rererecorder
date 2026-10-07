@@ -3,12 +3,13 @@ import { Eye, EyeOff } from 'lucide-react';
 
 import {
   PREVIEW_LABELS,
-  audioLevelsUrl,
+  arrayStateUrl,
   previewUrl,
   reconnectDevice,
   setCodecs,
   setRecordAudio,
   setStreams,
+  type ArrayState,
   type AudioLevels,
   type CodecChoice,
   type CaptureName,
@@ -123,23 +124,25 @@ const micPosition = (angleDeg: number, radius: number) => {
 };
 
 /**
- * Subscribe to the live per-channel level stream while mounted. `EventSource`
- * reconnects on its own; the last reading is kept rather than cleared meanwhile.
+ * Subscribe to the array's live levels and direction while mounted.
+ * `EventSource` reconnects on its own; the last reading is kept rather than
+ * cleared meanwhile.
  */
-const useAudioLevels = (): AudioLevels => {
-  const [levels, setLevels] = useState<AudioLevels>({
+const useArrayState = (): ArrayState => {
+  const [levels, setLevels] = useState<ArrayState>({
     mix: null,
     mic1: null,
     mic2: null,
     mic3: null,
     mic4: null,
+    doa: null,
   });
 
   useEffect(() => {
-    const source = new EventSource(audioLevelsUrl());
+    const source = new EventSource(arrayStateUrl());
     source.onmessage = (event) => {
       try {
-        setLevels(JSON.parse(event.data) as AudioLevels);
+        setLevels(JSON.parse(event.data) as ArrayState);
       } catch {
         // Ignore a malformed line rather than closing the stream.
       }
@@ -350,12 +353,13 @@ const ReconnectButton = ({
  * settings and a live view, whether or not anything has opened it.
  */
 export const DevicesPanel = ({ devices, settings, recording, onChanged }: Props) => {
-  const levels = useAudioLevels();
+  const levels = useArrayState();
   const { realsense, respeaker } = devices;
   // The enlarged preview replaces the small one, to hold one connection each.
   const [enlarged, setEnlarged] = useState<PreviewKind | null>(null);
   const [previews, togglePreview] = usePreviewChoice();
   const closeEnlarged = useCallback(() => setEnlarged(null), []);
+  const doa = levels.doa;
 
   return (
     <section className="panel devices">
@@ -520,6 +524,21 @@ export const DevicesPanel = ({ devices, settings, recording, onChanged }: Props)
               <text x={100} y={100 + 40} textAnchor="middle">
                 mix {dbLabel(levels.mix)}
               </text>
+              {/* The chip's direction estimate. Its zero is as unmeasured as the
+                  mic angles above. */}
+              {doa ? (
+                <g className={`doa ${doa.voice ? 'voice' : ''}`}>
+                  <line
+                    x1={micPosition(doa.angle, 28).x}
+                    y1={micPosition(doa.angle, 28).y}
+                    x2={micPosition(doa.angle, RADIUS_OUTER).x}
+                    y2={micPosition(doa.angle, RADIUS_OUTER).y}
+                  />
+                  <text x={100} y={11} textAnchor="middle">
+                    DoA {doa.angle}°{doa.voice ? ' · voice' : ''}
+                  </text>
+                </g>
+              ) : null}
             </svg>
           </div>
 

@@ -152,6 +152,15 @@ export type AudioLevels = {
   mic4: number | null;
 };
 
+/** The chip's own direction estimate, in its DOA convention. */
+export type DoaReading = {
+  angle: number;
+  voice: boolean;
+};
+
+/** What the array's live stream carries: its levels and its direction. */
+export type ArrayState = AudioLevels & { doa: DoaReading | null };
+
 /** One finished session, as its manifest describes it. */
 export type SessionSummary = {
   session_id: string;
@@ -367,12 +376,11 @@ export const previewUrl = (kind: PreviewKind): string =>
   `${controlBase()}/stream/${kind}.mjpg`;
 
 /**
- * URL of the live per-channel audio level stream (server-sent events).
+ * URL of the array's live levels and direction (server-sent events).
  *
  * @returns The URL.
  */
-export const audioLevelsUrl = (): string =>
-  `${controlBase()}/stream/audio-levels`;
+export const arrayStateUrl = (): string => `${controlBase()}/stream/array`;
 
 /**
  * Fetch one session in full, enough to play it back.

@@ -67,11 +67,15 @@ def test_a_block_arrives_scaled_and_stamped_with_its_adc_time() -> None:
 #
 # See docs/decisions.md 20 and 26.
 
+BLOCK_SAMPLES = np.zeros((BLOCK, CHANNELS), dtype=np.float32)
 
-def _calibrate(clock: AdcClock, offsets: list[float]) -> None:
-    """Report one block per offset at ``now - offset``."""
+
+def _calibrate(clock: AdcClock, offsets: list[float]) -> list[float]:
+    """Report one block per offset at ``now - offset``; return the times released."""
+    released = []
     for offset in offsets:
-        clock(BLOCK, time.monotonic() - offset)
+        released += [at for _, at in clock.add(BLOCK_SAMPLES, time.monotonic() - offset)]
+    return released
 
 
 @pytest.mark.parametrize(
@@ -94,7 +98,8 @@ def test_the_adc_clock_is_judged_once_and_then_applied(
     offsets, offset, incoherent, logged, caplog
 ) -> None:
     clock = AdcClock(RATE)
-    _calibrate(clock, offsets)
+    released = _calibrate(clock, offsets)
+    assert len(released) == _DOMAIN_CALIBRATION_BLOCKS, "held, then released together"
     _calibrate(clock, [LAG] * 30)  # decided once; nothing re-fitted or re-warned
 
     assert clock.offset == pytest.approx(offset, abs=2e-3)
@@ -103,14 +108,43 @@ def test_the_adc_clock_is_judged_once_and_then_applied(
     assert caplog.text.count("WARNING") <= 1
 
     now = time.monotonic()
-    reported = now - offsets[0]
-    assert clock(BLOCK, reported) == pytest.approx(now - LAG, abs=2e-3)
+    [(_, at)] = clock.add(BLOCK_SAMPLES, now - offsets[0])
+    assert at == pytest.approx(now - LAG, abs=2e-3)
+
+
+def test_blocks_delivered_in_bursts_are_stamped_without_gaps() -> None:
+    """Callbacks arrive two blocks at a time; the converter's times are still even.
+
+    Timing these from the callback would read as a hole every other block, which
+    the writer then fills with silence that was never lost.
+    """
+    clock = AdcClock(RATE)
+    start = time.monotonic() - 1.0
+    released = []
+    for n in range(_DOMAIN_CALIBRATION_BLOCKS + 4):
+        released += [at for _, at in clock.add(BLOCK_SAMPLES, start + n * LAG)]
+    assert np.diff(released) == pytest.approx(LAG, abs=1e-9)
+
+
+def test_a_capture_closed_before_the_decision_still_delivers_what_it_held() -> None:
+    received: list[float] = []
+    capture = Capture(lambda block, at: received.append(at), rate=RATE)
+    for _ in range(3):
+        capture._callback(
+            np.zeros((BLOCK, CHANNELS), dtype=np.int16),
+            BLOCK,
+            FakeTimeInfo(inputBufferAdcTime=time.monotonic()),
+            FakeStatus(),
+        )
+    assert received == []
+    capture.__exit__(None, None, None)
+    assert len(received) == 3
 
 
 def test_a_missing_adc_time_falls_back_to_the_callback_clock(caplog) -> None:
     """Some host APIs report zero; the block started a block before the callback."""
     before = time.monotonic()
-    at = AdcClock(RATE)(BLOCK, 0.0)
+    [(_, at)] = AdcClock(RATE).add(BLOCK_SAMPLES, 0.0)
     assert before - LAG <= at <= time.monotonic()
     assert "inputBufferAdcTime" in caplog.text
 

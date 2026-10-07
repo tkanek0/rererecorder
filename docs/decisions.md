@@ -789,9 +789,9 @@ cases apart: agrees with `time.monotonic()` (use `reported` as-is, decision
 `_DOMAIN_STABILITY_S` (0.25 s) (add the measured mean offset to `reported`
 for the rest of the recording, keeping the ADC clock's own precision); or
 not stable at all (fall back to the callback clock for the rest of the
-recording, decision 20's original bad case, unchanged). Every block during
-the calibration window itself is timed from the callback clock, the same
-conservative choice decision 20 already made for a missing reading.
+recording, decision 20's original bad case, unchanged). The blocks of the
+calibration window are held until the decision and then stamped by it, so they
+carry the same clock as everything after them.
 
 **Alternatives:** keep decision 20's binary "agrees or discard" check
 (rejected: measured, on WASAPI, to discard a clock that was actually good
@@ -819,13 +819,18 @@ reading. Verified end to end through the real CLI: a 5-minute recording
 fitted +1 ppm with 422 samples (26 ms) filled over 300 s, independently
 confirmed by `rrr.inspection`.
 
-**Cost:** the first ~0.3 s of every recording is timed from the coarser
-callback clock while calibration runs, which it also was, for one block
-only, before this change. `rrr.inspection`'s `RESIDUAL_WARN_MS` (1.0 ms,
-calibrated against Linux/ALSA's 0.03 ms jitter) flags the resulting
-first-point residual (measured 20.7 ms) on a Windows/WASAPI recording as a
-`PROBLEM` - understood as this startup transient rather than adjusted away,
-since the check is still correctly describing a real, if harmless, number.
+**Why held, not timed from the callback meanwhile:** the window used to be
+timed from the callback clock, and that clock arrives in bursts - two blocks
+at a time every 32 ms on a Linux host, for instance. The writer read each burst
+as a hole and filled it with silence that was never lost: about 140 ms of
+invented silence at the start of every recording, and a time axis whose
+straight-line fit was off by up to 100 ms in a 30 s session (+2500 ppm). The
+26 ms filled in the Windows run above was the same thing. Held, the same 30 s
+recording fills nothing and fits to 0.04 ms at worst, -3 ppm.
+
+**Cost:** the first ~0.3 s of audio reaches consumers ~0.3 s late, once per
+opening of the array. A capture closed before the decision releases what it
+held timed from the callback clock.
 
 ---
 

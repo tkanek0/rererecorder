@@ -88,8 +88,9 @@ class AdcClock:
 
     The reported time is used as-is, corrected by a fixed offset, or replaced
     by the callback clock, as decided once over the first
-    :data:`_DOMAIN_CALIBRATION_BLOCKS` valid blocks, which are themselves timed
-    from the callback clock. See docs/decisions.md 20 and 26.
+    :data:`_DOMAIN_CALIBRATION_BLOCKS` valid blocks. Those blocks are held until
+    the decision and then stamped by it: the callback clock arrives in bursts,
+    and stamping them from it would read as gaps (docs/decisions.md 20, 26).
     """
 
     def __init__(self, rate: int) -> None:
@@ -100,48 +101,61 @@ class AdcClock:
         """
         self._rate = rate
         self._warned = False
-        self._lags: list[float] = []
+        self._held: list[tuple[np.ndarray, float, float]] = []
         self._decided = False
         #: Added to the reported time when it is stable but on another epoch.
         self.offset = 0.0
         #: Set when the reported time is not one clock; the callback's is used.
         self.incoherent = False
 
-    def __call__(self, frames: int, reported: float) -> float:
-        """Return the ADC time of a block's first sample.
+    def add(self, block: np.ndarray, reported: float) -> list[tuple[np.ndarray, float]]:
+        """Take one block and return those now ready, each with its ADC time.
 
         Args:
-            frames: Samples in the block.
+            block: The block's samples.
             reported: PortAudio's ``inputBufferAdcTime``; zero when the host
                 API does not fill it in.
 
         Returns:
-            The time, on the same clock as ``time.monotonic()``.
+            ``(block, time)`` pairs in order: none while the clock is still
+            being judged, then every held block at once, then one per call.
         """
-        expected_lag = frames / self._rate
         now = time.monotonic()
         if reported <= 0.0:
             if not self._warned:
                 logger.warning(
                     "PortAudio did not report inputBufferAdcTime; timing audio "
-                    "from the callback instead, which is %.1f ms coarser",
-                    expected_lag * 1000.0,
+                    "from the callback instead, which is a block coarser"
                 )
                 self._warned = True
-            return now - expected_lag
-        if not self._decided:
-            self._lags.append(now - reported)
-            if len(self._lags) < _DOMAIN_CALIBRATION_BLOCKS:
-                return now - expected_lag
-            self._decide(expected_lag)
+            return [*self.flush(), (block, self._callback_time(block, now))]
+        if self._decided:
+            return [(block, self._stamp(block, reported, now))]
+        self._held.append((block, reported, now))
+        if len(self._held) < _DOMAIN_CALIBRATION_BLOCKS:
+            return []
+        self._decide()
+        held, self._held = self._held, []
+        return [(b, self._stamp(b, r, n)) for b, r, n in held]
+
+    def flush(self) -> list[tuple[np.ndarray, float]]:
+        """Release blocks still held before a decision, timed by the callback."""
+        held, self._held = self._held, []
+        return [(b, self._callback_time(b, n)) for b, _, n in held]
+
+    def _callback_time(self, block: np.ndarray, now: float) -> float:
+        return now - len(block) / self._rate
+
+    def _stamp(self, block: np.ndarray, reported: float, now: float) -> float:
         if self.incoherent:
-            return now - expected_lag
+            return self._callback_time(block, now)
         return reported + self.offset
 
-    def _decide(self, expected_lag: float) -> None:
-        """Judge the reported clock from the lags collected so far."""
+    def _decide(self) -> None:
+        """Judge the reported clock from the held blocks."""
         self._decided = True
-        lags = np.array(self._lags)
+        expected_lag = len(self._held[0][0]) / self._rate
+        lags = np.array([now - reported for _, reported, now in self._held])
         mean_lag, spread = float(lags.mean()), float(lags.std())
         if -expected_lag <= mean_lag <= 3.0 * expected_lag:
             logger.info(
@@ -239,6 +253,8 @@ class Capture:
                 # Abort, not stop: a stalled stream has nothing left to drain.
                 stream.abort()
                 stream.close()
+            for block, at in self._clock.flush():
+                self._on_block(block, at)
         finally:
             if self._com:
                 _com_uninitialize()
@@ -248,10 +264,9 @@ class Capture:
         self.last_block_at = time.monotonic()
         if status.input_overflow:
             self.overruns += 1
-        self._on_block(
-            indata.astype(np.float32) * _INT16_SCALE,
-            self._clock(frames, time_info.inputBufferAdcTime),
-        )
+        block = indata.astype(np.float32) * _INT16_SCALE
+        for ready, at in self._clock.add(block, time_info.inputBufferAdcTime):
+            self._on_block(ready, at)
 
 
 #: Host API preferred on Windows, only together with a matching rate.

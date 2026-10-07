@@ -155,8 +155,9 @@ Not built, and deliberately so: pose. Monocular SLAM belongs outside this
 repository - the export carries what it needs. This repository measures and
 records; it does not estimate.
 
-Untested by anything automatic: `SessionRecorder` itself, which needs a device.
-That covers the mark sidecar's open-and-close lifecycle.
+Untested by anything automatic: the adapters' real device I/O - `LiveSource`,
+`Capture` and the USB direction readout. Everything above them, `SessionRecorder`
+included, is tested against fakes of those three (`tests/conftest.py`).
 
 Confirmed on the hardware (2026-09-07, firmware 5.17.3.10), with the numbers in
 `docs/features.md` "What the calibration holds" and "The projector": depth is

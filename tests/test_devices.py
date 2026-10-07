@@ -7,104 +7,26 @@ all three are one mechanism.
 
 from __future__ import annotations
 
-import threading
 import time
 from collections.abc import Callable, Iterator
-from dataclasses import dataclass, field
-from typing import Self
 
 import numpy as np
 import pytest
 from rrr.devices import AudioTap, DoaTap, FrameHub, SharedWorker
 from rrr.devices import audio as audio_module
 
-from .conftest import wait_until
+from .conftest import Device, FakeCapture, FakeSource, FakeTuning, wait_until
 
 RATE = 16_000
 BLOCK = 256
 CHANNELS = 6
 
 
-@dataclass
-class Device:
-    """What a fake device does when opened, shared by every fake below."""
-
-    opens: int = 0
-    fail_open: bool = False
-    #: Set to make an open device fail mid-stream.
-    broken: threading.Event = field(default_factory=threading.Event)
-
-    def open(self) -> None:
-        self.opens += 1
-        if self.fail_open:
-            raise RuntimeError("no such device")
-
-
-# -- the camera ---------------------------------------------------------------
-
-
-@dataclass(frozen=True)
-class FakeFrames:
-    index: int
-
-
-class FakeSource:
-    """Delivers a set every 10 ms until closed, or fails as a stalled camera."""
-
-    def __init__(self, device: Device) -> None:
-        self._device = device
-        self._closed = threading.Event()
-
-    def __enter__(self) -> Self:
-        self._device.open()
-        return self
-
-    def __exit__(self, *exc: object) -> None:
-        self._closed.set()
-
-    def frames(self) -> Iterator[FakeFrames]:
-        while not self._closed.is_set():
-            if self._device.broken.wait(0.01):
-                raise RuntimeError("no frames for 5.0s")
-            yield FakeFrames(index=0)
+# -- each device, faked --------------------------------------------------
 
 
 def _hub(device: Device, monkeypatch) -> FrameHub:
     return FrameHub(lambda: FakeSource(device), idle_shutdown_s=0.0)
-
-
-# -- the array's audio --------------------------------------------------------
-
-
-class FakeCapture:
-    """Delivers a block every 10 ms through the tap's callback, as PortAudio would.
-
-    A broken one stops delivering, which the tap must notice by itself.
-    """
-
-    device: Device
-
-    def __init__(self, on_block: Callable[[np.ndarray, float], None], **_: object):
-        self._on_block = on_block
-        self._stop = threading.Event()
-        self.overruns = 0
-        self.last_block_at = 0.0
-
-    def __enter__(self) -> Self:
-        self.device.open()
-        self.last_block_at = time.monotonic()
-        threading.Thread(target=self._deliver, daemon=True).start()
-        return self
-
-    def __exit__(self, *exc: object) -> None:
-        self._stop.set()
-
-    def _deliver(self) -> None:
-        while not self._stop.wait(0.01):
-            if self.device.broken.is_set():
-                continue
-            self.last_block_at = time.monotonic()
-            self._on_block(np.zeros((BLOCK, CHANNELS), np.float32), time.monotonic())
 
 
 def _audio(device: Device, monkeypatch) -> AudioTap:
@@ -114,26 +36,6 @@ def _audio(device: Device, monkeypatch) -> AudioTap:
     return AudioTap(
         0.0, device="x", rate=RATE, channels=CHANNELS, block_size=BLOCK, window_s=1.0
     )
-
-
-# -- the direction ------------------------------------------------------------
-
-
-class FakeTuning:
-    def __init__(self, device: Device) -> None:
-        device.open()
-        self._device = device
-
-    @property
-    def direction(self) -> int:
-        if self._device.broken.is_set():
-            raise RuntimeError("[Errno 5] Input/Output Error")
-        return 90
-
-    voice_activity = False
-
-    def close(self) -> None:
-        pass
 
 
 def _doa(device: Device, monkeypatch) -> DoaTap:

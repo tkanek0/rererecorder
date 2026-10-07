@@ -6,9 +6,12 @@ Values are measured on the real D455, not round figures: epoch-ms timestamps as
 
 from __future__ import annotations
 
+import threading
 import time
 import wave
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
+from dataclasses import dataclass, field
+from typing import Self
 
 import numpy as np
 import pytest
@@ -258,3 +261,106 @@ def small_session(tmp_path) -> SessionPaths:
         rate=SMALL_RATE,
         doa=[{"t": SMALL_START, "angle": 90, "voice": True}],
     )
+
+
+# -- fake devices, for what shares and records them ----------------------------
+
+FAKE_RATE = 16_000
+FAKE_BLOCK = 256
+
+
+@dataclass
+class Device:
+    """What a fake device does when opened, shared by every fake below."""
+
+    opens: int = 0
+    fail_open: bool = False
+    #: Set to make an open device fail mid-stream.
+    broken: threading.Event = field(default_factory=threading.Event)
+
+    def open(self) -> None:
+        self.opens += 1
+        if self.fail_open:
+            raise RuntimeError("no such device")
+
+
+@dataclass(frozen=True)
+class FakeFrames:
+    index: int
+
+
+class FakeSource:
+    """Delivers a set every 10 ms until closed, or fails as a stalled camera."""
+
+    def __init__(
+        self, device: Device, frame: Callable[[int], object] = lambda n: FakeFrames(n)
+    ) -> None:
+        self._device = device
+        self._frame = frame
+        self._closed = threading.Event()
+
+    def __enter__(self) -> Self:
+        self._device.open()
+        return self
+
+    def __exit__(self, *exc: object) -> None:
+        self._closed.set()
+
+    def frames(self) -> Iterator[object]:
+        n = 0
+        while not self._closed.is_set():
+            if self._device.broken.wait(0.01):
+                raise RuntimeError("no frames for 5.0s")
+            n += 1
+            yield self._frame(n)
+
+
+class FakeCapture:
+    """Delivers a block per block's worth of time, with contiguous ADC times.
+
+    A broken one stops delivering, which the tap must notice by itself.
+    """
+
+    device: Device
+
+    def __init__(self, on_block: Callable[[np.ndarray, float], None], **_: object):
+        self._on_block = on_block
+        self._stop = threading.Event()
+        self.overruns = 0
+        self.last_block_at = 0.0
+
+    def __enter__(self) -> Self:
+        self.device.open()
+        self.last_block_at = time.monotonic()
+        threading.Thread(target=self._deliver, daemon=True).start()
+        return self
+
+    def __exit__(self, *exc: object) -> None:
+        self._stop.set()
+
+    def _deliver(self) -> None:
+        start, n = time.monotonic(), 0
+        while not self._stop.wait(FAKE_BLOCK / FAKE_RATE):
+            if self.device.broken.is_set():
+                continue
+            self.last_block_at = time.monotonic()
+            block = np.full((FAKE_BLOCK, 6), 0.01 * (n % 7), np.float32)
+            self._on_block(block, start + n * FAKE_BLOCK / FAKE_RATE)
+            n += 1
+
+
+class FakeTuning:
+    def __init__(self, device: Device) -> None:
+        device.open()
+        self._device = device
+
+    @property
+    def direction(self) -> int:
+        if self._device.broken.is_set():
+            raise RuntimeError("[Errno 5] Input/Output Error")
+        return 90
+
+    voice_activity = False
+
+    def close(self) -> None:
+        pass

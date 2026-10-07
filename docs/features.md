@@ -151,6 +151,9 @@ README.
   next to color because the failure worth catching mid-recording is depth going
   blank while color looks perfect. Clicking one enlarges the same preview over
   the page; Escape, the backdrop or the close button closes it.
+  Either can be turned off for this viewer alone - remembered in the browser,
+  never sent to the server - which closes its stream and spares the encoding.
+  Only a stream being captured, and so recorded, can be previewed.
 - **Recording** - start and stop, an optional session name, the counts above as
   they change, and [marks](#marks).
 - **Storage** - free space and **how long that lasts**, computed from the rate

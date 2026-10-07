@@ -96,10 +96,11 @@ header .sub {
 
 .previews figcaption {
   color: var(--dim);
-  font-size: 11px;
+  font-size: 13px;
   padding-top: 4px;
   display: flex;
   justify-content: space-between;
+  align-items: center;
 }
 
 .rows {
@@ -424,6 +425,10 @@ button > svg {
   margin: 2.5px 0;
 }
 
+button.icon {
+  padding: 2px 6px;
+}
+
 /* -- previews ----------------------------------------------------------- */
 
 .previews .enlargeable {
@@ -431,9 +436,29 @@ button > svg {
 }
 
 .previews .placeholder {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--dim);
+  font-size: 11px;
   background: #000;
   border-radius: 4px;
   aspect-ratio: 16 / 10;
+}
+
+.previews .caption-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* Small enough to sit in a caption line. */
+.previews figcaption button.icon {
+  padding: 0 4px;
+}
+
+.previews figcaption button.icon > svg {
+  margin: 1px 0;
 }
 
 /* -- enlarged preview --------------------------------------------------- */

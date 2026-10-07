@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { Eye, EyeOff } from 'lucide-react';
 
 import {
   PREVIEW_LABELS,
@@ -27,6 +28,51 @@ type Props = {
 };
 
 const STREAMS: StreamName[] = ['color', 'depth', 'infrared'];
+
+/** The streams the page previews, each of which this viewer can turn off. */
+type Previewed = 'color' | 'depth';
+const PREVIEWED: Previewed[] = ['color', 'depth'];
+type PreviewChoice = Record<Previewed, boolean>;
+
+const PREVIEW_STORAGE_KEY = 'rrr.previews';
+
+/** This viewer's preview choice, remembered in the browser; both on if unknown. */
+const loadPreviewChoice = (): PreviewChoice => {
+  const fallback = { color: true, depth: true };
+  try {
+    const saved: unknown = JSON.parse(
+      localStorage.getItem(PREVIEW_STORAGE_KEY) ?? 'null',
+    );
+    if (typeof saved !== 'object' || saved === null) return fallback;
+    const choice = saved as Partial<Record<string, unknown>>;
+    return {
+      color: choice.color !== false,
+      depth: choice.depth !== false,
+    };
+  } catch {
+    return fallback;
+  }
+};
+
+/**
+ * Remember which previews this viewer wants, across reloads. A preview is the
+ * viewer's own business, so it never reaches the server.
+ */
+const usePreviewChoice = (): [PreviewChoice, (kind: Previewed) => void] => {
+  const [choice, setChoice] = useState(loadPreviewChoice);
+  const toggle = (kind: Previewed) =>
+    setChoice((was) => {
+      const next = { ...was, [kind]: !was[kind] };
+      try {
+        localStorage.setItem(PREVIEW_STORAGE_KEY, JSON.stringify(next));
+      } catch {
+        // Not remembered, but still applied.
+      }
+      return next;
+    });
+  return [choice, toggle];
+};
+
 
 const CODEC_CHOICES: CodecChoice[] = ['compressed', 'raw'];
 
@@ -259,6 +305,7 @@ export const DevicesPanel = ({ devices, settings, recording, onChanged }: Props)
   const { realsense, respeaker } = devices;
   // The enlarged preview replaces the small one, to hold one connection each.
   const [enlarged, setEnlarged] = useState<PreviewKind | null>(null);
+  const [previews, togglePreview] = usePreviewChoice();
   const closeEnlarged = useCallback(() => setEnlarged(null), []);
 
   return (
@@ -292,33 +339,53 @@ export const DevicesPanel = ({ devices, settings, recording, onChanged }: Props)
           </div>
 
           <div className="visual previews">
-            {(['color', 'depth'] as PreviewKind[]).map((kind) => (
-              <figure key={kind}>
-                {enlarged === kind ? (
-                  <div className="placeholder" />
-                ) : (
-                  <div
-                    className="enlargeable"
-                    onClick={() => setEnlarged(kind)}
-                    title="enlarge"
-                  >
-                    <LiveImage src={previewUrl(kind)} alt={PREVIEW_LABELS[kind]} />
-                  </div>
-                )}
-                <figcaption>
-                  <span>{PREVIEW_LABELS[kind]}</span>
-                  <span>
-                    {kind === 'depth'
-                      ? realsense.streams.depth
-                        ? `${realsense.streams.depth[0]}x${realsense.streams.depth[1]} @${realsense.streams.depth[2]}`
-                        : 'off'
-                      : realsense.streams.color
-                        ? `${realsense.streams.color[0]}x${realsense.streams.color[1]} @${realsense.streams.color[2]}`
-                        : 'off'}
-                  </span>
-                </figcaption>
-              </figure>
-            ))}
+            {PREVIEWED.map((kind) => {
+              const stream = realsense.streams[kind];
+              const shown = previews[kind] && stream !== null;
+              return (
+                <figure key={kind}>
+                  {!shown ? (
+                    <div className="placeholder">
+                      {stream === null ? 'not captured' : 'preview off'}
+                    </div>
+                  ) : enlarged === kind ? (
+                    <div className="placeholder" />
+                  ) : (
+                    <div
+                      className="enlargeable"
+                      onClick={() => setEnlarged(kind)}
+                      title="enlarge"
+                    >
+                      <LiveImage src={previewUrl(kind)} alt={PREVIEW_LABELS[kind]} />
+                    </div>
+                  )}
+                  <figcaption>
+                    <span className="caption-title">
+                      {PREVIEW_LABELS[kind]}
+                      {/* Only a stream the camera is asked for can be previewed. */}
+                      <button
+                        className="icon"
+                        aria-pressed={shown}
+                        disabled={stream === null}
+                        onClick={() => togglePreview(kind)}
+                        title={
+                          stream === null
+                            ? 'not captured, so nothing to preview'
+                            : shown
+                              ? 'hide the preview'
+                              : 'show the preview'
+                        }
+                      >
+                        {shown ? <Eye size={14} /> : <EyeOff size={14} />}
+                      </button>
+                    </span>
+                    <span>
+                      {stream ? `${stream[0]}x${stream[1]} @${stream[2]}` : 'off'}
+                    </span>
+                  </figcaption>
+                </figure>
+              );
+            })}
           </div>
 
           <CaptureControls

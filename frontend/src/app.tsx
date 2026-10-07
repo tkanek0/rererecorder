@@ -71,19 +71,14 @@ export const App = () => {
     if (!wasRecording) refreshSessions();
   }, [wasRecording, refreshSessions]);
 
-  const device = status?.devices.realsense.device;
-
   return (
     <div className="app">
       <header>
         <h1>ReReRecorder</h1>
-        <span className="sub">
-          {device
-            ? `${device.name} · ${device.serial} · FW ${device.firmware} · USB ${device.usb_type}`
-            : offline
-              ? `control plane unreachable: ${offline}`
-              : 'looking for a camera'}
-        </span>
+        {/* The device is named in its own card; this only says the page is stale. */}
+        {offline ? (
+          <span className="sub">control plane unreachable: {offline}</span>
+        ) : null}
       </header>
 
       {status ? (

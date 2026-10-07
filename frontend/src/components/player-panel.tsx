@@ -53,7 +53,6 @@ export const PlayerPanel = ({ sessionId, onClose }: Props) => {
   const indexRef = useRef(0);
   const [index, setIndex] = useState(0);
   const objectUrl = useRef<string | null>(null);
-  const panel = useRef<HTMLElement>(null);
 
   // With audio, the audio element is the clock; `loading` drops frame requests
   // rather than queueing them when fetching falls behind.
@@ -61,11 +60,6 @@ export const PlayerPanel = ({ sessionId, onClose }: Props) => {
   const loading = useRef(false);
   const [frameTimes, setFrameTimes] = useState<[number, number][]>([]);
   const [channel, setChannel] = useState(0);
-
-  // Bring the transport controls on screen when the panel opens.
-  useEffect(() => {
-    panel.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-  }, [sessionId]);
 
   const first = detail?.archive.first_index ?? 0;
   const last = detail?.archive.last_index ?? 0;
@@ -246,10 +240,7 @@ export const PlayerPanel = ({ sessionId, onClose }: Props) => {
   ];
 
   return (
-    <section
-      className="panel player wide"
-      ref={panel}
-    >
+    <section className="panel player wide">
       <h2>
         playing {sessionId}
         <button className="close" onClick={onClose} title="close">

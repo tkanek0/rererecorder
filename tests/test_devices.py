@@ -7,6 +7,9 @@ all three are one mechanism.
 
 from __future__ import annotations
 
+import os
+import subprocess
+import sys
 import time
 from collections.abc import Callable, Iterator
 
@@ -194,3 +197,30 @@ def test_a_stalled_array_fails_the_tap_with_a_reason(monkeypatch) -> None:
     assert "no audio" in (tap.error or "")
     assert tap.stream(tap.cursor, timeout=5.0) is None
     tap.shutdown()
+
+
+@pytest.mark.parametrize(
+    ("adapter", "check", "environment"),
+    [
+        (
+            "realsense_adapter",
+            "a.DEFAULT_EMITTER == 'on' and a.StreamConfig().emitter == 'on'",
+            {"RRR_EMITTER": "off"},
+        ),
+        (
+            "respeaker_adapter",
+            "a.DEVICE_NAME == 'ReSpeaker' and a.BLOCK_SIZE == 256",
+            {"RRR_AUDIO_DEVICE": "elsewhere", "RRR_AUDIO_BLOCK_SIZE": "1"},
+        ),
+    ],
+)
+def test_an_adapter_imports_nothing_from_rrr_and_ignores_the_environment(
+    adapter: str, check: str, environment: dict[str, str]
+) -> None:
+    """A device stays usable without the recorder; rrr passes settings in."""
+    code = (
+        f"import sys, {adapter} as a;"
+        "assert not [m for m in sys.modules if m == 'rrr' or m.startswith('rrr.')];"
+        f"assert {check}"
+    )
+    subprocess.run([sys.executable, "-c", code], check=True, env={**os.environ, **environment})

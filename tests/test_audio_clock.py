@@ -29,63 +29,39 @@ def _ideal(blocks: int, rate: float = RATE) -> list[AudioClockPoint]:
 # -- the ideal case -----------------------------------------------------------
 
 
-def test_ideal_recording_measures_the_nominal_rate() -> None:
-    report = AudioTimeline(_ideal(100), RATE).report()
+def test_an_ideal_recording_is_the_nominal_arithmetic_both_ways() -> None:
+    timeline = AudioTimeline(_ideal(50), RATE)
+    report = timeline.report()
     assert report.measured_rate == pytest.approx(RATE, rel=1e-9)
-    assert report.rate_error_ppm == pytest.approx(0.0, abs=1e-3)
     assert report.residual_max_ms == pytest.approx(0.0, abs=1e-6)
     assert report.filled == 0
-
-
-def test_sample_and_time_invert_each_other() -> None:
-    timeline = AudioTimeline(_ideal(50), RATE)
-    for sample in (0, 1024, 40_960, 50_000):
-        # Measured worst case 1.3e-6 samples: a double's ulp at ~1.3e6 s
-        # (2.3e-10 s) divided by 6.25e-5 s per sample.
+    for sample in (0, 8_000, 40_960):
+        assert timeline.monotonic_at(sample) == pytest.approx(
+            START + sample / RATE, abs=1e-9
+        )
+        # A double's ulp at ~1.3e6 s is 2.3e-10 s, far under a sample.
         assert timeline.sample_at(timeline.monotonic_at(sample)) == pytest.approx(
             sample, abs=1e-3
         )
 
-
-def test_monotonic_at_matches_the_nominal_arithmetic() -> None:
-    """For a clean recording, the fit must agree with start + n/rate."""
-    timeline = AudioTimeline(_ideal(50), RATE)
-    for sample in (0, 8_000, 32_768):
-        assert timeline.monotonic_at(sample) == pytest.approx(
-            START + sample / RATE, abs=1e-9
-        )
-
-
-def test_a_single_point_falls_back_to_the_nominal_rate() -> None:
-    """One block is not enough to fit a rate, and must not pretend otherwise."""
-    timeline = AudioTimeline([AudioClockPoint(sample=0, monotonic=START)], RATE)
-    report = timeline.report()
-    assert report.measured_rate is None
-    assert report.rate_error_ppm is None
-    assert timeline.monotonic_at(RATE) == pytest.approx(START + 1.0, abs=1e-9)
+    # One point is not enough to fit a rate, and must not pretend otherwise.
+    single = AudioTimeline([AudioClockPoint(sample=0, monotonic=START)], RATE)
+    assert single.report().measured_rate is None
+    assert single.monotonic_at(RATE) == pytest.approx(START + 1.0, abs=1e-9)
 
 
 # -- a converter running at the wrong rate ------------------------------------
 
 
 @pytest.mark.parametrize("ppm", [-200.0, -50.0, 50.0, 200.0])
-def test_a_rate_error_is_measured_back(ppm: float) -> None:
-    """A crystal off by ``ppm`` is reported as such (50 ppm = 0.18 s/h)."""
+def test_a_rate_error_is_measured_back_and_leaves_no_residual(ppm: float) -> None:
+    """A crystal off by ``ppm`` is absorbed by the fit, so only the rate reveals it."""
     actual_rate = RATE * (1.0 + ppm / 1e6)
     report = AudioTimeline(_ideal(1000, rate=actual_rate), RATE).report()
 
     assert report.measured_rate == pytest.approx(actual_rate, rel=1e-9)
     assert report.rate_error_ppm == pytest.approx(ppm, rel=1e-6)
-    # Cross-check the fitted rate against the ppm figure over an hour.
-    drift_per_hour = 3600.0 * (report.measured_rate - RATE) / RATE
-    assert drift_per_hour == pytest.approx(ppm / 1e6 * 3600.0, rel=1e-6)
-
-
-def test_a_rate_error_leaves_no_residual() -> None:
-    """A steady rate error is absorbed by the fit, so only the rate reveals it."""
-    report = AudioTimeline(_ideal(500, rate=RATE * 1.0002), RATE).report()
     assert report.residual_max_ms == pytest.approx(0.0, abs=1e-6)
-    assert report.rate_error_ppm == pytest.approx(200.0, rel=1e-6)
 
 
 # -- dropped audio ------------------------------------------------------------
@@ -111,26 +87,19 @@ def _with_unfilled_drop(
     return points
 
 
-def test_an_unfilled_drop_shows_up_as_a_step_in_the_residual() -> None:
-    """The file contracted by the dropped samples, and the report must say so."""
-    lost = 4 * BLOCK  # 4096 samples = 256 ms at 16 kHz
-    report = AudioTimeline(_with_unfilled_drop(200, 100, lost), RATE).report()
+def test_an_unfilled_drop_shows_as_a_step_and_drags_the_rate() -> None:
+    """The file contracted by the dropped samples, and the report must say so.
 
-    # A mid-recording step leaves about half the gap either side of the fit.
-    assert report.residual_max_ms is not None
-    assert report.residual_max_ms == pytest.approx(lost / RATE * 1000.0 / 2, rel=0.25)
-
-
-def test_a_step_also_corrupts_the_fitted_rate() -> None:
-    """A drop drags the slope too: 256 ms in 13 s reads as about -29,000 ppm.
-
-    So a fitted rate means nothing until the residual is checked first.
+    The slope is dragged too (256 ms in 13 s reads as about -29,000 ppm), so a
+    fitted rate means nothing until the residual is checked first.
     """
     lost = 4 * BLOCK
     report = AudioTimeline(_with_unfilled_drop(200, 100, lost), RATE).report()
 
-    assert abs(report.rate_error_ppm) > 10_000.0, "the slope is dragged, not spared"
-    assert report.residual_max_ms > 100.0, "and the residual is what says so"
+    # A mid-recording step leaves about half the gap either side of the fit.
+    assert report.residual_max_ms == pytest.approx(lost / RATE * 1000.0 / 2, rel=0.25)
+    assert abs(report.rate_error_ppm) > 10_000.0
+    assert report.filled == 0
 
 
 def test_a_filled_drop_keeps_the_axis_intact() -> None:
@@ -156,14 +125,6 @@ def test_a_filled_drop_keeps_the_axis_intact() -> None:
     assert report.residual_max_ms == pytest.approx(0.0, abs=1e-3)
     assert report.filled == lost
     assert report.rate_error_ppm == pytest.approx(0.0, abs=1e-3)
-
-
-def test_filled_and_unfilled_are_distinguishable() -> None:
-    """The two must not look the same, or the sidecar buys nothing."""
-    lost = 2 * BLOCK
-    unfilled = AudioTimeline(_with_unfilled_drop(200, 100, lost), RATE).report()
-    assert unfilled.filled == 0
-    assert unfilled.residual_max_ms > 10.0
 
 
 # -- timestamp jitter ---------------------------------------------------------

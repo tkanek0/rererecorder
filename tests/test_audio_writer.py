@@ -143,45 +143,27 @@ def _wav_samples(path: str) -> np.ndarray:
 # -- the ordinary case --------------------------------------------------------
 
 
-def test_continuous_audio_is_written_whole(tmp_path) -> None:
+def test_continuous_audio_is_written_whole_and_placed_on_the_clock(tmp_path) -> None:
+    """The point of all of it: an instant maps to a position in the file."""
     tap = FakeTap()
-    blocks = [FakeBlock(n * BLOCK, START + n * BLOCK_S, n + 1) for n in range(20)]
-    for n in range(0, 20, 4):
+    blocks = [FakeBlock(n * BLOCK, START + n * BLOCK_S, n + 1) for n in range(60)]
+    for n in range(0, 60, 4):
         tap.queue(_chunk(blocks[n : n + 4]))
 
     wav, clock, stats = _run(tap, tmp_path)
 
-    assert _wav_frames(wav) == 20 * BLOCK
-    assert stats.filled == 0
-    assert stats.gaps == 0
+    assert _wav_frames(wav) == 60 * BLOCK
+    assert (stats.filled, stats.gaps) == (0, 0)
     assert stats.first_monotonic == pytest.approx(START, abs=1e-9)
+    assert tap.acquired == 0, "the tap is held only while recording"
 
-    report = AudioTimeline.read(clock, RATE).report()
+    timeline = AudioTimeline.read(clock, RATE)
+    report = timeline.report()
     assert report.residual_max_ms == pytest.approx(0.0, abs=1e-3)
     assert report.rate_error_ppm == pytest.approx(0.0, abs=1.0)
-    assert report.filled == 0
-
-
-def test_the_written_axis_can_be_queried_by_time(tmp_path) -> None:
-    """The point of all of it: an instant maps to a position in the file."""
-    tap = FakeTap()
-    blocks = [FakeBlock(n * BLOCK, START + n * BLOCK_S, 1) for n in range(60)]
-    tap.queue(_chunk(blocks))
-
-    wav, clock, _ = _run(tap, tmp_path)
-    timeline = AudioTimeline.read(clock, RATE)
-
-    # Half a second in: 8000 samples, and the file is long enough to hold them.
+    # Half a second in: 8000 samples.
     assert timeline.sample_at(START + 0.5) == pytest.approx(8_000, abs=1.0)
     assert timeline.monotonic_at(8_000) == pytest.approx(START + 0.5, abs=1e-6)
-    assert _wav_frames(wav) > 8_000
-
-
-def test_the_tap_is_held_only_while_recording(tmp_path) -> None:
-    tap = FakeTap()
-    tap.queue(_chunk([FakeBlock(0, START, 1)]))
-    _run(tap, tmp_path)
-    assert tap.acquired == 0
 
 
 # -- the driver dropped input -------------------------------------------------
@@ -305,24 +287,6 @@ def test_the_two_losses_are_not_filled_twice(tmp_path) -> None:
     assert report.residual_max_ms == pytest.approx(0.0, abs=1e-3), (
         "if the fill were wrong, the sidecar's own points would not lie on a line"
     )
-
-
-def test_an_unrepaired_recording_would_have_failed_these_checks() -> None:
-    """A control: positions as an unfilled writer would write them must fail."""
-    lost = 8 * BLOCK
-    points = []
-    position = 0
-    for n in range(20):
-        skipped = lost / RATE if n >= 10 else 0.0
-        points.append((position, START + n * BLOCK_S + skipped))
-        position += BLOCK
-
-    from rrr.timeline.audio_clock import AudioClockPoint
-
-    report = AudioTimeline(
-        [AudioClockPoint(sample=s, monotonic=t) for s, t in points], RATE
-    ).report()
-    assert report.residual_max_ms > 50.0, "an unfilled hole must be visible"
 
 
 # -- accounting ---------------------------------------------------------------

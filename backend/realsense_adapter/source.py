@@ -103,12 +103,6 @@ def _extrinsics(source: rs.stream_profile, target: rs.stream_profile) -> Extrins
     )
 
 
-def _option_name(option: rs.option) -> str:
-    """The SDK enum member's name, e.g. ``emitter_enabled``."""
-    # Not str(option): that is the display name, "Emitter Enabled".
-    return option.name
-
-
 def _motion_intrinsics(profile: rs.stream_profile) -> MotionIntrinsics | None:
     """Convert an SDK motion profile's correction to ours.
 
@@ -489,7 +483,7 @@ class LiveSource:
                 continue
             for option in sensor.get_supported_options():
                 try:
-                    key = f"{name}/{_option_name(option)}"
+                    key = f"{name}/{option.name}"
                     snapshot[key] = float(sensor.get_option(option))
                 except RuntimeError:
                     continue
@@ -673,7 +667,7 @@ class LiveSource:
                 logger.warning(
                     "this depth sensor does not support %s, so emitter mode %r "
                     "is not what will be recorded",
-                    _option_name(option),
+                    option.name,
                     mode,
                 )
                 continue
@@ -681,11 +675,11 @@ class LiveSource:
                 sensor.set_option(option, value)
             except RuntimeError as exc:
                 logger.warning(
-                    "could not set %s to %s: %s", _option_name(option), value, exc
+                    "could not set %s to %s: %s", option.name, value, exc
                 )
 
         got = {
-            _option_name(option): sensor.get_option(option)
+            option.name: sensor.get_option(option)
             for option in (rs.option.emitter_enabled, rs.option.emitter_on_off)
             if sensor.supports(option)
         }

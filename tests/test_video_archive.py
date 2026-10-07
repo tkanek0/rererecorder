@@ -7,10 +7,7 @@ Every codec is checked by decoding and comparing, not by trusting the word
 from __future__ import annotations
 
 import json
-import os
 import sqlite3
-import subprocess
-import sys
 from collections.abc import Callable
 from pathlib import Path
 
@@ -278,14 +275,3 @@ def test_startup_discards_are_counted_apart_from_losses() -> None:
     source._index = 1
     source._count_skip()
     assert (source.skipped_warmup, source.skipped_duplicate) == (1, 1)
-
-
-def test_the_adapter_imports_nothing_from_rrr_and_ignores_the_environment() -> None:
-    """The camera stays usable without the recorder; rrr passes settings in."""
-    code = (
-        "import sys, realsense_adapter as a;"
-        "assert not [m for m in sys.modules if m == 'rrr' or m.startswith('rrr.')];"
-        "assert a.DEFAULT_EMITTER == 'on' and a.StreamConfig().emitter == 'on'"
-    )
-    env = {**os.environ, "RRR_EMITTER": "off"}
-    subprocess.run([sys.executable, "-c", code], check=True, env=env)

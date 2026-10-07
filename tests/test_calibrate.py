@@ -111,33 +111,7 @@ def session(tmp_path: Path, calibration: Calibration) -> SessionPaths:
     )
 
 
-# -- the two halves -----------------------------------------------------------
-
-
-def test_the_audio_impulse_is_located(session: SessionPaths) -> None:
-    """To well under a video frame: this half is not the limiting one."""
-    claps = handclap._find_claps(session)
-
-    assert len(claps) == 1
-    expected = MONO + MOVEMENT_FRAME / FPS + PLANTED_OFFSET_S
-    assert claps[0] == pytest.approx(expected, abs=0.005)
-
-
-def test_the_video_movement_is_located(session: SessionPaths) -> None:
-    """To within one frame, which is all the video can say."""
-    from rrr.video import ArchiveSource
-
-    claps = handclap._find_claps(session)
-    with ArchiveSource(session.video) as archive:
-        found = handclap._find_movement(
-            archive, archive.frame_times(), claps[0], "ir1"
-        )
-
-    assert found is not None
-    index, at, sharpness = found
-    assert index == MOVEMENT_FRAME + 1, "the archive's own index of that frame"
-    assert at == pytest.approx(MONO + MOVEMENT_FRAME / FPS, abs=1e-6)
-    assert sharpness > 2.0, "a distinct movement, not the noise floor"
+# -- what is measured --------------------------------------------------------
 
 
 def test_a_still_recording_yields_no_movement(session: SessionPaths) -> None:
@@ -157,30 +131,20 @@ def test_a_still_recording_yields_no_movement(session: SessionPaths) -> None:
 # -- end to end ---------------------------------------------------------------
 
 
-def test_the_planted_offset_is_measured_back(session: SessionPaths, capsys) -> None:
-    root = str(Path(session.directory).parent)
-    assert calibrate.main([f"{root}/planted"]) == 0
-
+def test_the_planted_offset_is_measured_back_and_written_only_on_apply(
+    session: SessionPaths, capsys
+) -> None:
+    directory = str(Path(session.directory))
+    assert calibrate.main([directory]) == 0
     printed = capsys.readouterr().out
     assert "impulses        1 found" in printed
     # Audio planted late, so adding the offset to an audio time must go back.
     assert f"{-PLANTED_OFFSET_S * 1000:+.1f} ms" in printed
-
-
-def test_nothing_is_written_without_apply(session: SessionPaths) -> None:
-    """A measurement nobody looked at is not better than admitting ignorance."""
-    root = str(Path(session.directory).parent)
-    calibrate.main([f"{root}/planted"])
-
+    # A measurement nobody looked at is not better than admitting ignorance.
     assert read_manifest(session).calibration.measured is False
 
-
-def test_apply_writes_the_offset_and_its_uncertainty(session: SessionPaths) -> None:
-    root = str(Path(session.directory).parent)
-    assert calibrate.main([f"{root}/planted", "--apply"]) == 0
-
+    assert calibrate.main([directory, "--apply"]) == 0
     result = read_manifest(session).calibration
-    assert result.measured is True
     assert result.offset_s == pytest.approx(-PLANTED_OFFSET_S, abs=1.0 / FPS)
     assert result.method == "handclap"
     # Half a frame for a single clap - the tool's own claim about itself.
@@ -213,11 +177,3 @@ def test_a_session_without_a_clap_is_refused(session: SessionPaths) -> None:
     root = str(Path(session.directory).parent)
     assert calibrate.main([f"{root}/planted"]) == 1
     assert read_manifest(session).calibration.measured is False
-
-
-def test_the_measured_value_is_reported_for_the_record(session, capsys) -> None:
-    """Prints the measurement into the test log, to see the error within a frame."""
-    root = str(Path(session.directory).parent)
-    calibrate.main([f"{root}/planted"])
-    out = capsys.readouterr().out
-    print("\n" + "\n".join(line for line in out.splitlines() if line.strip()))

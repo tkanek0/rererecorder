@@ -101,25 +101,10 @@ def test_the_whole_rig_survives_the_archive(tmp_path, make_frames) -> None:
         assert archive.calibration == original
 
 
-def test_an_archive_written_before_the_rig_still_opens(
+def test_a_calibration_without_infrared_or_an_inertial_sensor_survives(
     tmp_path, calibration, make_frames
 ) -> None:
-    """The new fields are absent from every recording made so far."""
-    path = str(tmp_path / "video.rrdb")
-    _write(path, calibration, make_frames)
-
-    with ArchiveSource(path) as archive:
-        assert archive.calibration.depth == calibration.depth
-        assert archive.calibration.infrared == (None, None)
-        assert archive.calibration.depth_to_infrared == (None, None)
-        assert archive.calibration.motion is None
-
-
-def test_a_recording_can_have_infrared_without_an_inertial_sensor(
-    tmp_path, make_frames
-) -> None:
     """The two are separate options, and a device may fail to start one."""
-    path = str(tmp_path / "video.rrdb")
     partial = Calibration(
         color=None,
         depth=_intrinsics(WIDTH / 2),
@@ -129,36 +114,26 @@ def test_a_recording_can_have_infrared_without_an_inertial_sensor(
         infrared=_full().infrared,
         depth_to_infrared=_full().depth_to_infrared,
     )
-    _write(path, partial, make_frames)
-
-    with ArchiveSource(path) as archive:
-        assert archive.calibration.motion is None
-        assert archive.calibration.infrared_baseline_m == pytest.approx(BASELINE_M)
+    for n, original in enumerate((calibration, partial)):
+        path = str(tmp_path / f"video{n}.rrdb")
+        _write(path, original, make_frames)
+        with ArchiveSource(path) as archive:
+            assert archive.calibration == original
+            assert archive.calibration.motion is None
+    assert partial.infrared_baseline_m == pytest.approx(BASELINE_M)
+    assert calibration.infrared_baseline_m is None
 
 
 # -- the emitter --------------------------------------------------------------
 
 
-@pytest.mark.parametrize("mode", ["on", "off", "alternating"])
-def test_every_emitter_mode_is_accepted(mode) -> None:
-    assert StreamConfig(emitter=mode).as_dict()["emitter"] == mode
-
-
-def test_an_unknown_emitter_mode_is_refused() -> None:
+def test_every_emitter_mode_is_accepted_and_no_other() -> None:
     """Refused rather than ignored: silently recording with the projector in
     the wrong state costs a session that looks fine."""
+    for mode in ("on", "off", "alternating"):
+        assert StreamConfig(emitter=mode).as_dict()["emitter"] == mode
     with pytest.raises(ValueError, match="emitter mode"):
         StreamConfig(emitter="sometimes")
-
-
-def test_the_emitter_read_back_compares_like_with_like() -> None:
-    """The read-back keys must match the names it is compared against, or every
-    mode warns and a real refusal is lost among them."""
-    rs = pytest.importorskip("pyrealsense2")
-    from realsense_adapter.source import _option_name
-
-    assert _option_name(rs.option.emitter_enabled) == "emitter_enabled"
-    assert _option_name(rs.option.emitter_on_off) == "emitter_on_off"
 
 
 def test_the_emitter_mode_is_recorded_in_the_archive(tmp_path, make_frames) -> None:

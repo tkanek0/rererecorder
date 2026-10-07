@@ -72,48 +72,20 @@ def _session(tmp_path, times: list[float]) -> SessionPaths:
     return paths
 
 
-def test_inspect_counts_marks_inside_the_recording(tmp_path) -> None:
-    paths = _session(tmp_path, [105.0, 110.0])
+def test_inspect_fails_a_mark_neither_track_spans(tmp_path) -> None:
+    """A mark outside the recording means the two do not belong together; the
+    video may run past the audio, and a mark there is still inside."""
+    audio = {"first_monotonic": 100.0, "last_monotonic": 130.0}
+    video = {"first_monotonic": 100.0, "last_monotonic": 150.0}
+
     check = Check()
-
-    result = _check_events(
-        paths,
-        {"first_monotonic": 100.0, "last_monotonic": 130.0},
-        None,
-        check,
-    )
-
-    assert result["marks"] == 2
+    result = _check_events(_session(tmp_path / "a", [105.0, 140.0]), audio, video, check)
+    assert result is not None and result["marks"] == 2
     assert check.problems == []
 
-
-def test_inspect_reports_a_mark_outside_the_recording(tmp_path) -> None:
-    """A mark the recording does not span means the two do not belong together."""
-    paths = _session(tmp_path, [105.0, 900.0])
     check = Check()
-
-    _check_events(
-        paths, {"first_monotonic": 100.0, "last_monotonic": 130.0}, None, check
-    )
-
+    _check_events(_session(tmp_path / "b", [105.0, 900.0]), audio, video, check)
     assert any("outside the recording" in problem for problem in check.problems)
 
-
-def test_inspect_spans_both_tracks_before_calling_a_mark_late(tmp_path) -> None:
-    """The video may run past the audio; a mark in that stretch is still fine."""
-    paths = _session(tmp_path, [140.0])
-    check = Check()
-
-    _check_events(
-        paths,
-        {"first_monotonic": 100.0, "last_monotonic": 130.0},
-        {"first_monotonic": 100.0, "last_monotonic": 150.0},
-        check,
-    )
-
-    assert check.problems == []
-
-
-def test_inspect_says_nothing_when_nobody_marked(tmp_path) -> None:
-    paths = SessionPaths.create(str(tmp_path), "s")
-    assert _check_events(paths, None, None, Check()) is None
+    # Nobody marked anything: nothing to say.
+    assert _check_events(SessionPaths.create(str(tmp_path), "c"), audio, None, Check()) is None

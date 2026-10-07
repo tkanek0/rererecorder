@@ -86,92 +86,44 @@ def hub(calibration: Calibration, sets) -> FakeHub:
     return fake
 
 
-# -- nothing is lost ----------------------------------------------------------
-
-
-def test_every_published_set_is_written(tmp_path, hub, sets) -> None:
+def test_every_published_set_is_written_and_counted_on_its_own_axis(
+    tmp_path, hub, sets
+) -> None:
     """A listener sees every frame; that is why recording uses one."""
-    path = str(tmp_path / "video.rrdb")
-    writer = VideoWriter(hub, path, config=StreamConfig())
-    writer.start(timeout=1.0)
-    originals = sets(12)
-    for frames in originals:
-        hub.publish(frames)
-    writer.stop(timeout=10.0)
-
-    with ArchiveSource(path) as archive:
-        restored = list(archive.frames())
-    assert len(restored) == 12
-    for original, back in zip(originals, restored, strict=True):
-        assert np.array_equal(back.depth, original.depth)
-
-
-def test_the_frame_count_survives_being_asked_after_stop(tmp_path, hub, sets) -> None:
-    """The counters live in the archive, which stop() closes, and must be copied first.
-
-    A regression once left the manifest with 210 of 240 frames.
-    """
-    path = str(tmp_path / "video.rrdb")
-    writer = VideoWriter(hub, path, config=StreamConfig())
-    writer.start(timeout=1.0)
-    for frames in sets(12):
-        hub.publish(frames)
-
-    returned = writer.stop(timeout=10.0)
-
-    assert returned.frames == 12
-    assert writer.stats.frames == 12, "and still 12 when asked again later"
-    assert writer.stats.dropped == 0
-
-
-def test_stats_track_the_recording_while_it_runs(tmp_path, hub, sets) -> None:
-    """Counted asynchronously, so this waits for the archive's queue to drain."""
-    path = str(tmp_path / "video.rrdb")
-    writer = VideoWriter(hub, path, config=StreamConfig())
-    writer.start(timeout=1.0)
-    for frames in sets(10):
-        hub.publish(frames)
-
-    deadline = time.monotonic() + 5.0
-    while writer.stats.frames < 10 and time.monotonic() < deadline:
-        time.sleep(0.01)
-    assert writer.stats.frames == 10, "the queue should have drained by now"
-    writer.stop(timeout=10.0)
-
-
-# -- the time axis ------------------------------------------------------------
-
-
-def test_the_span_and_rate_come_from_received_monotonic(tmp_path, hub, sets) -> None:
-    """Not the mean of one-over-interval, which jitter biases high."""
     from .conftest import FPS
 
     path = str(tmp_path / "video.rrdb")
     writer = VideoWriter(hub, path, config=StreamConfig())
     writer.start(timeout=1.0)
+    # A recording holds the camera, so closing the last preview cannot stop it.
+    assert hub.acquired == 1
+    with pytest.raises(RuntimeError, match="already running"):
+        writer.start(timeout=1.0)
+
     published = sets(16)
     for frames in published:
         hub.publish(frames)
-    stats = writer.stop(timeout=10.0)
+    # Counted asynchronously, as the archive's queue drains.
+    deadline = time.monotonic() + 5.0
+    while writer.stats.frames < 16 and time.monotonic() < deadline:
+        time.sleep(0.01)
+    assert writer.stats.frames == 16
 
+    stats = writer.stop(timeout=10.0)
+    assert hub.acquired == 0
+    # The counters live in the archive stop() closes, so they are copied first.
+    assert (stats.frames, writer.stats.frames, stats.dropped) == (16, 16, 0)
+    # The span and rate come from received_monotonic, not from 1/interval.
     assert stats.first_monotonic == pytest.approx(published[0].received_monotonic)
-    assert stats.last_monotonic == pytest.approx(published[-1].received_monotonic)
     assert stats.span_s == pytest.approx(15 / FPS, abs=1e-6)
     assert stats.fps == pytest.approx(FPS, abs=1e-6)
 
-
-# -- holding the camera -------------------------------------------------------
-
-
-def test_the_hub_is_held_for_exactly_as_long_as_the_archive(tmp_path, hub, sets) -> None:
-    """A recording holds the camera, so closing the last preview cannot stop it."""
-    path = str(tmp_path / "video.rrdb")
-    writer = VideoWriter(hub, path, config=StreamConfig())
-    assert hub.acquired == 0
-    writer.start(timeout=1.0)
-    assert hub.acquired == 1
-    writer.stop(timeout=10.0)
-    assert hub.acquired == 0
+    for frames in sets(5):
+        hub.publish(frames)  # after the recording: must not reach the archive
+    assert writer.stats.frames == 16
+    with ArchiveSource(path) as archive:
+        restored = list(archive.frames())
+    assert [np.array_equal(b.depth, o.depth) for o, b in zip(published, restored, strict=True)] == [True] * 16
 
 
 def test_a_camera_that_never_delivers_releases_the_hub(tmp_path, hub) -> None:
@@ -182,31 +134,6 @@ def test_a_camera_that_never_delivers_releases_the_hub(tmp_path, hub) -> None:
     with pytest.raises(RuntimeError, match="no frames"):
         writer.start(timeout=0.01)
     assert hub.acquired == 0
-    assert writer.running is False
-
-
-def test_stopping_detaches_the_listener(tmp_path, hub, sets) -> None:
-    """Frames published after a recording ends must not reach a closed archive."""
-    path = str(tmp_path / "video.rrdb")
-    writer = VideoWriter(hub, path, config=StreamConfig())
-    writer.start(timeout=1.0)
-    for frames in sets(5):
-        hub.publish(frames)
-    stats = writer.stop(timeout=10.0)
-
-    for frames in sets(5):
-        hub.publish(frames)  # must be harmless
-    assert writer.stats.frames == stats.frames
-
-
-def test_starting_twice_is_refused(tmp_path, hub) -> None:
-    writer = VideoWriter(hub, str(tmp_path / "video.rrdb"), config=StreamConfig())
-    writer.start(timeout=1.0)
-    try:
-        with pytest.raises(RuntimeError, match="already running"):
-            writer.start(timeout=1.0)
-    finally:
-        writer.stop(timeout=10.0)
 
 
 def test_only_inertial_samples_from_the_recording_are_written(

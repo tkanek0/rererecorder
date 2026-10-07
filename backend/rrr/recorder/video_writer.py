@@ -184,11 +184,6 @@ class VideoWriter:
         return self.stats
 
     @property
-    def running(self) -> bool:
-        """Whether frames are currently being written."""
-        return self._running
-
-    @property
     def stats(self) -> VideoStats:
         """A snapshot of what has been written."""
         with self._lock:

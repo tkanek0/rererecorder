@@ -6,9 +6,6 @@ still loads PortAudio, so a missing libportaudio2 fails at import.
 
 from __future__ import annotations
 
-import os
-import subprocess
-import sys
 import time
 from dataclasses import dataclass
 
@@ -245,14 +242,3 @@ def test_no_name_match_is_reported_plainly(monkeypatch) -> None:
     _patch_devices(monkeypatch, [], [])
     with pytest.raises(DeviceNotFound, match="no capture device"):
         _resolve_device("ReSpeaker", 6, RATE)
-
-
-def test_package_imports_nothing_from_rrr_and_ignores_the_environment() -> None:
-    """The adapter stays usable without the recorder; rrr passes settings in."""
-    code = (
-        "import sys, respeaker_adapter, respeaker_adapter.config as c;"
-        "assert not [m for m in sys.modules if m == 'rrr' or m.startswith('rrr.')];"
-        "assert c.DEVICE_NAME == 'ReSpeaker' and c.BLOCK_SIZE == 256"
-    )
-    env = {**os.environ, "RRR_AUDIO_DEVICE": "elsewhere", "RRR_AUDIO_BLOCK_SIZE": "1"}
-    subprocess.run([sys.executable, "-c", code], check=True, env=env)

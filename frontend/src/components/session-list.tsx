@@ -85,8 +85,12 @@ export const SessionList = ({
                   <td className="actions">
                     <button
                       onClick={() => onSelect(session.session_id)}
-                      disabled={live}
-                      title={live ? 'still recording' : 'play this session'}
+                      disabled={recordingId !== null}
+                      title={
+                        recordingId !== null
+                          ? 'stop recording first'
+                          : 'play this session'
+                      }
                     >
                       Play
                     </button>

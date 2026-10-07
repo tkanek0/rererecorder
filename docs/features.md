@@ -157,6 +157,8 @@ README.
   hour: 200 GB reads as plenty and is one hour. The directory can be moved
   between sessions, not during one.
 - **Sessions** - every recording, newest first, with its losses. Play or delete.
+  Play is disabled while recording, and playing hides the device, recording and
+  storage panels, leaving only the player and this list until it is closed.
 - **Playback** - play, pause, step, seek, four video streams, six audio
   channels, 0.25x to 4x. The clock shown is each frame's own recorded time,
   read from a response header, because frames are not evenly spaced.

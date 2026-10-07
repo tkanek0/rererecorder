@@ -88,26 +88,28 @@ export const App = () => {
 
       {status ? (
         <>
-          {/* Hidden while playing back, to keep the transport on screen. */}
+          {/* Playback replaces the recording controls; Play is disabled while recording. */}
           {playing ? null : (
-            <DevicesPanel
-              devices={status.devices}
-              settings={settings}
-              recording={status.recording.recording}
-              onChanged={refreshSessions}
-            />
+            <>
+              <DevicesPanel
+                devices={status.devices}
+                settings={settings}
+                recording={status.recording.recording}
+                onChanged={refreshSessions}
+              />
+              <RecordingPanel
+                recording={status.recording}
+                writeRate={status.storage.write_bytes_per_s}
+                onChanged={refreshSessions}
+              />
+              <StoragePanel
+                storage={status.storage}
+                settings={settings}
+                recording={status.recording.recording}
+                onChanged={refreshSessions}
+              />
+            </>
           )}
-          <RecordingPanel
-            recording={status.recording}
-            writeRate={status.storage.write_bytes_per_s}
-            onChanged={refreshSessions}
-          />
-          <StoragePanel
-            storage={status.storage}
-            settings={settings}
-            recording={status.recording.recording}
-            onChanged={refreshSessions}
-          />
           {playing ? (
             <PlayerPanel
               sessionId={playing}

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { ChevronLeft, ChevronRight, X } from 'lucide-react';
 
 import {
   PREVIEW_LABELS,
@@ -244,7 +245,7 @@ export const PlayerPanel = ({ sessionId, onClose }: Props) => {
       <h2>
         playing {sessionId}
         <button className="close" onClick={onClose} title="close">
-          ×
+          <X size={16} />
         </button>
       </h2>
 
@@ -282,10 +283,10 @@ export const PlayerPanel = ({ sessionId, onClose }: Props) => {
               {playing ? 'Pause' : 'Play'}
             </button>
             <button onClick={() => seek(index - 1)} disabled={playing} title="previous frame">
-              ‹
+              <ChevronLeft size={16} />
             </button>
             <button onClick={() => seek(index + 1)} disabled={playing} title="next frame">
-              ›
+              <ChevronRight size={16} />
             </button>
             <input
               type="range"

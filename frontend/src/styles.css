@@ -333,9 +333,7 @@ th {
 }
 
 button.close {
-  padding: 0 8px;
-  font-size: 18px;
-  line-height: 1.2;
+  padding: 0 4px;
   background: none;
   border: none;
   color: var(--dim);
@@ -415,4 +413,13 @@ button.danger {
   .player-body {
     grid-template-columns: 1fr;
   }
+}
+
+/* -- icons -------------------------------------------------------------- */
+
+/* A 16px icon plus this margin is one line of text, so an icon button is as
+   tall as its neighbours. */
+button > svg {
+  display: block;
+  margin: 2.5px 0;
 }

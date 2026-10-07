@@ -149,7 +149,8 @@ README.
 - **Preview** - color and depth side by side, MJPEG at up to 15 Hz, 10 Hz
   while recording. Depth is shown
   next to color because the failure worth catching mid-recording is depth going
-  blank while color looks perfect.
+  blank while color looks perfect. Clicking one enlarges the same preview over
+  the page; Escape, the backdrop or the close button closes it.
 - **Recording** - start and stop, an optional session name, the counts above as
   they change, and [marks](#marks).
 - **Storage** - free space and **how long that lasts**, computed from the rate

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
 import {
   PREVIEW_LABELS,
@@ -17,6 +17,7 @@ import {
   type StreamName,
 } from '../lib/api';
 import { useAction } from '../lib/use-action';
+import { PreviewModal } from './preview-modal';
 
 type Props = {
   devices: Devices;
@@ -256,6 +257,9 @@ const ReconnectButton = ({
 export const DevicesPanel = ({ devices, settings, recording, onChanged }: Props) => {
   const levels = useAudioLevels();
   const { realsense, respeaker } = devices;
+  // The enlarged preview replaces the small one, to hold one connection each.
+  const [enlarged, setEnlarged] = useState<PreviewKind | null>(null);
+  const closeEnlarged = useCallback(() => setEnlarged(null), []);
 
   return (
     <section className="panel devices">
@@ -290,7 +294,17 @@ export const DevicesPanel = ({ devices, settings, recording, onChanged }: Props)
           <div className="visual previews">
             {(['color', 'depth'] as PreviewKind[]).map((kind) => (
               <figure key={kind}>
-                <LiveImage src={previewUrl(kind)} alt={PREVIEW_LABELS[kind]} />
+                {enlarged === kind ? (
+                  <div className="placeholder" />
+                ) : (
+                  <div
+                    className="enlargeable"
+                    onClick={() => setEnlarged(kind)}
+                    title="enlarge"
+                  >
+                    <LiveImage src={previewUrl(kind)} alt={PREVIEW_LABELS[kind]} />
+                  </div>
+                )}
                 <figcaption>
                   <span>{PREVIEW_LABELS[kind]}</span>
                   <span>
@@ -387,6 +401,15 @@ export const DevicesPanel = ({ devices, settings, recording, onChanged }: Props)
           </div>
         </div>
       </div>
+
+      {enlarged ? (
+        <PreviewModal title={PREVIEW_LABELS[enlarged]} onClose={closeEnlarged}>
+          <LiveImage
+            src={previewUrl(enlarged)}
+            alt={PREVIEW_LABELS[enlarged]}
+          />
+        </PreviewModal>
+      ) : null}
     </section>
   );
 };

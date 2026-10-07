@@ -1,4 +1,4 @@
-"""Make a short GIF from a recorded colour stream, optionally showing its sound.
+"""Make a short GIF from a recorded color stream, optionally showing its sound.
 
 A presentation copy, like ``render_mp4``; see docs/features.md "MP4 review
 copies".
@@ -77,7 +77,7 @@ class _Audio:
 def main(argv: list[str] | None = None) -> int:
     """Command-line entry point."""
     parser = argparse.ArgumentParser(
-        description="Make a short GIF from a recorded colour stream.",
+        description="Make a short GIF from a recorded color stream.",
     )
     parser.add_argument("directory", help="recorded session directory")
     parser.add_argument(
@@ -114,7 +114,7 @@ def main(argv: list[str] | None = None) -> int:
         help="waveform window in seconds (default: 0.5)",
     )
     parser.add_argument(
-        "--colours", type=int, default=96, help="palette size per frame (default: 96)"
+        "--colors", type=int, default=96, help="palette size per frame (default: 96)"
     )
     parser.add_argument("--force", action="store_true", help="replace an existing GIF")
     args = parser.parse_args(argv)
@@ -130,7 +130,7 @@ def main(argv: list[str] | None = None) -> int:
             width=args.width,
             frame_ms=args.frame_ms,
             window_s=args.window_s,
-            colours=args.colours,
+            colors=args.colors,
             overwrite=args.force,
         )
     except (OSError, ValueError, SessionError, StreamError, av.FFmpegError) as error:
@@ -159,7 +159,7 @@ def render(
     width: int = 360,
     frame_ms: int = 80,
     window_s: float = 0.5,
-    colours: int = 96,
+    colors: int = 96,
     overwrite: bool = False,
 ) -> GifReport:
     """Render one raw session as an animated GIF.
@@ -172,23 +172,23 @@ def render(
         volume: Add the loudness strip.
         waveform: Add the waveform strip.
         audio_channel: ``mix``, ``processed``, or a zero-based WAV channel.
-        stride: Use every ``stride``-th colour frame.
+        stride: Use every ``stride``-th color frame.
         width: GIF width in pixels; height follows the camera's aspect.
         frame_ms: Display time per frame, rounded to GIF's 10 ms steps.
         window_s: Length of the waveform strip.
-        colours: Palette size, chosen afresh for every frame.
+        colors: Palette size, chosen afresh for every frame.
         overwrite: Replace an existing ``output``.
 
     Returns:
         What was rendered.
 
     Raises:
-        ValueError: If a parameter is out of range, the session has no colour
+        ValueError: If a parameter is out of range, the session has no color
             video, or a strip was asked for without a WAV to draw it from.
         FileExistsError: If ``output`` exists and ``overwrite`` is false.
     """
-    if stride < 1 or width < 1 or window_s <= 0 or not 2 <= colours <= 256:
-        raise ValueError("stride, width and window_s must be positive; colours 2-256")
+    if stride < 1 or width < 1 or window_s <= 0 or not 2 <= colors <= 256:
+        raise ValueError("stride, width and window_s must be positive; colors 2-256")
     delay = round(frame_ms / 10)
     if delay < 1:
         raise ValueError("frame_ms must be at least 10")
@@ -242,7 +242,7 @@ def render(
             )
             for index, stamp in selected
         )
-        _encode(temporary, images, delay, colours)
+        _encode(temporary, images, delay, colors)
 
     return GifReport(
         output=str(output),
@@ -265,11 +265,11 @@ def _compose(
     waveform: bool,
     window_s: float,
 ) -> np.ndarray:
-    """Build one GIF frame: the scaled colour image and the requested strips."""
+    """Build one GIF frame: the scaled color image and the requested strips."""
     frames = archive.frame_at(index, only="color")
     image = color_to_bgr(frames) if frames is not None else None
     if image is None:
-        raise ValueError(f"frame {index} has no colour image")
+        raise ValueError(f"frame {index} has no color image")
     height = max(round(image.shape[0] * width / image.shape[1]), 1)
     image = cv2.resize(image, (width, height), interpolation=cv2.INTER_AREA)
     if audio is None:
@@ -302,7 +302,7 @@ def _compose(
     return np.vstack(rows)
 
 
-def _encode(output: Path, images: Any, delay: int, colours: int) -> None:
+def _encode(output: Path, images: Any, delay: int, colors: int) -> None:
     """Encode BGR images as a looping GIF with a palette chosen per frame.
 
     FFmpeg rather than OpenCV: OpenCV's global palette measured about 3x further
@@ -326,7 +326,7 @@ def _encode(output: Path, images: Any, delay: int, colours: int) -> None:
             width=width, height=height, format="bgr24", time_base=GIF_TIME_BASE
         )
         split = graph.add("split")
-        generate = graph.add("palettegen", f"stats_mode=single:max_colors={colours}")
+        generate = graph.add("palettegen", f"stats_mode=single:max_colors={colors}")
         apply = graph.add("paletteuse", "new=1")
         sink = graph.add("buffersink")
         source.link_to(split)

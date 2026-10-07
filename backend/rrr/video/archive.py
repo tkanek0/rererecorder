@@ -79,11 +79,11 @@ CREATE TABLE IF NOT EXISTS meta(
 );
 CREATE TABLE IF NOT EXISTS frames(
     idx                INTEGER PRIMARY KEY,
-    color_timestamp_ms REAL,          -- colour frame's own get_timestamp(), or NULL if disabled
+    color_timestamp_ms REAL,          -- color frame's own get_timestamp(), or NULL if disabled
     depth_timestamp_ms REAL,          -- depth's (shared by ir1/ir2 - one imager), or NULL if disabled
     received_monotonic REAL NOT NULL, -- time.monotonic() when the set was assembled
     depth              BLOB,          -- zlib or raw; meta.codecs says which
-    color              BLOB,          -- PNG, only when the colour format is rgb8
+    color              BLOB,          -- PNG, only when the color format is rgb8
     color_y            BLOB,          -- PNG, luma, when the format is yuyv
     color_u            BLOB,          -- PNG, chroma at half width
     color_v            BLOB,          -- PNG, chroma at half width
@@ -922,7 +922,7 @@ class ArchiveSource:
         u: bytes | None,
         v: bytes | None,
     ) -> tuple[np.ndarray | None, str]:
-        """Rebuild the colour image: one blob for rgb8, three planes for yuyv.
+        """Rebuild the color image: one blob for rgb8, three planes for yuyv.
 
         Returns:
             ``(image, format)``.

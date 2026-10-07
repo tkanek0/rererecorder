@@ -1,4 +1,4 @@
-"""Make a reviewable MP4 from a recorded colour stream and ReSpeaker audio.
+"""Make a reviewable MP4 from a recorded color stream and ReSpeaker audio.
 
 A presentation copy, not a measurement; see docs/features.md "MP4 review copies".
 
@@ -26,7 +26,7 @@ from rrr.playback import (
     Direction,
     audio_timeline,
     direction_at,
-    in_colour_camera,
+    in_color_camera,
     read_directions,
     replacing,
     resample_onto_video,
@@ -65,7 +65,7 @@ class RenderReport:
 def main(argv: list[str] | None = None) -> int:
     """Command-line entry point."""
     parser = argparse.ArgumentParser(
-        description="Combine a recorded RealSense colour stream and ReSpeaker audio.",
+        description="Combine a recorded RealSense color stream and ReSpeaker audio.",
     )
     parser.add_argument("directory", help="recorded session directory")
     parser.add_argument(
@@ -135,7 +135,7 @@ def render(
 
     Raises:
         FileExistsError: If ``output`` exists and ``overwrite`` is false.
-        ValueError: If the session has no usable colour video.
+        ValueError: If the session has no usable color video.
     """
     paths = SessionPaths.of_directory(str(directory))
     manifest = read_manifest(paths)
@@ -230,10 +230,10 @@ def _encode(
     first = archive.frame_at(times[0][0], only="color")
     first_image = color_to_bgr(first) if first is not None else None
     if first_image is None:
-        raise ValueError("the archive has no colour frames")
+        raise ValueError("the archive has no color frames")
     height, width = first_image.shape[:2]
     if width % 2 or height % 2:
-        raise ValueError("H.264 requires an even colour frame width and height")
+        raise ValueError("H.264 requires an even color frame width and height")
 
     with av.open(str(output), "w", options={"movflags": "+faststart"}) as container:
         container.metadata["title"] = session_id
@@ -262,7 +262,7 @@ def _encode(
             frames = first if position == 0 else archive.frame_at(index, only="color")
             image = color_to_bgr(frames) if frames is not None else None
             if image is None:
-                raise ValueError(f"frame {index} has no colour image")
+                raise ValueError(f"frame {index} has no color image")
             _draw_direction(image, stamp, directions, doa_mode)
             frame = av.VideoFrame.from_ndarray(image, format="bgr24")
             pts = max(previous_pts + 1, round((stamp - start) / float(VIDEO_TIME_BASE)))
@@ -298,16 +298,16 @@ def _directions(
     *,
     enabled: bool,
 ) -> tuple[list[Direction], str]:
-    """Read DOA and, when fully described, rotate it into the colour camera."""
+    """Read DOA and, when fully described, rotate it into the color camera."""
     if not enabled:
         return [], "off"
     readings = read_directions(path, offset)
     if not readings:
         return [], "unavailable"
-    corrected = in_colour_camera(readings, rig, depth_to_color)
+    corrected = in_color_camera(readings, rig, depth_to_color)
     if corrected is None:
         return readings, "array coordinates (rig unset)"
-    return corrected, f"colour-camera coordinates ({rig.source} rig)"
+    return corrected, f"color-camera coordinates ({rig.source} rig)"
 
 
 def _draw_direction(
@@ -319,7 +319,7 @@ def _draw_direction(
     """Draw the freshest non-stale DOA reading as a top-down compass."""
     reading = direction_at(readings, stamp, DOA_STALE_S)
     if reading is not None:
-        draw_compass(image, reading, camera=mode.startswith("colour"))
+        draw_compass(image, reading, camera=mode.startswith("color"))
 
 
 if __name__ == "__main__":

@@ -147,7 +147,7 @@ The two are both usable - the Aria recordings this project compares against use
 nominal CAD positions for their own microphones - but they are not the same
 claim, and which one a session was processed with has to survive in the file.
 
-Alignment of depth to colour is refused in the same spirit: recordings are
+Alignment of depth to color is refused in the same spirit: recordings are
 **unaligned**, and `depth_to_color` is recorded so any consumer can align on the
 way out (decision 2).
 

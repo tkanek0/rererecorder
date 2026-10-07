@@ -12,7 +12,7 @@ Python bindings, inside a container image.
 **Alternatives:** the `pyrealsense2` wheel from PyPI (V4L2); lowering the
 resolution until V4L2 keeps up.
 
-**Why:** the wheel loses 8.4% of depth frames and 9.6% of colour frames at
+**Why:** the wheel loses 8.4% of depth frames and 9.6% of color frames at
 1280x720 + 1280x800. The same test through RSUSB loses none, at 172 MB/s with
 both raw infrared streams added. The full investigation - and the seven
 hypotheses that turned out wrong - is in [frame-loss.md](frame-loss.md).
@@ -30,13 +30,13 @@ Raspberry Pi would record through the image too.
 
 ---
 
-## 2. Record without aligning depth to colour
+## 2. Record without aligning depth to color
 
 **Chosen:** `align_to_color=False`. Store `depth_to_color` instead.
 
 **Alternatives:** align, as realsense-playground does; store both.
 
-**Why:** alignment resamples depth onto the colour camera's 1280x800 grid. That
+**Why:** alignment resamples depth onto the color camera's 1280x800 grid. That
 cannot be undone, it destroys the pixel correspondence with the infrared pair -
 which is the reason for keeping the pair at all - and it bakes one choice into a
 file meant to outlast it. Every consumer can align on the way out; none can
@@ -51,7 +51,7 @@ has to apply the extrinsics itself.
 
 **Chosen:** record IR 1 and IR 2 alongside depth.
 
-**Alternatives:** depth and colour only (40 MB/s instead of 54).
+**Alternatives:** depth and color only (40 MB/s instead of 54).
 
 **Why:** the depth in a recording is one particular stereo match, made by this
 camera's ASIC with this firmware. The infrared pair is what it was made from, so
@@ -64,7 +64,7 @@ had at once.
 
 ---
 
-## 4. Store colour as YUYV in three planes
+## 4. Store color as YUYV in three planes
 
 **Chosen:** ask the sensor for YUYV and store Y, U and V as three PNGs.
 
@@ -145,7 +145,7 @@ own pool.
 bumped whenever their layout changes, and a reader opens only its own version.
 
 **Why:** a changed layout read by an older reader is misread silently - v2
-split colour across three columns and stored depth as zlib, so the same
+split color across three columns and stored depth as zlib, so the same
 columns meant something else. Refusing is better than guessing, and with no
 backward compatibility to keep (CLAUDE.md, Design principles), refusing is also
 all a reader has to do. The suffix differs from realsense-playground's `.rsdb`
@@ -229,7 +229,7 @@ keeping the evidence rather than the conclusion.
 The callback was chosen over a frame queue on measurement. Both keep the video
 intact, but the queue lost inertial samples:
 
-| Mode         | depth lost | colour lost | video sets  | Accel interval, max |
+| Mode         | depth lost | color lost | video sets  | Accel interval, max |
 | ------------ | ---------- | ----------- | ----------- | ------------------- |
 | no IMU       | 0.0%       | 0.0%        | 28.92/s     | -                   |
 | **callback** | **0.0%**   | **0.0%**    | **30.17/s** | **2.5 ms**          |
@@ -437,7 +437,7 @@ infrared imager. Transforms are a list where each entry names both ends, so a
 rig with a different set of sensors produces the same shape of file with
 different rows.
 
-**What it costs:** a second copy on disk, and one conversion. Colour is written
+**What it costs:** a second copy on disk, and one conversion. Color is written
 as RGB because nothing outside the SDK reads packed YUYV; the packed original
 stays in the archive, and the manifest says which encoding was used. Depth stays
 raw z16 with its scale, and the two inertial streams are written separately
@@ -547,11 +547,11 @@ otherwise does not run at all.
 
 ---
 
-## 21. Keep every frame; stop discarding a set for colour/depth skew
+## 21. Keep every frame; stop discarding a set for color/depth skew
 
 **Chosen:** `MAX_PAIR_SKEW_MS` and the discard it drove are removed.
 `LiveSource` no longer rejects a set because its streams disagree about the
-moment - every frame is kept, and colour and depth each carry their own
+moment - every frame is kept, and color and depth each carry their own
 `get_timestamp()` (`FrameSet.color_timestamp_ms` / `depth_timestamp_ms`,
 `frames.color_timestamp_ms` / `frames.depth_timestamp_ms` columns in the
 archive) so a consumer can judge the disagreement for itself instead of
@@ -564,7 +564,7 @@ field every set is guaranteed to have and the axis the audio recording is
 also on.
 
 **Alternatives:** widen the threshold for Windows; keep discarding but stop
-counting it; build a custom colour-primary re-pairing scheme instead of
+counting it; build a custom color-primary re-pairing scheme instead of
 using the SDK's own bundled composite frame.
 
 **Why:** investigated at length in
@@ -576,20 +576,20 @@ On Windows (Media Foundation) the _normal_ case measured 13 ms mean with
 roughly 4 ms of jitter, later found to split into two separate causes: most
 of the jitter came from auto-exposure's own frame-to-frame timing variance,
 and a further slow, roughly-linear drift (tens of ppm to a few hundred) came
-from colour and depth being timestamped independently, with no cross-sensor
+from color and depth being timestamped independently, with no cross-sensor
 correction (`global_time` is not achieved on Windows - domain reads
 `system_time`). Neither number is a fixed offset a calibration could
 subtract, and neither means a frame went missing: opening each sensor
 directly and reading its own hardware-assigned `frame_number` (bypassing the
-pipeline's syncer entirely) found zero gaps in colour, depth or either
+pipeline's syncer entirely) found zero gaps in color, depth or either
 infrared stream over a three-minute recording, in either auto-exposure
 state. What the syncer's skew was catching, on this platform, was working
 exactly as designed against a normal condition it was never calibrated for.
 
 Given this repository's own priorities - no data loss first, then image
-quality (auto-exposure stays on), with colour/depth timing reconciled by a
+quality (auto-exposure stays on), with color/depth timing reconciled by a
 downstream consumer rather than guaranteed at capture time, since depth and
-infrared are validation data for a SLAM pipeline that runs on colour - a
+infrared are validation data for a SLAM pipeline that runs on color - a
 recorder that throws away real, undamaged frames because two independent
 clocks disagree by low milliseconds is solving a problem downstream analysis
 does not have and creating one it does (missing frames).
@@ -605,7 +605,7 @@ health is instead visible directly from whether frames are missing, which
 
 ---
 
-## 22. Offer a raw codec for depth, colour and infrared
+## 22. Offer a raw codec for depth, color and infrared
 
 **Chosen:** every stream can be stored `"raw"` instead of compressed: the
 array's own bytes, little-endian, straight into the BLOB column
@@ -623,7 +623,7 @@ as a machine limit and do nothing.
 the original 18.3 ms/set measurement - were taken against synthetic noise,
 not a real scene, and that turned out to matter: a compressor gives up
 searching for redundancy in noise almost immediately, where real depth,
-colour and infrared content has real redundancy to search for and takes
+color and infrared content has real redundancy to search for and takes
 measurably longer to encode. Measured on real content on a Core Ultra 7
 265U: ~29-30 ms/set for the full six-image lossless set, at any encoder
 thread count from 8 to 12 - the CPU's own compute limit, not something more
@@ -635,7 +635,7 @@ was measured moving the bottleneck rather than removing it. A synthetic
 SQLite/WAL benchmark mirroring `archive.py`'s own write pattern found
 compressed-size blobs insert at 10.2 ms each (`ArchiveWriter` was never
 disk-bound) but raw-size blobs at 55.5 ms each - past the 33.3 ms budget on
-its own, independent of any encoding cost. Recording colour, depth and
+its own, independent of any encoding cost. Recording color, depth and
 infrared as raw was measured losing frames at both ends: the SDK delivers
 them at a clean ~30 fps regardless, but writing falls behind starting within
 the first 10-20 seconds, in both the real `FrameHub`/`VideoWriter` path and
@@ -643,8 +643,8 @@ a minimal `LiveSource` + `ArchiveWriter` wiring with neither `FrameHub` nor
 anything else of this repository's between them - ruling out `FrameHub` as
 the cause for the full set specifically.
 
-Where it _is_ the fix: colour alone. Raw colour is about 61 MB/s, comfortably
-inside what both encoding and SQLite can do, and a colour-only recording
+Where it _is_ the fix: color alone. Raw color is about 61 MB/s, comfortably
+inside what both encoding and SQLite can do, and a color-only recording
 using it was measured sustaining 29.99 fps with zero dropped frames over a
 full 10-minute, 17,996-frame session - see windows-native.md for what closed
 that specific gap (removing PNG's compute let a still-unexplained overhead
@@ -675,7 +675,7 @@ budget).
 (mirroring the existing `.root` setter), refusing with `RecorderBusy` while
 recording. `rrr.recorder.config.with_streams` and `with_codecs` are the one
 place the page, the command line and the environment turn a choice into a
-configuration; "compressed" is `zlib` for depth and `png` for colour and
+configuration; "compressed" is `zlib` for depth and `png` for color and
 infrared (`rrr.video.archive.COMPRESSED_CODECS`).
 
 **Alternatives:** a per-recording-start parameter instead of a persistent
@@ -687,12 +687,12 @@ one); resolution/frame rate/emitter mode also made settable from here
 parameters and stay environment-only, as they were).
 
 **Why:** decision 21 and 22's investigation settled on a specific answer for
-this Windows setup - colour alone, raw - but until now reaching it meant
+this Windows setup - color alone, raw - but until now reaching it meant
 setting three environment variables and restarting a process. What decisions
 21 and 22 actually established is safe to make a first-class choice rather
 than a workaround.
 
-**The conclusion this exists to make usable:** on this Windows setup, **colour
+**The conclusion this exists to make usable:** on this Windows setup, **color
 alone with the raw codec** is the only combination measured to hold 30 fps
 with nothing dropped. Depth and infrared can both be recorded here, and nothing
 stops a session from asking for them, but every measurement so far shows a
@@ -1073,8 +1073,8 @@ kernel module, and the page is served by vite in its own container - but
 neither the aarch64 build nor the encoding throughput has been checked.
 Lossless at 54 MB/s will not fit: the 18.3 ms per set is a sixteen-core figure.
 
-**Native Windows** keeps every frame but stamps colour and depth independently
-(Media Foundation does not achieve `global_time`), holds 30 fps only for colour
+**Native Windows** keeps every frame but stamps color and depth independently
+(Media Foundation does not achieve `global_time`), holds 30 fps only for color
 alone with the `raw` codec, records the array's audio cleanly, and cannot read
 its direction. What was measured, and the configuration to operate with, are in
 [windows-native.md](windows-native.md), "The operating conclusion".

@@ -18,11 +18,11 @@ depth  numbers 5..574 span 570  delivered 546  MISSING 24  redelivered 21
 color  numbered 15..584 span 570  delivered 567  MISSING  3  redelivered  0
 ```
 
-Depth lost 4.2%; colour lost 0.5%. The `redelivered` column is the SDK's
+Depth lost 4.2%; color lost 0.5%. The `redelivered` column is the SDK's
 response to a missing depth frame: its syncer pairs the previous one with the
-next colour frame, so a set still arrives, with its two streams 33.4 ms apart
+next color frame, so a set still arrives, with its two streams 33.4 ms apart
 instead of 0.03 ms. Those sets are discarded here - a set whose depth is one
-frame older than its colour is not a moment in time - which is why the effective
+frame older than its color is not a moment in time - which is why the effective
 rate was 28.7 fps rather than 30.
 
 ## What it was not
@@ -49,14 +49,14 @@ throughput survives.
 The backend. Same camera, same cable, same machine, same librealsense version -
 only the transfer path differs.
 
-| Backend | Configuration | depth lost | colour lost | Throughput |
+| Backend | Configuration | depth lost | color lost | Throughput |
 |---|---|---|---|---|
-| **V4L2** (the PyPI wheel) | depth 1280x720 + colour 1280x800 @30 | **8.4%** | **9.6%** | 106 MB/s |
+| **V4L2** (the PyPI wheel) | depth 1280x720 + color 1280x800 @30 | **8.4%** | **9.6%** | 106 MB/s |
 | **RSUSB** (libusb) | same | **0.0%** | **0.0%** | 117 MB/s |
 | **RSUSB** | same **+ both raw IR** @30 | **0.0%** | **0.0%** | **172 MB/s** |
 
 ```
-depth 1280x720 + colour 1280x800 + IR1 + IR2 @ 30, 20 s   [RSUSB]
+depth 1280x720 + color 1280x800 + IR1 + IR2 @ 30, 20 s   [RSUSB]
   depth      1843 KB/frame  numbers 30.02/s  delivered 30.02/s  MISSING 0/510
   color      2048 KB/frame  numbers 30.02/s  delivered 30.02/s  MISSING 0/510
   IR 1        922 KB/frame  numbers 30.02/s  delivered 30.02/s  MISSING 0/510
@@ -138,9 +138,9 @@ because it is a different crop rather than a smaller version of the same image.
 ## Falling back, if RSUSB is ever unavailable
 
 Measured through V4L2, in case a platform cannot use libusb. Loss rises with
-frame size but not smoothly, and 1280x720 is where colour starts suffering too.
+frame size but not smoothly, and 1280x720 is where color starts suffering too.
 
-| Configuration | depth | colour | Effective fps |
+| Configuration | depth | color | Effective fps |
 |---|---|---|---|
 | 1280x720 @30 | 11.2% | 11.6% | 26.7 |
 | 848x480 @60 | 3.3% | 0.1% | 57.9 |
@@ -162,7 +162,7 @@ threshold is, 1280x800 is on the wrong side of it.
 ## What is still discarded, on purpose
 
 Only a set whose every frame was delivered before - the syncer re-delivering
-one. Colour and depth disagreeing in time discards nothing (decisions.md 21).
+one. Color and depth disagreeing in time discards nothing (decisions.md 21).
 Before the first set reaches the recorder, a re-delivery is the syncer settling
 and is counted as `skipped_warmup`, not a loss; after it, as
 `skipped_duplicate`.

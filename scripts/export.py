@@ -86,7 +86,7 @@ def main(argv: list[str] | None = None) -> int:
         "--color",
         choices=("png", "jpeg"),
         default="png",
-        help="colour encoding. png is lossless (default); jpeg is not",
+        help="color encoding. png is lossless (default); jpeg is not",
     )
     parser.add_argument(
         "--jpeg-quality", type=int, default=95, help="quality when --color=jpeg"
@@ -329,7 +329,7 @@ def _write_frames(
         start: First frame index to write.
         end: Stop before this index, or None.
         stride: Write every Nth frame.
-        color: Colour encoding.
+        color: Color encoding.
         jpeg_quality: Quality when ``color`` is ``"jpeg"``.
         calibration: Filled in with the sensors this recording has.
 
@@ -406,7 +406,7 @@ def _write_frames(
                         os.makedirs(
                             os.path.join(destination, name, "data"), exist_ok=True
                         )
-                    # Depth stays 16-bit and stays raw; colour and infrared are 8.
+                    # Depth stays 16-bit and stays raw; color and infrared are 8.
                     extension = (
                         ".png" if name in ("depth", "ir_left", "ir_right") else suffix
                     )

@@ -47,7 +47,7 @@ Module boundaries). Each exits non-zero on failure.
 | `sqlite_write_benchmark.py` | No | Decision 22's SQLite/WAL insert throughput: compressed-size blobs (~600 KB) insert well inside budget, raw-size blobs (~1.8 MB) do not. |
 
 ```bash
-# colour alone, raw - the combination decision 23 settled on for Windows
+# color alone, raw - the combination decision 23 settled on for Windows
 uv run python scripts/record.py --seconds 600 --no-depth --no-infrared \
     --color-codec raw --min-fps 29.5
 

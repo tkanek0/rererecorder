@@ -119,7 +119,7 @@ Every entry has a `kind`; paths are relative to the export directory.
 - `group_id` is the archive's frame-set id, shared by the images captured
   together and by the matching `frame_metadata` line, which holds the variable
   firmware fields per stream.
-- Colour is RGB, never packed YUYV. Depth is raw z16; multiply by
+- Color is RGB, never packed YUYV. Depth is raw z16; multiply by
   `calibration.json` `sensors.depth.scale_m` for metres. Zero means no
   measurement, not zero distance.
 - The two inertial streams are separate tables at their own rates; joining them

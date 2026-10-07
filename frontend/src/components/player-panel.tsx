@@ -377,7 +377,7 @@ export const PlayerPanel = ({ sessionId, onClose }: Props) => {
             label="aligned"
             value={detail?.archive.aligned === undefined ? '-' : String(detail.archive.aligned)}
           />
-          <Row label="colour" value={detail?.archive.color_format ?? '-'} />
+          <Row label="color" value={detail?.archive.color_format ?? '-'} />
           <Row
             label="inertial"
             value={

@@ -11,7 +11,7 @@ up, what was lost is counted ([Honesty about losses](#honesty-about-losses)).
 | Stream | Recorded as | Codec | Size |
 |---|---|---|---|
 | depth 1280x720 z16 | `frames.depth` | zlib level 1 | 580 KB/frame |
-| colour 1280x800 YUYV | `frames.color_y` / `_u` / `_v` | PNG each | 761 KB/frame |
+| color 1280x800 YUYV | `frames.color_y` / `_u` / `_v` | PNG each | 761 KB/frame |
 | IR left 1280x720 y8 | `frames.ir1` | PNG | 220 KB/frame |
 | IR right 1280x720 y8 | `frames.ir2` | PNG | 226 KB/frame |
 | accel 400 Hz | `imu` | plain columns | 48 B/sample |
@@ -99,12 +99,12 @@ audio recording is also on. This is the number to compare against an audio
 sample.
 
 Also stored per frame, because they answer a different question - not "when
-does this line up with the audio", but "how far apart were colour and depth
+does this line up with the audio", but "how far apart were color and depth
 themselves":
 
 | Field | What it means |
 |---|---|
-| `color_timestamp_ms` | the colour frame's own `frame.get_timestamp()`, or None if colour is disabled |
+| `color_timestamp_ms` | the color frame's own `frame.get_timestamp()`, or None if color is disabled |
 | `depth_timestamp_ms` | the depth frame's own, shared by both infrared frames - one imager, one exposure |
 | `received_monotonic` | `time.monotonic()` when the set was assembled |
 
@@ -146,10 +146,10 @@ On Linux, `make up` starts both in containers, bound to `HOST` on `API_PORT` and
 `APP_PORT`. Elsewhere they are started natively, one command each - see the
 README.
 
-- **Preview** - colour and depth side by side, MJPEG at up to 15 Hz, 10 Hz
+- **Preview** - color and depth side by side, MJPEG at up to 15 Hz, 10 Hz
   while recording. Depth is shown
-  next to colour because the failure worth catching mid-recording is depth going
-  blank while colour looks perfect.
+  next to color because the failure worth catching mid-recording is depth going
+  blank while color looks perfect.
 - **Recording** - start and stop, an optional session name, the counts above as
   they change, and [marks](#marks).
 - **Storage** - free space and **how long that lasts**, computed from the rate
@@ -360,7 +360,7 @@ itself, not a parent to put one in.
 The layout - every file, column and key, and what a reader may rely on - is in
 [export-format.md](export-format.md). In short: one directory per role
 (`color`, `ir_left`, `depth`, `imu_accel`, `audio`, ...) indexed by
-`manifest.json`, times in integer nanoseconds on `CLOCK_MONOTONIC`, colour as
+`manifest.json`, times in integer nanoseconds on `CLOCK_MONOTONIC`, color as
 RGB and depth as raw z16, and the measured device offset written down but not
 applied.
 
@@ -374,7 +374,7 @@ uv run python scripts/validate_export.py data/sessions/<session>/export
 
 ## MP4 review copies
 
-The raw session remains the measurement, but a colour-and-sound review copy can
+The raw session remains the measurement, but a color-and-sound review copy can
 be made without exporting every stream first:
 
 ```bash
@@ -386,7 +386,7 @@ The movie keeps the recorded frame timestamps, maps the WAV through
 measured. ReSpeaker's processed channel 0 is the default; `--audio-channel mix`
 mixes the physical channels named by `rig.channels`, or nominal channels 1-4
 when the rig is unset. A recorded DOA is drawn as a compass. With a complete
-rig transform it is rotated into the colour-camera frame; otherwise it is
+rig transform it is rotated into the color-camera frame; otherwise it is
 labelled as an unregistered array-frame angle. Missing calibration never
 silently becomes an identity transform: without clock, offset, rig, or DOA the
 tool falls back independently to a simple start-together audio/video movie.
@@ -402,7 +402,7 @@ uv run python scripts/render_gif.py data/sessions/walk-01                       
 uv run python scripts/render_gif.py data/sessions/walk-01 --volume --waveform -o walk-01.gif
 ```
 
-Every `--stride`-th colour frame (default 15) is kept, scaled to `--width`, and
+Every `--stride`-th color frame (default 15) is kept, scaled to `--width`, and
 given its own palette. `--volume` adds the whole recording's loudness (linear
 RMS, scaled to its loudest column) with a playhead; `--waveform` adds the
 `--window-s` seconds ending at each frame on one amplitude scale. Both place the
@@ -423,7 +423,7 @@ container, `compose.yaml` passes each of these through when it is set.
 | `RRR_DEPTH`, `RRR_COLOR` | `1280x720@30`, `1280x800@30` | a stream's `WIDTHxHEIGHT@FPS`, or `off` |
 | `RRR_INFRARED`, `RRR_MOTION` | `1`, `1` | the infrared pair, the inertial sensor |
 | `RRR_COLOR_FORMAT` | `yuyv` | `yuyv` or `rgb8` (decision 4) |
-| `RRR_ALIGN` | `0` | resample depth into the colour camera (decision 2) |
+| `RRR_ALIGN` | `0` | resample depth into the color camera (decision 2) |
 | `RRR_EMITTER` | `on` | `on`, `off` or `alternating` ([The projector](#the-projector)) |
 | `RRR_DEPTH_CODEC`, `RRR_COLOR_CODEC`, `RRR_INFRARED_CODEC` | `compressed` | `compressed` or `raw` (decision 22) |
 | `RRR_SERIAL` | first found | which camera to open |
@@ -450,6 +450,6 @@ container, `compose.yaml` passes each of these through when it is set.
   runs on a session (see [Aligning the two devices](#aligning-the-two-devices)).
 - **A Raspberry Pi.** The image is built to be portable but has not run on one,
   and lossless at 54 MB/s will not fit there.
-- **Windows drops frames** with more than colour alone, and Media Foundation
-  stamps colour and depth independently. What is lost is recorded in the
+- **Windows drops frames** with more than color alone, and Media Foundation
+  stamps color and depth independently. What is lost is recorded in the
   session like anywhere else ([windows-native.md](windows-native.md)).

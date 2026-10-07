@@ -278,7 +278,7 @@ def test_depth_keeps_its_sixteen_bits(session, tmp_path) -> None:
     assert calibration["sensors"]["depth"]["scale_m"] == 0.001
 
 
-def test_colour_comes_out_as_readable_rgb(session, tmp_path) -> None:
+def test_color_comes_out_as_readable_rgb(session, tmp_path) -> None:
     out, manifest = _export(session, tmp_path)
 
     row = _rows(out / "color" / "index.csv")[0]
@@ -457,7 +457,7 @@ def test_jpeg_is_offered_and_recorded_as_lossy(session, tmp_path) -> None:
     assert manifest["streams"]["color"]["encoding"] == "jpeg"
     row = _rows(out / "color" / "index.csv")[0]
     assert row["file"].endswith(".jpg")
-    # Depth and infrared are never lossy, whatever colour is asked for.
+    # Depth and infrared are never lossy, whatever color is asked for.
     assert _rows(out / "depth" / "index.csv")[0]["file"].endswith(".png")
     assert _rows(out / "ir_left" / "index.csv")[0]["file"].endswith(".png")
 

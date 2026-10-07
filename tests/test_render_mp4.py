@@ -55,7 +55,7 @@ def test_measured_offset_and_rig_are_reported(small_session, tmp_path: Path) -> 
     )
     assert report.offset_s == pytest.approx(0.08)
     assert report.audio_channel == "physical microphone mix from rig"
-    assert report.doa == "colour-camera coordinates (measured rig)"
+    assert report.doa == "color-camera coordinates (measured rig)"
 
 
 def test_direction_falls_back_to_array_coordinates(tmp_path: Path) -> None:

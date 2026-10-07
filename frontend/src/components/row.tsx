@@ -2,7 +2,7 @@
 export type Tone = 'good' | 'warn' | 'bad';
 
 /**
- * One labelled line of a panel's readout, coloured when the value means trouble.
+ * One labelled line of a panel's readout, colored when the value means trouble.
  *
  * @param props The label, the value and its tone.
  * @returns The row.

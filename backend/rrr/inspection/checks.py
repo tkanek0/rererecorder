@@ -284,7 +284,7 @@ def _check_video(
         # stay in the data. See docs/windows-native.md #3.
         check.note(
             f"frame timestamps are in domain {domain!r}, not global_time: "
-            f"colour and depth were stamped independently"
+            f"color and depth were stamped independently"
         )
 
     monotonic = np.array([row[1] for row in rows], dtype=np.float64)

@@ -9,7 +9,7 @@ from rrr.playback import (
     TimeRange,
     crop_clock_points,
     direction_at,
-    in_colour_camera,
+    in_color_camera,
     sample_range,
 )
 from rrr.timeline import AudioClockPoint, AudioTimeline, Rig
@@ -62,15 +62,15 @@ def test_directions_stay_in_the_array_frame_while_the_rig_is_unset() -> None:
         Direction(time=1.0, angle=90.0, voice=True),
         Direction(time=1.1, angle=0.0, voice=False),
     ]
-    assert in_colour_camera(readings, Rig(), Extrinsics.identity()) is None
+    assert in_color_camera(readings, Rig(), Extrinsics.identity()) is None
     measured = Rig(
         source="measured",
         rotation=(1.0, 0.0, 0.0, 0.0, 0.0, -1.0, 0.0, 1.0, 0.0),
         translation=(0.0, 0.0, 0.0),
     )
-    assert in_colour_camera(readings, measured, None) is None
+    assert in_color_camera(readings, measured, None) is None
     # The array's +Y onto the camera's +Z: 0 deg is straight ahead, +X stays 90.
-    turned = in_colour_camera(readings, measured, Extrinsics.identity())
+    turned = in_color_camera(readings, measured, Extrinsics.identity())
     assert turned is not None
     assert [r.angle for r in turned] == [pytest.approx(90.0), pytest.approx(0.0)]
 

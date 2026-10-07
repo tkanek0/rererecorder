@@ -267,8 +267,8 @@ class FrameSet:
     Attributes:
         index: Monotonically increasing counter assigned by whatever produced
             this set. Used to tell a new frame from one already handled.
-        color_timestamp_ms: The colour frame's own ``frame.get_timestamp()``,
-            in milliseconds, or None if colour is disabled. What it means
+        color_timestamp_ms: The color frame's own ``frame.get_timestamp()``,
+            in milliseconds, or None if color is disabled. What it means
             depends on ``timestamp_domain``.
         depth_timestamp_ms: The depth frame's own ``frame.get_timestamp()``,
             shared by both infrared frames, or None if depth is disabled.
@@ -277,7 +277,7 @@ class FrameSet:
             returned; the axis the audio is also on.
         timestamp_domain: What the SDK said the two timestamps mean; see
             docs/features.md "Timing".
-        color: The colour image as the sensor produced it, or None if
+        color: The color image as the sensor produced it, or None if
             disabled. Its shape depends on ``color_format``: ``(height, width)``
             uint16 for ``"yuyv"`` - each element one pixel's two bytes - or
             ``(height, width, 3)`` uint8 for ``"rgb8"``.
@@ -306,13 +306,13 @@ class FrameSet:
 
 
 def color_to_bgr(frames: FrameSet) -> np.ndarray | None:
-    """Convert a set's colour image to BGR, whatever format it was recorded in.
+    """Convert a set's color image to BGR, whatever format it was recorded in.
 
     Args:
         frames: The set to read.
 
     Returns:
-        ``(height, width, 3)`` uint8 BGR, or None if colour is disabled.
+        ``(height, width, 3)`` uint8 BGR, or None if color is disabled.
     """
     if frames.color is None:
         return None
@@ -322,14 +322,14 @@ def color_to_bgr(frames: FrameSet) -> np.ndarray | None:
 
 
 def color_to_rgb(frames: FrameSet) -> np.ndarray | None:
-    """Convert a set's colour image to RGB, whatever format it was recorded in.
+    """Convert a set's color image to RGB, whatever format it was recorded in.
 
     Args:
         frames: The set to read.
 
     Returns:
         ``(height, width, 3)`` uint8 RGB - the recorded array itself when it
-        already was RGB - or None if colour is disabled.
+        already was RGB - or None if color is disabled.
     """
     if frames.color is None:
         return None

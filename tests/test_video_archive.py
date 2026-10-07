@@ -248,7 +248,7 @@ def test_the_yuyv_split_separates_luma_from_chroma_and_is_inverse() -> None:
     assert np.array_equal(join_yuyv(*split_yuyv(color)), color)
 
 
-def test_colour_conversions_agree_across_recorded_formats(
+def test_color_conversions_agree_across_recorded_formats(
     make_frames: Callable[..., FrameSet],
 ) -> None:
     """YUYV and RGB recordings of the same grey come out the same, in either order."""

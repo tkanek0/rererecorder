@@ -11,10 +11,10 @@ StreamSpec = tuple[int, int, int]
 #: docs/frame-loss.md, "What the sensors actually are".
 DEFAULT_DEPTH: StreamSpec = (1280, 720, 30)
 
-#: The colour sensor's own resolution, not matched to depth: docs/decisions.md 2.
+#: The color sensor's own resolution, not matched to depth: docs/decisions.md 2.
 DEFAULT_COLOR: StreamSpec = (1280, 800, 30)
 
-#: What the colour sensor emits. See docs/decisions.md 4.
+#: What the color sensor emits. See docs/decisions.md 4.
 DEFAULT_COLOR_FORMAT = "yuyv"
 
 #: What the depth projector does while recording. See docs/features.md,
@@ -30,7 +30,7 @@ class StreamConfig:
     Attributes:
         color: Color stream as (width, height, fps), or None to disable it.
         depth: Depth stream as (width, height, fps), or None to disable it.
-        color_format: Pixel format for the colour stream, ``"yuyv"`` or
+        color_format: Pixel format for the color stream, ``"yuyv"`` or
             ``"rgb8"``. See DEFAULT_COLOR_FORMAT.
         infrared: Record the two raw infrared images the depth is computed
             from, at the depth stream's own resolution and rate. See
@@ -59,7 +59,7 @@ class StreamConfig:
         if self.color is None and self.depth is None:
             raise ValueError("at least one of color or depth must be enabled")
         if self.color_format not in ("yuyv", "rgb8"):
-            raise ValueError(f"unsupported colour format {self.color_format!r}")
+            raise ValueError(f"unsupported color format {self.color_format!r}")
         if self.emitter not in EMITTER_MODES:
             raise ValueError(
                 f"unsupported emitter mode {self.emitter!r}, "

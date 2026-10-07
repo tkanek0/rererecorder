@@ -55,18 +55,18 @@ def read_directions(path: str, offset: float) -> list[Direction] | None:
     return readings
 
 
-def in_colour_camera(
+def in_color_camera(
     readings: list[Direction], rig: Rig, depth_to_color: Extrinsics | None
 ) -> list[Direction] | None:
-    """Rotate array-frame readings into bearings in the colour camera.
+    """Rotate array-frame readings into bearings in the color camera.
 
     Args:
         readings: Array-frame readings, as :func:`read_directions` returns.
         rig: The mounting from the array to the depth frame.
-        depth_to_color: The camera's own depth-to-colour extrinsics.
+        depth_to_color: The camera's own depth-to-color extrinsics.
 
     Returns:
-        Bearings about the colour camera's vertical axis, 0 deg straight ahead
+        Bearings about the color camera's vertical axis, 0 deg straight ahead
         and increasing toward +X - or None if either transform is unknown.
         An unmeasured mounting is never replaced by an identity.
     """

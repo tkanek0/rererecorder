@@ -22,7 +22,7 @@ export type PreviewKind = 'color' | 'depth' | 'ir1' | 'ir2';
 
 /** What each preview is called on screen. */
 export const PREVIEW_LABELS: Record<PreviewKind, string> = {
-  color: 'colour',
+  color: 'color',
   depth: 'depth',
   ir1: 'infrared left',
   ir2: 'infrared right',

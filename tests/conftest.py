@@ -71,7 +71,7 @@ def intrinsics() -> Intrinsics:
 
 @pytest.fixture
 def calibration(intrinsics: Intrinsics) -> Calibration:
-    """Calibration with depth aligned to colour, as a recording would hold it."""
+    """Calibration with depth aligned to color, as a recording would hold it."""
     return Calibration(
         color=intrinsics,
         depth=intrinsics,
@@ -97,7 +97,7 @@ def make_frames(calibration: Calibration) -> Callable[..., FrameSet]:
 
         Args:
             depth: Raw uint16 depth, or None.
-            color: Colour image in ``color_format``, or None.
+            color: Color image in ``color_format``, or None.
             index: Frame counter. Also sets the frame's place in time, at 30 fps.
             timestamp_domain: What the timestamp is supposed to mean.
             color_format: ``"rgb8"`` or ``"yuyv"``.
@@ -105,7 +105,7 @@ def make_frames(calibration: Calibration) -> Callable[..., FrameSet]:
 
         Returns:
             The frame set, with ``received_monotonic`` exactly
-            ``MONO + index / FPS + ARRIVAL_LAG_S`` and the same colour and
+            ``MONO + index / FPS + ARRIVAL_LAG_S`` and the same color and
             depth timestamp (no skew).
         """
         capture = index / FPS
@@ -217,7 +217,7 @@ def write_session(
     return paths
 
 
-#: The small session several converters are tried on: 4 colour frames at
+#: The small session several converters are tried on: 4 color frames at
 #: 10 fps, 8 kHz audio whose processed channel is a ramp, one direction.
 SMALL_FRAMES = 4
 SMALL_FPS = 10.0

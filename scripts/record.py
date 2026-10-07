@@ -52,7 +52,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--no-audio", action="store_true", help="skip the array")
     parser.add_argument("--no-doa", action="store_true", help="skip the direction")
     parser.add_argument(
-        "--no-color", action="store_true", help="do not capture the colour stream"
+        "--no-color", action="store_true", help="do not capture the color stream"
     )
     parser.add_argument(
         "--no-depth", action="store_true", help="do not capture the depth stream"
@@ -66,7 +66,7 @@ def main(argv: list[str] | None = None) -> int:
         "--color-codec",
         choices=("compressed", "raw"),
         default=None,
-        help="how the colour stream is stored (default: from the environment)",
+        help="how the color stream is stored (default: from the environment)",
     )
     parser.add_argument(
         "--depth-codec",

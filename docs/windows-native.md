@@ -10,7 +10,7 @@ inside WSL2 with the two USB devices passed through. Four real bugs came out
 of it and are fixed (decisions 19, 20, 21 and a `FrameHub` crash decision 21
 exposed) - decision 21 (removing `MAX_PAIR_SKEW_MS`'s discard) is what lets
 native Windows record video at all, and decision 22 (a raw, uncompressed
-codec) is what lets it hold 30 fps for colour, confirmed over a 10-minute
+codec) is what lets it hold 30 fps for color, confirmed over a 10-minute
 recording with zero dropped frames, and decision 23 turns that finding into
 an actual choice from the CLI or the page rather than environment variables
 to remember. What remains open on the video side - a real but uncharacterised
@@ -43,7 +43,7 @@ generalise to that one either.
 |---|---|---|---|
 | 1 | `pyrealsense2` sees 0 devices | Device was attached to WSL2 via `usbipd`, not actually a Windows problem | Yes - stop attaching it to test Windows |
 | 2 | `Couldn't resolve requests` on every stream combination, including depth alone | The camera was negotiating at USB 2.1, and the profile table has no 1280x720/1280x800 @30 fps entries below USB 3.x | Yes - swapped to a USB-C cable |
-| 3 | 0 video frames recorded, even after fix 2 | Colour and depth were being discarded whenever `MAX_PAIR_SKEW_MS = 5.0` was exceeded - which, on Windows, was every set: a real ~13 ms mean gap (jitter from auto-exposure, plus - with AE off only - a slow drift), calibrated against Linux's 0.03 ms and never re-calibrated for this platform's normal case | Yes - decision 21, remove the discard |
+| 3 | 0 video frames recorded, even after fix 2 | Color and depth were being discarded whenever `MAX_PAIR_SKEW_MS = 5.0` was exceeded - which, on Windows, was every set: a real ~13 ms mean gap (jitter from auto-exposure, plus - with AE off only - a slow drift), calibrated against Linux's 0.03 ms and never re-calibrated for this platform's normal case | Yes - decision 21, remove the discard |
 | 4 | Audio duration stuck at 0.0s in the live progress line | Not investigated directly; turned out to be downstream of #6 | See #6 |
 | 5 | Encoder falling behind (`DROPPED` climbing), ~9 fps effective, a single ~30 s stretch with no video or IMU samples | This CPU's four encoder threads do not clear 30 fps for a six-image set - see decision 19 | Yes |
 | 6 | `audio: 'L' format requires 0 <= number <= 4294967295` crash | `_adc_time` returned a known-bad `inputBufferAdcTime` after only warning about it, feeding a multi-billion-sample gap into the WAV writer - see decision 20 | Yes |
@@ -53,7 +53,7 @@ generalise to that one either.
 
 Before the cable swap, the device's own `usb_type_descriptor` read `2.1`,
 and `sensor.get_stream_profiles()` showed nothing above 5 fps at 1280x720
-depth or 8 fps at 1280x800 colour - the firmware does not offer the fast
+depth or 8 fps at 1280x800 color - the firmware does not offer the fast
 profiles at all under USB 2.1, so `pipeline.start()` refusing every
 combination, including depth alone, was correct behaviour given what was on
 offer. After swapping to a USB-C cable, `usb_type_descriptor` read `3.2` and
@@ -61,7 +61,7 @@ every profile this repository asks for was present at 30 fps. Reconnecting
 through `usbipd` renumbers the bus id (`4-7` became `1-4` here) - worth
 checking with `usbipd list` rather than assuming it stayed put.
 
-## #3: colour and depth do not share a clock the way they do on Linux
+## #3: color and depth do not share a clock the way they do on Linux
 
 A raw `pyrealsense2` loop (`pipeline.wait_for_frames()`, no writing, so
 nothing about this repository's own code is involved) over 25 s of the full
@@ -69,7 +69,7 @@ four-stream configuration found:
 
 ```
 per-stream frame loss: ~0%, once #2 was fixed
-colour - depth skew:   mean 13.10 ms, stdev 4.55 ms, min -57.72 ms, max 15.63 ms  (n=713)
+color - depth skew:   mean 13.10 ms, stdev 4.55 ms, min -57.72 ms, max 15.63 ms  (n=713)
 ```
 
 `docs/decisions.md`'s `MAX_PAIR_SKEW_MS = 5.0` was measured on Linux/RSUSB at
@@ -295,7 +295,7 @@ alone until it was actually needed.
 ### What this changes for the "actual fix" section below
 
 The camera and array turned out to need the same lesson twice: decision 21
-found that Windows' colour/depth timestamp gap was not something to discard
+found that Windows' color/depth timestamp gap was not something to discard
 frames over, and this investigation found that the array's clock offset was
 not something to discard readings over either - both were real, measurable,
 *stable* differences that a downstream consumer (or, here, a calibration
@@ -368,12 +368,12 @@ libusb device would each reproduce on any WSL2 box.
 ## WSL2, part 2: RSUSB fixes the skew, and usbip becomes the new ceiling
 
 With the build working and both devices attached, the result answers the one
-question this whole detour existed to ask: **RSUSB does fix the colour/depth
+question this whole detour existed to ask: **RSUSB does fix the color/depth
 skew, the same way it already does on native Linux (decision 1).**
 
 ```
 domain (both streams)      global_time              (was system_time under MF)
-colour - depth skew        mean 0.95 ms, stdev 0.40 ms, max 1.17 ms   (n=145)
+color - depth skew        mean 0.95 ms, stdev 0.40 ms, max 1.17 ms   (n=145)
                            (was mean 13.1 ms, stdev 4.2 ms on native Windows/MF)
 ```
 
@@ -384,7 +384,7 @@ through `usbipd-win` rather than a real controller.
 
 That fix immediately exposed a different, unrelated ceiling. A clean
 recording of all four streams held only **13.7 fps**, with 217 of 275 sets
-discarded mid-stream for growing frame-number mismatches between colour and
+discarded mid-stream for growing frame-number mismatches between color and
 depth - not the skew (already fixed), but frames going missing somewhere
 before this repository's own pairing ever sees them. Three measurements ruled
 out everything this investigation had already blamed on native Windows:
@@ -442,7 +442,7 @@ recording does.
 
 The lever that finally worked was not a backend at all. `FORCE_RSUSB_BACKEND`
 was chased on the assumption that a Windows recorder needs to match Linux's
-sub-millisecond colour/depth sync to be usable - decision 21 revisits that
+sub-millisecond color/depth sync to be usable - decision 21 revisits that
 assumption instead.
 
 **Correcting an earlier guess:** the "untried fix" this document previously
@@ -461,7 +461,7 @@ INF involved, and it measurably fixed the skew.
 
 **What actually explained the skew**, found by separating it into two parts
 and testing each on the real priority order (no data loss first, then image
-quality, with colour/depth timing reconciled downstream - see decision 21):
+quality, with color/depth timing reconciled downstream - see decision 21):
 
 * **The jitter (stdev ~4 ms) was auto-exposure.** Fixing exposure on both
   sensors dropped it to ~0.6-0.8 ms. But auto-exposure is what this
@@ -472,13 +472,13 @@ quality, with colour/depth timing reconciled downstream - see decision 21):
   too, in the other direction.** With AE **on**, three independent
   measurements (twice with `align-depth2color.py`'s own official pattern,
   once opening each sensor directly) found **no drift at all** over 90-180
-  seconds: colour and depth's timestamp difference held inside a roughly
-  1-2 ms band the entire time, and colour's `frame_number` minus depth's
+  seconds: color and depth's timestamp difference held inside a roughly
+  1-2 ms band the entire time, and color's `frame_number` minus depth's
   stayed at exactly the same constant the whole way through.
 * **Neither jitter nor drift meant a lost frame.** Opening the Stereo Module
   and RGB Camera sensors directly - bypassing the pipeline's syncer, which
-  is what actually decides colour/depth pairing - and reading each stream's
-  own hardware-assigned `frame_number` found **zero gaps in colour, depth,
+  is what actually decides color/depth pairing - and reading each stream's
+  own hardware-assigned `frame_number` found **zero gaps in color, depth,
   IR1 or IR2** over a 180 s recording at ~30 fps each, with AE on. What
   `MAX_PAIR_SKEW_MS` was discarding was two real, undamaged frames that
   simply were not the pipeline's default idea of a pair.
@@ -505,7 +505,7 @@ Every frame is kept, `color_timestamp_ms` and `depth_timestamp_ms` are
 recorded per set instead of one ambiguous composite value, and a consumer
 that wants a tightly synchronised pair filters for one itself - the same job
 `_is_paired` used to do, now done by whoever actually needs the guarantee.
-Colour is what SLAM runs on; depth and infrared are validation data reconciled
+Color is what SLAM runs on; depth and infrared are validation data reconciled
 against it afterward, so neither needs to be discarded to make the other look
 synchronised.
 
@@ -523,7 +523,7 @@ fake hub instead. Fixed; a real test for `FrameHub._publish` itself is not
 yet written.
 
 **The ceiling, found by measuring instead of assuming:** with the bug fixed,
-a real recording (colour + depth + infrared, the default) held only ~17 fps
+a real recording (color + depth + infrared, the default) held only ~17 fps
 with the encoder queue overflowing steadily - reproduced with audio off, with
 `--quiet`, with `--no-doa`, so none of those were it. Isolated component
 benchmarks all looked fine in isolation (raw SDK throughput ~29-30 fps after
@@ -533,23 +533,23 @@ explained a 17 fps recording. The gap turned out to be the benchmarks
 themselves: every one of them, including decision 19's original figures, was
 timed against synthetic noise. Noise is not representative - a compressor
 gives up searching for redundancy in it almost immediately, where real depth,
-colour and infrared content has real redundancy to search for. Encoding
+color and infrared content has real redundancy to search for. Encoding
 frames captured live from the camera measured **~29-30 ms/set for the full
 six-image lossless set, at any thread count from 8 to 12** - the CPU's
 compute limit, against a 33.3 ms budget with almost nothing left over for
 anything else in the pipeline. Decision 22 adds a `"raw"` (uncompressed)
 codec for exactly this case.
 
-**Raw fixes colour alone, and only colour alone.** Measuring every
+**Raw fixes color alone, and only color alone.** Measuring every
 combination directly (real `FrameHub` + `VideoWriter`, raw codecs, ~25-40 s
 each):
 
 | streams stored | fps (steady) | drops in the window |
 |---|---|---|
-| colour only | 29.8-30.0 | 0 |
-| colour + depth | ~24 | 34 in 25 s, climbing |
-| colour + infrared (depth captured, not stored) | ~24 | 36 in 25 s, climbing |
-| colour + depth + infrared | ~18 | 200 in 25 s, climbing fast |
+| color only | 29.8-30.0 | 0 |
+| color + depth | ~24 | 34 in 25 s, climbing |
+| color + infrared (depth captured, not stored) | ~24 | 36 in 25 s, climbing |
+| color + depth + infrared | ~18 | 200 in 25 s, climbing fast |
 
 Depth and infrared cost about the same on their own; together the cost more
 than adds. For the full set, raw does not help - it moves the bottleneck
@@ -563,7 +563,7 @@ Confirmed live: a minimal `LiveSource` + `ArchiveWriter` wiring with neither
 of 912 frames dropped by 25-30 s). Full-set raw is disk/SQLite-bound,
 independent of everything else investigated here.
 
-**Colour alone, raw, is confirmed at full length:** a 10-minute (602 s) CLI
+**Color alone, raw, is confirmed at full length:** a 10-minute (602 s) CLI
 recording (`RRR_DEPTH=off RRR_INFRARED=0 RRR_MOTION=0 RRR_COLOR_CODEC=raw`)
 produced 17,996 frames at 29.99 fps with **zero dropped**. `inspect` flagged
 "frame capture times are not increasing"; checked directly, it is two pairs
@@ -580,11 +580,11 @@ repeats.
 
 **Still open: `FrameHub`/`VideoWriter` cost more than the sum of their
 parts, for reasons not yet found.** A minimal direct wiring (`LiveSource` +
-`ArchiveWriter`, no hub, no writer wrapper) reaches a clean 30 fps for colour
+`ArchiveWriter`, no hub, no writer wrapper) reaches a clean 30 fps for color
 alone at *either* codec - compressed or raw. The real recording path,
 same machine, same single stream, reaches only ~25 fps at the compressed
 codec. Raw removes enough compute that the real path clears budget anyway
-(colour alone, raw, real path: ~30 fps, confirmed above) - which is why this
+(color alone, raw, real path: ~30 fps, confirmed above) - which is why this
 was not chased further for now - but the overhead itself is real, sits
 somewhere in `FrameHub._publish` or `VideoWriter._on_frame`, and would also
 explain some of the depth/infrared numbers above being worse than their own
@@ -602,11 +602,11 @@ thread and a poller.
   (`dataclasses.replace`, the hub's locks, `_should_stop`/`_superseded`, and a
   bare background thread running the same read/write loop were each measured
   negligible or non-reproducing in isolation - see decision 23). **Closed as
-  an operating question, not as a solved one**: colour+raw clears budget
+  an operating question, not as a solved one**: color+raw clears budget
   regardless of this overhead, which is now the CLI's and the page's
   first-class recommended combination (decision 23) rather than something
   reached through environment variables. Worth reopening only if a future
-  need requires compressed colour, or the full set, to also hold 30 fps here
+  need requires compressed color, or the full set, to also hold 30 fps here
   - at that point this paragraph's profiling result is the starting point,
   and OS-level profiling (thread/core scheduling on this hybrid P-core/E-core
   chip) is the next untried step.
@@ -637,7 +637,7 @@ thread and a poller.
 
 ## The operating conclusion
 
-**On this Windows setup, run with colour alone and the raw codec.** It is the
+**On this Windows setup, run with color alone and the raw codec.** It is the
 only combination measured to hold a lossless 30 fps with nothing dropped -
 over a 10-minute CLI recording (17,996 frames, 0 dropped) and again over a
 73-minute run through the actual server with a live preview attached the
@@ -664,10 +664,10 @@ pointed at.
 
 | Session | Config | Duration | Frames | Dropped | fps | Note |
 |---|---|---|---|---|---|---|
-| `color-raw-10min` | colour only, raw | 602.1 s | 17,996 | 0 | 29.99 | The 10-minute CLI verification cited throughout - decisions 22 and 23, README, "The operating conclusion" above. |
-| `server-preview-test` | colour only, raw, via the server with a live preview attached the whole time | 4,387.4 s (73 min - see below) | 130,195 | 1,147 (0.87%) | 29.7 | Confirms the server path (`FrameHub` shared with a preview) costs slightly more than the CLI's zero drops, still far better than any compressed combination. The duration was unintentional - a scheduled wake-up fired much later than intended - reported as an accidental but informative extended stress test rather than the ~1 minute originally planned. The array was not attached for this run (`doa read failed: No backend available` throughout), so its audio side is not evidence of anything; §7's clock drift is pre-existing and untouched by this work. |
-| `cpu-diag` | colour + depth + infrared, compressed (`png`/`zlib`, the defaults) | 26.1 s | 355 | 559 | 17.7 | An early diagnostic run, stopped once the problem was evident rather than run to completion. Supports the "~18 fps" figure for the full compressed set in decision 22 and "Known limits". |
-| `decision21-verify` | colour + depth + infrared, compressed | interrupted before a final report; 1,123 frames and 2,083 dropped by 71 s | - | - | ~16 (falling) | A larger capture of the same compressed-full-set problem, from the same investigation session as `cpu-diag`. What it was measuring turned out to be decision 22's own finding - real-content encoding, not synthetic noise, is the true bottleneck - see "The actual fix" and "Putting decision 21 into practice" above. |
+| `color-raw-10min` | color only, raw | 602.1 s | 17,996 | 0 | 29.99 | The 10-minute CLI verification cited throughout - decisions 22 and 23, README, "The operating conclusion" above. |
+| `server-preview-test` | color only, raw, via the server with a live preview attached the whole time | 4,387.4 s (73 min - see below) | 130,195 | 1,147 (0.87%) | 29.7 | Confirms the server path (`FrameHub` shared with a preview) costs slightly more than the CLI's zero drops, still far better than any compressed combination. The duration was unintentional - a scheduled wake-up fired much later than intended - reported as an accidental but informative extended stress test rather than the ~1 minute originally planned. The array was not attached for this run (`doa read failed: No backend available` throughout), so its audio side is not evidence of anything; §7's clock drift is pre-existing and untouched by this work. |
+| `cpu-diag` | color + depth + infrared, compressed (`png`/`zlib`, the defaults) | 26.1 s | 355 | 559 | 17.7 | An early diagnostic run, stopped once the problem was evident rather than run to completion. Supports the "~18 fps" figure for the full compressed set in decision 22 and "Known limits". |
+| `decision21-verify` | color + depth + infrared, compressed | interrupted before a final report; 1,123 frames and 2,083 dropped by 71 s | - | - | ~16 (falling) | A larger capture of the same compressed-full-set problem, from the same investigation session as `cpu-diag`. What it was measuring turned out to be decision 22's own finding - real-content encoding, not synthetic noise, is the true bottleneck - see "The actual fix" and "Putting decision 21 into practice" above. |
 
 Reproducing any of these no longer needs a bespoke script: `scripts/record.py --seconds <n> --min-fps 29.5 [stream/codec flags]` exits with status 2 when the combination does not hold.
 
@@ -696,9 +696,9 @@ same-day.
 **The MJPEG preview, unthrottled while idle, is itself enough load to matter.**
 An earlier pass at this same session removed the preview's `PREVIEW_MAX_HZ`
 cap whenever nothing was recording, reasoning that with no encoder running
-there was nothing to protect. Measured directly: two previews (colour +
+there was nothing to protect. Measured directly: two previews (color +
 depth) encoding at the camera's full ~30 fps was by itself enough CPU load to
-degrade `hub.fps` into the 18-28 fps range even for colour alone, and
+degrade `hub.fps` into the 18-28 fps range even for color alone, and
 degraded further once depth + infrared were also being captured - matching
 this document's own repeated finding that this CPU is the bottleneck for
 per-frame image work, preview encoding included. **Fixed:** two separate
@@ -706,7 +706,7 @@ caps, `PREVIEW_MAX_HZ_RECORDING` (10, unchanged - a dropped frame in a
 recording cannot be gotten back) and
 `PREVIEW_MAX_HZ_IDLE` (15, chosen after this measurement), both real caps
 rather than "whatever the camera delivers." A direct A/B on this exact
-question - colour+raw+audio recording, live colour preview attached, ~110 s -
+question - color+raw+audio recording, live color preview attached, ~110 s -
 found 10 Hz preview indistinguishable from no preview at all (audio filled
 3,032 vs 11,238 samples, 0 vs 0 video drops, clock fit +451 vs +374 ppm - if
 anything, cleaner); 15 Hz during recording was measurably worse across every
@@ -735,7 +735,7 @@ document's own established-clean baselines above.
 
 With both bugs above fixed, a stationary handclap recording is clean
 (0 video frames dropped, 29.96 fps, 0 audio problems worth noting). Walking
-around with the camera while recording (colour only, raw, motion off,
+around with the camera while recording (color only, raw, motion off,
 otherwise identical settings) is not: five separate takes all showed video
 drops in the range of 16-29% (189-501 frames dropped out of ~1,650-2,200),
 each with a very similar shape -

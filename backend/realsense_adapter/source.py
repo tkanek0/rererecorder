@@ -746,7 +746,7 @@ class LiveSource:
 
         Returns:
             The frame set, or None if an enabled stream was missing or every
-            frame in it had already been delivered. Colour/depth skew never
+            frame in it had already been delivered. Color/depth skew never
             discards a set (docs/decisions.md 21).
         """
         # Taken before the align. Held, not copied, until the checks below
@@ -873,12 +873,12 @@ class LiveSource:
         if self._timestamp_domain == "global_time":
             logger.info(
                 "frame timestamps are epoch milliseconds (global_time), one "
-                "drift-corrected clock for colour and depth"
+                "drift-corrected clock for color and depth"
             )
         elif self._timestamp_domain == "system_time":
             logger.warning(
                 "frame timestamps are system_time: each stream was stamped by the "
-                "host on arrival, so colour and depth are not on one clock"
+                "host on arrival, so color and depth are not on one clock"
             )
         else:
             logger.warning(

@@ -1,7 +1,7 @@
 """Turning measurements into pictures for the browser.
 
 Presentation only: nothing recorded depends on this, and it is the one place
-depth acquires a range and a colour scale. Images stay BGR, as OpenCV encodes
+depth acquires a range and a color scale. Images stay BGR, as OpenCV encodes
 them, and are downscaled before encoding.
 """
 
@@ -30,7 +30,7 @@ MJPEG_CONTENT_TYPE = f"multipart/x-mixed-replace; boundary={BOUNDARY}"
 
 
 def colorize_depth(depth: np.ndarray, depth_scale: float) -> np.ndarray:
-    """Render a depth image as a colour picture, NEAR_M to FAR_M on turbo.
+    """Render a depth image as a color picture, NEAR_M to FAR_M on turbo.
 
     Turbo, because jet's perceptually uneven bands invent and hide edges.
     Anything further than FAR_M is clipped rather than dropped, so a far wall
@@ -46,9 +46,9 @@ def colorize_depth(depth: np.ndarray, depth_scale: float) -> np.ndarray:
     """
     metres = depth.astype(np.float32) * depth_scale
     scaled = np.clip((metres - NEAR_M) / (FAR_M - NEAR_M), 0.0, 1.0)
-    coloured = cv2.applyColorMap((scaled * 255).astype(np.uint8), cv2.COLORMAP_TURBO)
-    coloured[depth == 0] = 0
-    return coloured
+    colored = cv2.applyColorMap((scaled * 255).astype(np.uint8), cv2.COLORMAP_TURBO)
+    colored[depth == 0] = 0
+    return colored
 
 
 def render(
@@ -62,7 +62,7 @@ def render(
         kind: Which stream.
 
     Returns:
-        The image, or None if that stream is not in this recording. Colour and
+        The image, or None if that stream is not in this recording. Color and
         depth come back as BGR; infrared stays single-channel.
     """
     if kind == "color":

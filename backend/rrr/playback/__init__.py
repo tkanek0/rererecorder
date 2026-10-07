@@ -17,7 +17,7 @@ from .audio import (
     sample_range,
     select_audio,
 )
-from .direction import Direction, direction_at, in_colour_camera, read_directions
+from .direction import Direction, direction_at, in_color_camera, read_directions
 from .frames import TimeRange
 from .output import replacing
 
@@ -28,7 +28,7 @@ __all__ = [
     "audio_timeline",
     "crop_clock_points",
     "direction_at",
-    "in_colour_camera",
+    "in_color_camera",
     "read_directions",
     "read_mono",
     "read_wav",

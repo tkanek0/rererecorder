@@ -297,7 +297,7 @@ def _pick(frames, stream: str) -> np.ndarray | None:
         return frames.depth
     if frames.color is None:
         return None
-    # YUYV: the luma plane alone, with no colour conversion.
+    # YUYV: the luma plane alone, with no color conversion.
     if frames.color_format == "yuyv":
         height, width = frames.color.shape
         return frames.color.view(np.uint8).reshape(height, width, 2)[:, :, 0]

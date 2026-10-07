@@ -71,7 +71,9 @@ def _calibrate(clock: AdcClock, offsets: list[float]) -> list[float]:
     """Report one block per offset at ``now - offset``; return the times released."""
     released = []
     for offset in offsets:
-        released += [at for _, at in clock.add(BLOCK_SAMPLES, time.monotonic() - offset)]
+        released += [
+            at for _, at in clock.add(BLOCK_SAMPLES, time.monotonic() - offset)
+        ]
     return released
 
 
@@ -200,7 +202,9 @@ def test_a_matching_rate_wins_without_wasapi_present(monkeypatch) -> None:
     assert _resolve_device("ReSpeaker", 6, RATE) == 0
 
 
-def test_the_first_match_wins_when_nothing_reports_the_requested_rate(monkeypatch) -> None:
+def test_the_first_match_wins_when_nothing_reports_the_requested_rate(
+    monkeypatch,
+) -> None:
     """With no ranked tier applying, the first match is used rather than raising."""
     _patch_devices(
         monkeypatch,
@@ -220,8 +224,15 @@ def test_a_later_match_with_enough_channels_is_used_over_an_earlier_one_without(
     _patch_devices(
         monkeypatch,
         [
-            _device("ReSpeaker 4 Mic Array (UAC1.0)", hostapi=0, rate=44100.0, channels=1),
-            _device("ReSpeaker 4 Mic Array (UAC1.0) (WASAPI)", hostapi=1, rate=float(RATE), channels=6),
+            _device(
+                "ReSpeaker 4 Mic Array (UAC1.0)", hostapi=0, rate=44100.0, channels=1
+            ),
+            _device(
+                "ReSpeaker 4 Mic Array (UAC1.0) (WASAPI)",
+                hostapi=1,
+                rate=float(RATE),
+                channels=6,
+            ),
         ],
         [{"name": "MME"}, {"name": "Windows WASAPI"}],
     )
@@ -231,7 +242,11 @@ def test_a_later_match_with_enough_channels_is_used_over_an_earlier_one_without(
 def test_every_match_short_on_channels_names_the_firmware_problem(monkeypatch) -> None:
     _patch_devices(
         monkeypatch,
-        [_device("ReSpeaker 4 Mic Array (UAC1.0)", hostapi=0, rate=44100.0, channels=1)],
+        [
+            _device(
+                "ReSpeaker 4 Mic Array (UAC1.0)", hostapi=0, rate=44100.0, channels=1
+            )
+        ],
         [{"name": "MME"}],
     )
     with pytest.raises(DeviceNotFound, match="1-channel firmware"):

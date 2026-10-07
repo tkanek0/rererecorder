@@ -29,7 +29,12 @@ def test_plain_gif_holds_every_strided_frame(small_session, tmp_path: Path) -> N
     assert len(frames) == report.frames == FRAMES
     assert frames[0].shape == (HEIGHT, WIDTH, 3)
     assert report.audio_channel is None
-    assert render(small_session.directory, tmp_path / "half.gif", stride=2, width=WIDTH).frames == 2
+    assert (
+        render(
+            small_session.directory, tmp_path / "half.gif", stride=2, width=WIDTH
+        ).frames
+        == 2
+    )
 
 
 def test_each_strip_adds_its_own_height(small_session, tmp_path: Path) -> None:
@@ -40,7 +45,13 @@ def test_each_strip_adds_its_own_height(small_session, tmp_path: Path) -> None:
         ("both", True, True),
     ]:
         output = tmp_path / f"{name}.gif"
-        render(small_session.directory, output, volume=volume, waveform=waveform, width=WIDTH)
+        render(
+            small_session.directory,
+            output,
+            volume=volume,
+            waveform=waveform,
+            width=WIDTH,
+        )
         heights[name] = _frames(output)[0].shape[0]
 
     assert heights["volume"] == HEIGHT + 2 * PAD + VOLUME_HEIGHT

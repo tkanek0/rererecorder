@@ -128,7 +128,11 @@ class ClockTrack:
             The pair just read, whether or not it was kept.
         """
         pair = read_clocks()
-        if force or not self._samples or pair.monotonic - self._samples[-1].monotonic >= self._interval_s:
+        if (
+            force
+            or not self._samples
+            or pair.monotonic - self._samples[-1].monotonic >= self._interval_s
+        ):
             self._samples.append(pair)
         return pair
 

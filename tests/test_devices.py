@@ -156,7 +156,9 @@ def tap() -> AudioTap:
 def _feed(tap: AudioTap, blocks: int, *, start: float = 100.0, first: int = 0) -> None:
     """Deliver blocks whose ADC times are contiguous from block ``first``."""
     for n in range(first, first + blocks):
-        tap._on_block(np.full((BLOCK, CHANNELS), n, np.float32), start + n * BLOCK / RATE)
+        tap._on_block(
+            np.full((BLOCK, CHANNELS), n, np.float32), start + n * BLOCK / RATE
+        )
 
 
 def test_a_chunk_carries_the_samples_and_a_stamp_per_block(tap: AudioTap) -> None:
@@ -223,4 +225,6 @@ def test_an_adapter_imports_nothing_from_rrr_and_ignores_the_environment(
         "assert not [m for m in sys.modules if m == 'rrr' or m.startswith('rrr.')];"
         f"assert {check}"
     )
-    subprocess.run([sys.executable, "-c", code], check=True, env={**os.environ, **environment})
+    subprocess.run(
+        [sys.executable, "-c", code], check=True, env={**os.environ, **environment}
+    )

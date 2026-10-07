@@ -425,9 +425,7 @@ def _check_imu(
     result: dict[str, object] = {"samples": len(samples), "rates": rates}
 
     # Catches a timestamp domain mismatch, which is otherwise self-consistent.
-    placed = [
-        s.capture_monotonic for s in samples if s.capture_monotonic is not None
-    ]
+    placed = [s.capture_monotonic for s in samples if s.capture_monotonic is not None]
     if not placed:
         check.fail("inertial samples carry no clock, so they cannot be placed")
     elif video is not None and "first_monotonic" in video:
@@ -470,10 +468,7 @@ def _check_imu(
                 for s in samples
                 if s.stream == stream
                 and s.capture_monotonic is not None
-                and (
-                    window is None
-                    or window[0] <= s.capture_monotonic <= window[1]
-                )
+                and (window is None or window[0] <= s.capture_monotonic <= window[1])
             ]
         )
         if times.size > 2:

@@ -99,9 +99,7 @@ def _write_session(name: str, offset: float = 0.0) -> SessionPaths:
 def test_status_carries_what_the_page_polls_for_without_opening_anything(
     client,
 ) -> None:
-    body = client.get(
-        "/api/status", headers={"Origin": "http://localhost:5177"}
-    ).json()
+    body = client.get("/api/status", headers={"Origin": "http://localhost:5177"}).json()
     assert set(body) == {"recording", "storage", "devices"}
     assert body["devices"]["realsense"]["streams"]["align_to_color"] is False
     assert body["devices"]["respeaker"]["recording"] is False

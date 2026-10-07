@@ -147,14 +147,18 @@ def audio_levels(request: Request) -> StreamingResponse:
     def render(window: Window) -> str:
         mics = rms(window.mics)
         levels = {"mix": dbfs(float(rms(window.processed)))}
-        levels.update({f"mic{n + 1}": dbfs(float(level)) for n, level in enumerate(mics)})
+        levels.update(
+            {f"mic{n + 1}": dbfs(float(level)) for n, level in enumerate(mics)}
+        )
         return f"data: {json.dumps(levels)}\n\n"
 
     return StreamingResponse(
         _poll(
             request,
             tap,
-            lambda after: tap.latest(config.AUDIO_LEVEL_WINDOW_S, _STREAM_WAIT_S, after),
+            lambda after: tap.latest(
+                config.AUDIO_LEVEL_WINDOW_S, _STREAM_WAIT_S, after
+            ),
             lambda: config.AUDIO_LEVEL_HZ,
             render,
         ),

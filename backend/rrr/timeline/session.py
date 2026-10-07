@@ -415,7 +415,9 @@ class SessionPaths:
             SessionError: If it is not a session directory.
         """
         absolute = os.path.abspath(directory)
-        return SessionPaths.resolve(os.path.dirname(absolute), os.path.basename(absolute))
+        return SessionPaths.resolve(
+            os.path.dirname(absolute), os.path.basename(absolute)
+        )
 
     def _path(self, name: str) -> str:
         return os.path.join(self.directory, name)

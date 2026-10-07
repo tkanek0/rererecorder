@@ -69,9 +69,7 @@ def test_frames_the_camera_numbered_but_never_delivered_fail_the_check(
     tmp_path, make_frames, calibration
 ) -> None:
     """Even with every interval looking normal, a counter gap is a loss."""
-    paths, manifest = _session(
-        tmp_path, make_frames, calibration, [10, 11, 14, 15, 16]
-    )
+    paths, manifest = _session(tmp_path, make_frames, calibration, [10, 11, 14, 15, 16])
     check = Check()
 
     video = _check_video(paths, manifest, check)
@@ -115,4 +113,6 @@ def test_a_session_the_recorder_flagged_does_not_pass(small_session) -> None:
     assert "the direction was recorded and holds no readings" in problems
 
     empty = SessionManifest(session_id=manifest.session_id)
-    assert "neither device was recorded" in inspect_session(small_session, empty).problems
+    assert (
+        "neither device was recorded" in inspect_session(small_session, empty).problems
+    )

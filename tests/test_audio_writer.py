@@ -176,9 +176,7 @@ def test_a_driver_gap_is_filled_with_exactly_what_was_lost(tmp_path) -> None:
     blocks = []
     for n in range(20):
         skipped = lost_blocks if n >= 10 else 0
-        blocks.append(
-            FakeBlock(n * BLOCK, START + (n + skipped) * BLOCK_S, n + 1)
-        )
+        blocks.append(FakeBlock(n * BLOCK, START + (n + skipped) * BLOCK_S, n + 1))
     for n in range(0, 20, 5):
         tap.queue(_chunk(blocks[n : n + 5]))
 
@@ -323,7 +321,9 @@ def test_every_direction_reading_reaches_the_sidecar(tmp_path) -> None:
             # A burst between two writer passes, as a stalled pass would see.
             for n in range(5):
                 for listener in self.listeners:
-                    listener(Reading(angle=n, voice_activity=False, captured_at=START + n))
+                    listener(
+                        Reading(angle=n, voice_activity=False, captured_at=START + n)
+                    )
 
         def release(self) -> None:
             pass

@@ -53,8 +53,14 @@ PLANTED_OFFSET_S = 0.080
 def calibration() -> Calibration:
     """Calibration for the tiny synthetic frames."""
     intrinsics = Intrinsics(
-        width=WIDTH, height=HEIGHT, fx=32.0, fy=32.0,
-        ppx=32.0, ppy=24.0, model="brown_conrady", coeffs=(0.0,) * 5,
+        width=WIDTH,
+        height=HEIGHT,
+        fx=32.0,
+        fy=32.0,
+        ppx=32.0,
+        ppy=24.0,
+        model="brown_conrady",
+        coeffs=(0.0,) * 5,
     )
     return Calibration(
         color=intrinsics,
@@ -91,9 +97,11 @@ def session(tmp_path: Path, calibration: Calibration) -> SessionPaths:
 
     # Audio: noise, with an impulse at the movement's time plus the offset.
     seconds = frames_total / FPS
-    samples = np.random.default_rng(7).integers(
-        -40, 40, (int(seconds * RATE), CHANNELS)
-    ).astype("<i2")
+    samples = (
+        np.random.default_rng(7)
+        .integers(-40, 40, (int(seconds * RATE), CHANNELS))
+        .astype("<i2")
+    )
     start = int((MOVEMENT_FRAME / FPS + PLANTED_OFFSET_S) * RATE)
     samples[start : start + 160, :] = 12_000  # 10 ms of loud
 
@@ -107,7 +115,10 @@ def session(tmp_path: Path, calibration: Calibration) -> SessionPaths:
         clock_every=RATE,
         started_at=ClockPair(MONO, REAL),
         stopped_at=ClockPair(MONO + seconds, REAL + seconds),
-        clock_samples=[ClockPair(MONO, REAL), ClockPair(MONO + seconds, REAL + seconds)],
+        clock_samples=[
+            ClockPair(MONO, REAL),
+            ClockPair(MONO + seconds, REAL + seconds),
+        ],
     )
 
 

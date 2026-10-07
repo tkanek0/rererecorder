@@ -52,7 +52,20 @@ def _insert_batch(
         start = time.perf_counter()
         connection.execute(
             _INSERT,
-            (idx, float(idx), float(idx), float(idx), blob, None, None, None, None, None, None, None),
+            (
+                idx,
+                float(idx),
+                float(idx),
+                float(idx),
+                blob,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+            ),
         )
         durations.append(time.perf_counter() - start)
         if (idx + 1) % COMMIT_EVERY == 0:

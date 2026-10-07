@@ -75,6 +75,7 @@ DEFAULT_STREAMS = StreamConfig(
     motion=env_flag("RRR_MOTION", True),
 )
 
+
 def with_streams(current: StreamConfig, enabled: Mapping[str, bool]) -> StreamConfig:
     """Turn streams on or off; a stream turned on comes back at its configured size.
 
@@ -103,7 +104,9 @@ def with_streams(current: StreamConfig, enabled: Mapping[str, bool]) -> StreamCo
     return current.with_changes(**changes)
 
 
-def with_codecs(current: Mapping[str, str], choices: Mapping[str, str]) -> dict[str, str]:
+def with_codecs(
+    current: Mapping[str, str], choices: Mapping[str, str]
+) -> dict[str, str]:
     """Choose ``"compressed"`` or ``"raw"`` for streams; others keep their codec.
 
     Args:

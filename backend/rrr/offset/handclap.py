@@ -260,9 +260,7 @@ def _find_movement(
     Hands meeting is the fastest movement in a clap, so the peak lands on the
     clap's frame, to within one frame.
     """
-    window = [
-        (index, at) for index, at in times if abs(at - around) <= SEARCH_S
-    ]
+    window = [(index, at) for index, at in times if abs(at - around) <= SEARCH_S]
     if len(window) < 4:
         return None
 
@@ -280,10 +278,7 @@ def _find_movement(
         return None
 
     diffs = np.array(
-        [
-            np.abs(images[i][2] - images[i - 1][2]).mean()
-            for i in range(1, len(images))
-        ]
+        [np.abs(images[i][2] - images[i - 1][2]).mean() for i in range(1, len(images))]
     )
     peak = int(np.argmax(diffs))
     median = float(np.median(diffs)) or 1e-9

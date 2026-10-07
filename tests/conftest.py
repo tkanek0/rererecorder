@@ -196,13 +196,18 @@ def write_session(
             for sample in [*range(0, len(audio), step), len(audio)]:
                 clock.append(AudioClockPoint(sample, first + sample / rate).as_dict())
         tracks["audio"] = AudioTrack(
-            rate=rate, channels=audio.shape[1], samples=len(audio), first_monotonic=first
+            rate=rate,
+            channels=audio.shape[1],
+            samples=len(audio),
+            first_monotonic=first,
         )
     for path, entries in ((paths.doa, doa), (paths.events, events)):
         if entries:
             with JsonlWriter(path) as sidecar:
                 for entry in entries:
-                    sidecar.append(entry if isinstance(entry, dict) else entry.as_dict())
+                    sidecar.append(
+                        entry if isinstance(entry, dict) else entry.as_dict()
+                    )
     write_manifest(
         paths,
         SessionManifest(
@@ -223,8 +228,14 @@ SMALL_START = 1_000.0
 @pytest.fixture
 def small_session(tmp_path) -> SessionPaths:
     intrinsics = Intrinsics(
-        width=32, height=24, fx=16.0, fy=16.0, ppx=16.0, ppy=12.0,
-        model="brown_conrady", coeffs=(0.0,) * 5,
+        width=32,
+        height=24,
+        fx=16.0,
+        fy=16.0,
+        ppx=16.0,
+        ppy=12.0,
+        model="brown_conrady",
+        coeffs=(0.0,) * 5,
     )
     calibration = Calibration(
         color=intrinsics,

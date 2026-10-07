@@ -73,8 +73,7 @@ def main(argv: list[str] | None = None) -> int:
     offset, uncertainty = measurement.offset_s, measurement.uncertainty_s
     if offset is None or uncertainty is None:
         print(
-            "impulses were found but no matching movement was. Was the clap in "
-            "shot?",
+            "impulses were found but no matching movement was. Was the clap in shot?",
             file=sys.stderr,
         )
         return 1

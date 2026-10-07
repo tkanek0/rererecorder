@@ -48,8 +48,14 @@ def _frame_set(calibration: Calibration) -> Callable[[int], FrameSet]:
 def record(tmp_path, monkeypatch) -> Iterator[Callable[..., tuple]]:
     """Record a short session with the given fake devices, marking it once."""
     intrinsics = Intrinsics(
-        width=WIDTH, height=HEIGHT, fx=16.0, fy=16.0, ppx=16.0, ppy=12.0,
-        model="brown_conrady", coeffs=(0.0,) * 5,
+        width=WIDTH,
+        height=HEIGHT,
+        fx=16.0,
+        fy=16.0,
+        ppx=16.0,
+        ppy=12.0,
+        model="brown_conrady",
+        coeffs=(0.0,) * 5,
     )
     calibration = Calibration(
         color=intrinsics,
@@ -102,4 +108,6 @@ def test_a_device_that_fails_is_named_and_the_other_still_records(record) -> Non
 
     assert manifest.video is not None and manifest.video.frames > 10
     assert any(error.startswith("audio:") for error in manifest.errors)
-    assert "the recorder reported" in " ".join(inspect_session(paths, manifest).problems)
+    assert "the recorder reported" in " ".join(
+        inspect_session(paths, manifest).problems
+    )

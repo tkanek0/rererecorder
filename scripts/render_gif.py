@@ -81,22 +81,37 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("directory", help="recorded session directory")
     parser.add_argument(
-        "-o", "--output", default=DEFAULT_OUTPUT, help=f"GIF path (default: ./{DEFAULT_OUTPUT})"
+        "-o",
+        "--output",
+        default=DEFAULT_OUTPUT,
+        help=f"GIF path (default: ./{DEFAULT_OUTPUT})",
     )
     parser.add_argument("--volume", action="store_true", help="add the loudness strip")
-    parser.add_argument("--waveform", action="store_true", help="add the waveform strip")
+    parser.add_argument(
+        "--waveform", action="store_true", help="add the waveform strip"
+    )
     parser.add_argument(
         "--audio-channel",
         default="mix",
         help="mix (default), processed, or a zero-based WAV channel",
     )
-    parser.add_argument("--stride", type=int, default=15, help="use every Nth frame (default: 15)")
-    parser.add_argument("--width", type=int, default=360, help="GIF width in pixels (default: 360)")
     parser.add_argument(
-        "--frame-ms", type=int, default=80, help="display time per frame, 10 ms steps (default: 80)"
+        "--stride", type=int, default=15, help="use every Nth frame (default: 15)"
     )
     parser.add_argument(
-        "--window-s", type=float, default=0.5, help="waveform window in seconds (default: 0.5)"
+        "--width", type=int, default=360, help="GIF width in pixels (default: 360)"
+    )
+    parser.add_argument(
+        "--frame-ms",
+        type=int,
+        default=80,
+        help="display time per frame, 10 ms steps (default: 80)",
+    )
+    parser.add_argument(
+        "--window-s",
+        type=float,
+        default=0.5,
+        help="waveform window in seconds (default: 0.5)",
     )
     parser.add_argument(
         "--colours", type=int, default=96, help="palette size per frame (default: 96)"
@@ -121,7 +136,9 @@ def main(argv: list[str] | None = None) -> int:
     except (OSError, ValueError, SessionError, StreamError, av.FFmpegError) as error:
         parser.exit(1, f"render failed: {error}\n")
 
-    print(f"rendered {report.frames} frames from {report.duration_s:.3f} s to {report.output}")
+    print(
+        f"rendered {report.frames} frames from {report.duration_s:.3f} s to {report.output}"
+    )
     print(f"  audio: {report.audio_channel or 'none'}")
     print(f"  clock: {report.clock}")
     print(
@@ -182,7 +199,10 @@ def render(
         raise ValueError("the session has no video track")
 
     output = Path(output)
-    with replacing(output, overwrite) as temporary, ArchiveSource(paths.video) as archive:
+    with (
+        replacing(output, overwrite) as temporary,
+        ArchiveSource(paths.video) as archive,
+    ):
         times = archive.frame_times()
         clock_description = "recorded monotonic video and audio clocks"
         if not times:
@@ -217,7 +237,9 @@ def render(
 
         selected = times[::stride]
         images = (
-            _compose(archive, index, stamp, start, width, audio, volume, waveform, window_s)
+            _compose(
+                archive, index, stamp, start, width, audio, volume, waveform, window_s
+            )
             for index, stamp in selected
         )
         _encode(temporary, images, delay, colours)
@@ -329,7 +351,9 @@ def _encode(output: Path, images: Any, delay: int, colours: int) -> None:
         while image is not None:
             if image.shape[:2] != (height, width):
                 raise ValueError("every GIF frame must have the first frame's size")
-            frame = av.VideoFrame.from_ndarray(np.ascontiguousarray(image), format="bgr24")
+            frame = av.VideoFrame.from_ndarray(
+                np.ascontiguousarray(image), format="bgr24"
+            )
             frame.pts = pts
             frame.time_base = GIF_TIME_BASE
             source.push(frame)

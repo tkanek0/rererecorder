@@ -41,7 +41,6 @@ STALL_LIMIT_S = 5.0
 MOTION_BUFFER = 4096
 
 
-
 class StreamError(RuntimeError):
     """The stream stopped delivering frames and will not recover on its own."""
 
@@ -132,7 +131,9 @@ def _motion_intrinsics(profile: rs.stream_profile) -> MotionIntrinsics | None:
 _METADATA_FIELDS = tuple(rs.frame_metadata_value.__members__.values())
 
 
-def _read_metadata(frame: rs.frame, fields: tuple[rs.frame_metadata_value, ...]) -> dict[str, int]:
+def _read_metadata(
+    frame: rs.frame, fields: tuple[rs.frame_metadata_value, ...]
+) -> dict[str, int]:
     """Read the given metadata fields off a frame.
 
     Args:
@@ -515,8 +516,7 @@ class LiveSource:
             wanted = []
             for stream in (rs.stream.accel, rs.stream.gyro):
                 candidates = [
-                    p for p in sensor.get_stream_profiles()
-                    if p.stream_type() == stream
+                    p for p in sensor.get_stream_profiles() if p.stream_type() == stream
                 ]
                 if candidates:
                     wanted.append(max(candidates, key=lambda p: p.fps()))
@@ -674,9 +674,7 @@ class LiveSource:
             try:
                 sensor.set_option(option, value)
             except RuntimeError as exc:
-                logger.warning(
-                    "could not set %s to %s: %s", option.name, value, exc
-                )
+                logger.warning("could not set %s to %s: %s", option.name, value, exc)
 
         got = {
             option.name: sensor.get_option(option)
@@ -726,9 +724,7 @@ class LiveSource:
                     return
                 waited = time.monotonic() - last_frame_at
                 if waited > STALL_LIMIT_S:
-                    raise StreamError(
-                        f"no frames for {waited:.1f}s: {exc}"
-                    ) from exc
+                    raise StreamError(f"no frames for {waited:.1f}s: {exc}") from exc
                 continue
 
             # The axis the audio is also on; the SDK's own timestamps are
@@ -871,9 +867,9 @@ class LiveSource:
         Anything other than ``global_time`` is logged as a warning; see
         docs/features.md "Timing".
         """
-        self._timestamp_domain = str(frame.get_frame_timestamp_domain()).rsplit(
-            ".", 1
-        )[-1]
+        self._timestamp_domain = str(frame.get_frame_timestamp_domain()).rsplit(".", 1)[
+            -1
+        ]
         if self._timestamp_domain == "global_time":
             logger.info(
                 "frame timestamps are epoch milliseconds (global_time), one "
@@ -886,8 +882,7 @@ class LiveSource:
             )
         else:
             logger.warning(
-                "frame timestamps are in domain %r, not mapped to the host's "
-                "clock",
+                "frame timestamps are in domain %r, not mapped to the host's clock",
                 self._timestamp_domain,
             )
 

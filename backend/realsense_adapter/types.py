@@ -192,9 +192,7 @@ class Calibration:
                 self.depth_to_color.as_dict() if self.depth_to_color else None
             ),
             "aligned": self.aligned,
-            "infrared": [
-                entry.as_dict() if entry else None for entry in self.infrared
-            ],
+            "infrared": [entry.as_dict() if entry else None for entry in self.infrared],
             "depth_to_infrared": [
                 entry.as_dict() if entry else None for entry in self.depth_to_infrared
             ],

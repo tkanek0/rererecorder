@@ -134,8 +134,12 @@ class AudioTimeline:
 
         self._points = sorted(points, key=lambda point: point.sample)
         self._rate = rate
-        self._samples = np.array([point.sample for point in self._points], dtype=np.float64)
-        self._times = np.array([point.monotonic for point in self._points], dtype=np.float64)
+        self._samples = np.array(
+            [point.sample for point in self._points], dtype=np.float64
+        )
+        self._times = np.array(
+            [point.monotonic for point in self._points], dtype=np.float64
+        )
 
         if len(self._points) >= 2:
             # Seconds per sample and the intercept, by least squares.

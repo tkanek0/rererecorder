@@ -151,9 +151,7 @@ class SessionRecorder:
         self._write()
 
         if self._video is None and self._audio is None:
-            raise RuntimeError(
-                "neither device could be recorded: " + "; ".join(errors)
-            )
+            raise RuntimeError("neither device could be recorded: " + "; ".join(errors))
 
         self._monitor = threading.Thread(
             target=self._run_monitor, name="session-monitor", daemon=True
@@ -383,9 +381,7 @@ class SessionRecorder:
             "session_id": self._session_id,
             "seconds": self._elapsed(),
             "size_bytes": self._paths.size_bytes() if self._paths else 0,
-            "video": (
-                None if video is None else {**asdict(video), "fps": video.fps}
-            ),
+            "video": (None if video is None else {**asdict(video), "fps": video.fps}),
             "audio": (
                 None if audio is None else {**asdict(audio), "seconds": audio.seconds}
             ),
@@ -478,7 +474,11 @@ def _summary(manifest: SessionManifest) -> str:
     if manifest.audio is not None:
         parts.append(
             f"{manifest.audio.seconds:.1f} s audio"
-            + (f", {manifest.audio.filled} samples filled" if manifest.audio.filled else "")
+            + (
+                f", {manifest.audio.filled} samples filled"
+                if manifest.audio.filled
+                else ""
+            )
         )
     if manifest.duration_s is not None:
         parts.append(f"over {manifest.duration_s:.1f} s")

@@ -67,9 +67,7 @@ def test_a_rate_error_is_measured_back_and_leaves_no_residual(ppm: float) -> Non
 # -- dropped audio ------------------------------------------------------------
 
 
-def _with_unfilled_drop(
-    blocks: int, at_block: int, lost: int
-) -> list[AudioClockPoint]:
+def _with_unfilled_drop(blocks: int, at_block: int, lost: int) -> list[AudioClockPoint]:
     """Points from a recording that dropped ``lost`` samples and did not fill them.
 
     Every block after the drop lags its file position by ``lost / rate`` seconds.
@@ -135,7 +133,9 @@ def test_jitter_appears_in_the_residual_and_not_in_the_rate() -> None:
     rng = np.random.default_rng(20260901)
     jitter = rng.normal(0.0, 0.00035, 2000)
     points = [
-        AudioClockPoint(sample=n * BLOCK, monotonic=START + n * BLOCK / RATE + jitter[n])
+        AudioClockPoint(
+            sample=n * BLOCK, monotonic=START + n * BLOCK / RATE + jitter[n]
+        )
         for n in range(2000)
     ]
     report = AudioTimeline(points, RATE).report()
@@ -167,9 +167,7 @@ def test_writer_and_reader_round_trip(tmp_path) -> None:
 
 def test_points_are_sorted_by_position() -> None:
     timeline = AudioTimeline(list(reversed(_ideal(10))), RATE)
-    assert [point.sample for point in timeline.points] == [
-        n * BLOCK for n in range(10)
-    ]
+    assert [point.sample for point in timeline.points] == [n * BLOCK for n in range(10)]
 
 
 def test_empty_and_invalid_inputs_are_refused() -> None:

@@ -129,7 +129,6 @@ def find_tuning(
     device = usb.core.find(idVendor=vendor_id, idProduct=product_id, backend=backend)
     if device is None:
         raise DeviceNotFound(
-            f"no USB device {vendor_id:04x}:{product_id:04x} - is the array "
-            "plugged in?"
+            f"no USB device {vendor_id:04x}:{product_id:04x} - is the array plugged in?"
         )
     return Tuning(device, backend)

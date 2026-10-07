@@ -240,9 +240,9 @@ from rrr.video import ArchiveSource
 with ArchiveSource("data/sessions/x/video.rrdb") as archive:
     for frames in archive.frames():
         frames.received_monotonic  # the common axis
-        frames.depth               # (720, 1280) uint16, raw z16
-        frames.color               # (800, 1280) uint16 YUYV
-        frames.infrared            # (left, right), each (720, 1280) uint8
+        frames.depth  # (720, 1280) uint16, raw z16
+        frames.color  # (800, 1280) uint16 YUYV
+        frames.infrared  # (left, right), each (720, 1280) uint8
 ```
 
 Or without the SDK, since the container is SQLite:

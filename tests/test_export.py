@@ -110,7 +110,9 @@ def session(tmp_path: Path) -> SessionPaths:
         # Two inertial samples per frame, so both streams have rows. Half a
         # frame later, so a range boundary never falls on one.
         motion += [
-            MotionSample(stream, (capture + 0.5 / FPS + OFFSET) * 1000.0, float(n), 1.0, 9.8)
+            MotionSample(
+                stream, (capture + 0.5 / FPS + OFFSET) * 1000.0, float(n), 1.0, 9.8
+            )
             for stream in ("accel", "gyro")
         ]
         frames.append(
@@ -385,15 +387,13 @@ def test_a_filled_in_rig_reaches_the_export(session, tmp_path) -> None:
     from rrr.timeline import read_manifest
 
     manifest = read_manifest(session)
-    manifest.rig = (
-        Rig(
-            source="nominal",
-            rotation=(1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0),
-            translation=(0.0, -0.05, 0.0),
-            microphones=((0.0463, 0.0, 0.0), (0.0, 0.0463, 0.0)),
-            channels=(1, 2),
-            description="array on top of the camera",
-        )
+    manifest.rig = Rig(
+        source="nominal",
+        rotation=(1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0),
+        translation=(0.0, -0.05, 0.0),
+        microphones=((0.0463, 0.0, 0.0), (0.0, 0.0463, 0.0)),
+        channels=(1, 2),
+        description="array on top of the camera",
     )
     write_manifest(session, manifest)
 
@@ -516,9 +516,7 @@ def test_the_validator_runs_without_rrr(session, tmp_path) -> None:
         f"sys.argv = ['validate_export', {str(out)!r}];"
         f"runpy.run_path({str(script)!r}, run_name='__main__')"
     )
-    blocker = (
-        "import sys; sys.modules['rrr'] = None;"  # any import of rrr now fails
-    )
+    blocker = "import sys; sys.modules['rrr'] = None;"  # any import of rrr now fails
     result = subprocess.run(
         [sys.executable, "-c", blocker + code],
         capture_output=True,

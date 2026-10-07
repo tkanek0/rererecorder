@@ -26,7 +26,9 @@ MONO = 1_322_228.023434
 REAL = 1_788_250_182.059000
 
 
-def _manifest(session_id: str = "2026-09-01_17-30-00".replace(":", "-")) -> SessionManifest:
+def _manifest(
+    session_id: str = "2026-09-01_17-30-00".replace(":", "-"),
+) -> SessionManifest:
     """A manifest with both tracks and a start and stop anchor."""
     return SessionManifest(
         session_id=session_id,
@@ -84,9 +86,7 @@ def test_manifest_round_trips_through_the_file_and_rewrites_in_place(
     write_manifest(paths, manifest)
     assert read_manifest(paths).video == VideoTrack(frames=1200)
     assert read_manifest(paths).duration_s is None
-    assert sorted(p.name for p in (tmp_path / "session1").iterdir()) == [
-        "session.json"
-    ]
+    assert sorted(p.name for p in (tmp_path / "session1").iterdir()) == ["session.json"]
 
 
 def test_a_manifest_it_cannot_read_is_reported(tmp_path: Path) -> None:
@@ -137,9 +137,7 @@ def test_unusable_session_ids_are_refused(tmp_path, bad: str) -> None:
         SessionPaths.resolve(str(tmp_path), bad)
 
 
-@pytest.mark.parametrize(
-    "good", ["2026-09-01_17-30-00", "session1", "A", "a-b_c-123"]
-)
+@pytest.mark.parametrize("good", ["2026-09-01_17-30-00", "session1", "A", "a-b_c-123"])
 def test_usable_session_ids_are_accepted(tmp_path, good: str) -> None:
     paths = SessionPaths.create(str(tmp_path), good)
     assert paths.session_id == good

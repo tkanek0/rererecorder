@@ -67,7 +67,9 @@ def _session(tmp_path, times: list[float]) -> SessionPaths:
     with JsonlWriter(paths.events) as writer:
         for index, monotonic in enumerate(times):
             writer.append(
-                Event(monotonic=monotonic, realtime=1e9 + monotonic, label=f"m{index}").as_dict()
+                Event(
+                    monotonic=monotonic, realtime=1e9 + monotonic, label=f"m{index}"
+                ).as_dict()
             )
     return paths
 
@@ -79,7 +81,9 @@ def test_inspect_fails_a_mark_neither_track_spans(tmp_path) -> None:
     video = {"first_monotonic": 100.0, "last_monotonic": 150.0}
 
     check = Check()
-    result = _check_events(_session(tmp_path / "a", [105.0, 140.0]), audio, video, check)
+    result = _check_events(
+        _session(tmp_path / "a", [105.0, 140.0]), audio, video, check
+    )
     assert result is not None and result["marks"] == 2
     assert check.problems == []
 
@@ -88,4 +92,7 @@ def test_inspect_fails_a_mark_neither_track_spans(tmp_path) -> None:
     assert any("outside the recording" in problem for problem in check.problems)
 
     # Nobody marked anything: nothing to say.
-    assert _check_events(SessionPaths.create(str(tmp_path), "c"), audio, None, Check()) is None
+    assert (
+        _check_events(SessionPaths.create(str(tmp_path), "c"), audio, None, Check())
+        is None
+    )

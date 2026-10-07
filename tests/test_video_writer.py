@@ -123,7 +123,10 @@ def test_every_published_set_is_written_and_counted_on_its_own_axis(
     assert writer.stats.frames == 16
     with ArchiveSource(path) as archive:
         restored = list(archive.frames())
-    assert [np.array_equal(b.depth, o.depth) for o, b in zip(published, restored, strict=True)] == [True] * 16
+    assert [
+        np.array_equal(b.depth, o.depth)
+        for o, b in zip(published, restored, strict=True)
+    ] == [True] * 16
 
 
 def test_a_camera_that_never_delivers_releases_the_hub(tmp_path, hub) -> None:

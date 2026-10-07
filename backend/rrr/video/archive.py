@@ -162,7 +162,9 @@ def encode(image: np.ndarray, codec: str) -> bytes:
     if codec == "png":
         if image.ndim == 3:
             image = cv2.cvtColor(image, cv2.COLOR_RGB2BGR)  # what OpenCV writes
-        ok, buffer = cv2.imencode(".png", image, [cv2.IMWRITE_PNG_COMPRESSION, PNG_LEVEL])
+        ok, buffer = cv2.imencode(
+            ".png", image, [cv2.IMWRITE_PNG_COMPRESSION, PNG_LEVEL]
+        )
         if not ok:
             raise RuntimeError("PNG encoding failed")
         return buffer.tobytes()
@@ -337,7 +339,9 @@ class ArchiveWriter:
             if timeout is None:
                 self._queue.put_nowait(frames)
             else:
-                self._queue.put(frames, timeout=None if timeout == float("inf") else timeout)
+                self._queue.put(
+                    frames, timeout=None if timeout == float("inf") else timeout
+                )
             return True
         except queue.Full:
             with self._lock:
@@ -624,8 +628,7 @@ class ArchiveSource:
         if version != FORMAT_VERSION:
             connection.close()
             raise StreamError(
-                f"{self._path} is format version {version}; this reads "
-                f"{FORMAT_VERSION}"
+                f"{self._path} is format version {version}; this reads {FORMAT_VERSION}"
             )
         self._codecs = dict(self._meta["codecs"])
         raw = self._meta["calibration"]
@@ -698,7 +701,9 @@ class ArchiveSource:
         """How many frames the archive holds."""
         if self._connection is None:
             return 0
-        return int(self._connection.execute("SELECT COUNT(*) FROM frames").fetchone()[0])
+        return int(
+            self._connection.execute("SELECT COUNT(*) FROM frames").fetchone()[0]
+        )
 
     def _require_open(self) -> sqlite3.Connection:
         """Return the connection.
@@ -747,10 +752,14 @@ class ArchiveSource:
         Raises:
             StreamError: If the archive is not open.
         """
-        row = self._require_open().execute(
-            "SELECT MIN(idx), MAX(idx), MIN(received_monotonic), "
-            "MAX(received_monotonic) FROM frames"
-        ).fetchone()
+        row = (
+            self._require_open()
+            .execute(
+                "SELECT MIN(idx), MAX(idx), MIN(received_monotonic), "
+                "MAX(received_monotonic) FROM frames"
+            )
+            .fetchone()
+        )
         if row is None or row[0] is None:
             return None
         first, last, start, end = row
@@ -792,10 +801,14 @@ class ArchiveSource:
         Raises:
             StreamError: If the archive is not open.
         """
-        rows = self._require_open().execute(
-            "SELECT stream, COUNT(*), MIN(timestamp_ms), MAX(timestamp_ms) "
-            "FROM imu GROUP BY stream"
-        ).fetchall()
+        rows = (
+            self._require_open()
+            .execute(
+                "SELECT stream, COUNT(*), MIN(timestamp_ms), MAX(timestamp_ms) "
+                "FROM imu GROUP BY stream"
+            )
+            .fetchall()
+        )
         rates: dict[str, float] = {}
         for stream, count, first, last in rows:
             span = (last - first) / 1000.0
@@ -838,7 +851,9 @@ class ArchiveSource:
 
     def _to_frame_set(self, row: tuple) -> FrameSet:
         """Turn one row selected as ``_FRAME_COLUMNS`` then the blobs into a FrameSet."""
-        idx, color_timestamp_ms, depth_timestamp_ms, received_monotonic, metadata = row[:5]
+        idx, color_timestamp_ms, depth_timestamp_ms, received_monotonic, metadata = row[
+            :5
+        ]
         depth_blob, color_blob, y_blob, u_blob, v_blob, ir1, ir2 = row[5:12]
         color, color_format = self._decode_color(color_blob, y_blob, u_blob, v_blob)
         return FrameSet(

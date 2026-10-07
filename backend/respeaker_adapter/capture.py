@@ -305,7 +305,8 @@ def _resolve_device(name: str, channels: int, rate: int) -> int:
         if device["max_input_channels"] > 0 and needle in str(device["name"]).lower()
     ]
     usable = [
-        (index, device) for index, device in matches
+        (index, device)
+        for index, device in matches
         if device["max_input_channels"] >= channels
     ]
     if not usable:

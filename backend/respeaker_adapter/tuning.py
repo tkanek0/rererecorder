@@ -3,12 +3,15 @@
 The wire format follows Seeed's ``usb_4_mic_array`` (Apache 2.0):
 https://github.com/respeaker/usb_4_mic_array/blob/master/tuning.py
 
-Needs write access to the USB device node; see :data:`UDEV_HINT`.
+Needs the libusb-1.0 library and access to the device: on Linux a writable
+node (:data:`UDEV_HINT`), on Windows WinUSB bound to the control interface
+(:data:`WINUSB_HINT`).
 """
 
 from __future__ import annotations
 
 import struct
+import sys
 
 import usb.backend.libusb1
 import usb.core
@@ -28,10 +31,14 @@ _VOICEACTIVITY = (19, 32)
 
 
 class AccessDenied(RuntimeError):
-    """Raised when the device is present but its node cannot be written to.
+    """Raised when the device is present but cannot be opened for control.
 
-    Audio capture is unaffected; only the tuning interface needs the rule.
+    Audio capture is unaffected; only the tuning interface needs the access.
     """
+
+
+class LibusbMissing(RuntimeError):
+    """Raised when no libusb-1.0 library can be loaded."""
 
 
 #: Printed whenever a control transfer is refused: the node is root-only by default.
@@ -45,6 +52,14 @@ Grant access once:
     sudo udevadm trigger --action=add --subsystem-match=usb
 
 The last line re-applies the rule to the array without unplugging it. Audio
+capture works without any of this."""
+
+#: Printed on Windows, where libusb can open only an interface bound to WinUSB.
+WINUSB_HINT = """USB control transfer failed: the array's control interface has no WinUSB driver.
+
+Bind WinUSB to "SEEED Control (Interface 3)" with Zadig, as an administrator
+(docs/windows-native.md "Direction of arrival needs WinUSB"). Never the
+composite device or Interface 0, which would take the audio away. Audio
 capture works without any of this."""
 
 
@@ -98,10 +113,33 @@ class Tuning:
 
 def _translate(error: usb.core.USBError) -> Exception:
     """Turn a libusb errno into something that says what to do about it."""
-    # errno 13 is EACCES: the device is there, the node is not ours to write.
-    if getattr(error, "errno", None) == 13:
+    # EACCES on Linux: the node is not ours to write. On Windows libusb reports
+    # an interface without a supported driver as NOT_FOUND, which pyusb maps to 2.
+    errno = getattr(error, "errno", None)
+    if errno == 13:
         return AccessDenied(UDEV_HINT)
+    if errno == 2 and sys.platform == "win32":
+        return AccessDenied(WINUSB_HINT)
     return error
+
+
+def _load_libusb() -> object:
+    """Load libusb-1.0, from the ``libusb-package`` wheel where it is installed.
+
+    Raises:
+        LibusbMissing: If no library can be found.
+    """
+    try:
+        import libusb_package
+    except ImportError:
+        find_library = None
+    else:
+        find_library = libusb_package.find_library
+    if usb.backend.libusb1.get_backend(find_library=find_library) is None:
+        raise LibusbMissing(
+            "libusb-1.0 not found: install it (Windows: `uv sync` brings libusb-package)"
+        )
+    return usb.backend.libusb1._lib
 
 
 def find_tuning(
@@ -117,6 +155,7 @@ def find_tuning(
         A :class:`Tuning` bound to the device.
 
     Raises:
+        LibusbMissing: If no libusb-1.0 library can be loaded.
         DeviceNotFound: If no matching device is attached.
 
     Each call enumerates through a libusb context of its own: pyusb's shared
@@ -124,8 +163,7 @@ def find_tuning(
     in a container, so a replugged array would stay unreachable
     (docs/decisions.md 29). ``_LibUSB`` is pyusb's private context wrapper.
     """
-    usb.backend.libusb1.get_backend()  # loads the library once
-    backend = usb.backend.libusb1._LibUSB(usb.backend.libusb1._lib)
+    backend = usb.backend.libusb1._LibUSB(_load_libusb())
     device = usb.core.find(idVendor=vendor_id, idProduct=product_id, backend=backend)
     if device is None:
         raise DeviceNotFound(

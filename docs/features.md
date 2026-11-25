@@ -466,3 +466,6 @@ through when it is set.
 - **Windows drops frames** with more than color alone, and Media Foundation
   stamps color and depth independently. What is lost is recorded in the
   session like anywhere else ([windows-native.md](windows-native.md)).
+- **The direction on Windows** needs WinUSB bound to the array's control
+  interface, which takes administrator rights; until then `doa.jsonl` stays
+  empty ([windows-native.md](windows-native.md#direction-of-arrival-needs-winusb)).

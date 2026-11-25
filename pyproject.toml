@@ -12,6 +12,7 @@ dependencies = [
     "fastapi>=0.141.1",
     "uvicorn[standard]>=0.52.4",
     "av>=18.1.0",
+    "libusb-package>=1.0.30.1 ; sys_platform == 'win32'",
 ]
 
 [project.scripts]

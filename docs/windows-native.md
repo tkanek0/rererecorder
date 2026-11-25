@@ -279,18 +279,49 @@ understood startup transient trips it on Windows; not adjusted, since it is
 not evidence of an ongoing problem and the repository's practice is to
 explain a flagged number rather than silence the check that found it.
 
-### Still not investigated: direction of arrival
+### Direction of arrival needs WinUSB
 
-`doa read failed: No backend available` was seen throughout this
-investigation's own test recordings, with the array physically attached -
-unlike the `server-preview-test` run in the appendix below, where the same
-message meant the array was simply not plugged in. `backend/respeaker_adapter/doa.py`'s
-`pyusb` backend needs a libusb-compatible driver (WinUSB, or Zadig) bound to
-the array's control interface, which this machine does not have installed.
-Not investigated further here: it was out of scope for what this session set
-out to verify (the audio *clock*, not direction estimation), and is left as
-a known gap the way §3's own investigation left `FORCE_RSUSB_BACKEND`
-alone until it was actually needed.
+The direction readout (`backend/respeaker_adapter/tuning.py`) talks to the
+chip over USB control transfers through `pyusb`, and on Windows that takes two
+things the audio path does not:
+
+1. **The libusb-1.0 library.** Windows ships none, so `pyusb` found no backend
+   and the readout failed as `'NoneType' object has no attribute
+   'libusb_init'` (earlier, `No backend available`). `libusb-package` is now a
+   Windows-only dependency, so `uv sync` brings the DLL; a missing library is
+   reported as `libusb-1.0 not found`.
+2. **WinUSB bound to the control interface.** The array is a composite device:
+   Interface 0 is the audio (UAC1.0, `wdma_usb.inf`), Interface 3 is
+   "SEEED Control" and Interface 4 "SEEED DFU". Windows binds no driver to 3
+   or 4 (`pnputil /enum-devices /connected` shows code 28,
+   `CM_PROB_FAILED_INSTALL`), and libusb on Windows opens only an interface
+   bound to WinUSB, libusbK or libusb0. Without it the array enumerates but
+   every transfer fails with `[Errno 2] Entity not found`, now reported with
+   the steps below.
+
+Binding the driver needs administrator rights, once per machine:
+
+1. Download Zadig (<https://zadig.akeo.ie/>) and run it as administrator,
+   with the array plugged in.
+2. *Options > List All Devices*.
+3. Pick **SEEED Control (Interface 3)** from the list. Not "ReSpeaker 4 Mic
+   Array (UAC1.0)", not "Interface 0", not a "USB Composite Device" entry:
+   replacing any of those takes the audio away.
+4. Choose **WinUSB** as the target driver and press *Install Driver*.
+5. Check: `pnputil /enum-devices /connected` lists `MI_03` without a problem
+   code, the audio device is still there, and the page's array card shows a
+   direction.
+
+Undo, if needed: Device Manager > the SEEED Control device > *Uninstall
+device*, ticking *Delete the driver software*.
+
+Until the driver is bound, a session records audio normally and an empty
+`doa.jsonl`, which inspection reports as a direction with no readings.
+
+On the lab's Windows laptop this is **not done, by choice** (2026-11-25):
+the account has no administrator rights, so Windows sessions carry no chip
+direction. The four raw microphone channels are recorded regardless, so a
+direction can still be estimated from them downstream.
 
 ### What this changes for the "actual fix" section below
 
@@ -620,9 +651,9 @@ thread and a poller.
   show ongoing loss once steady state is reached - no USB bandwidth or CPU
   contention found between the two devices, or cost from the server's own
   polling, at least at this scale. What is left, deliberately not chased this
-  session: direction of arrival still fails outright on this machine
+  session: direction of arrival still failed outright on this machine
   (`doa read failed: No backend available`, a missing libusb backend,
-  unrelated to the clock work above), and a live MJPEG preview was not
+  unrelated to the clock work above; see "Direction of arrival needs WinUSB"), and a live MJPEG preview was not
   attached during the combined run the way decision 22's 73-minute
   server-preview test attached one for video alone.
 * **WSL2's usbip throughput ceiling** (~75-85% of the 30 fps / 163 MB/s

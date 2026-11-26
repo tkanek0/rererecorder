@@ -128,6 +128,16 @@ def test_the_array_reads_as_recorded_only_while_a_session_records_it(client) -> 
     assert respeaker()["recording"] is True
 
 
+def test_a_failed_direction_leaves_the_array_working(client) -> None:
+    """The audio records without the direction, so only the direction fails."""
+    api_app.state.recorder.doa.failed = True
+    api_app.state.recorder.doa.error = "no WinUSB driver"
+
+    respeaker = client.get("/api/status").json()["devices"]["respeaker"]
+    assert respeaker["failed"] is False
+    assert respeaker["doa_error"] == "no WinUSB driver"
+
+
 def test_frame_headers_are_readable_cross_origin(client) -> None:
     """The page is served from another port; unlisted headers stay hidden."""
     response = client.get("/api/status", headers={"Origin": "http://localhost:5177"})

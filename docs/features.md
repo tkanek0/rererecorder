@@ -157,7 +157,8 @@ README.
 - **The array** - each microphone's level, the chip's direction estimate
   (drawn in the same unmeasured convention as the microphones, so its zero is a
   guess), and whether the next recording records the array at all and, if so,
-  its direction. Its sound
+  its direction. A direction readout that fails is shown on its own line; the
+  array is marked failed only when its audio is. Its sound
   can be listened to live, muted until the speaker button in the card's corner
   is pressed: one channel at a time, chosen by clicking a microphone's circle
   on the diagram or the centre one for the processed channel, and outlined

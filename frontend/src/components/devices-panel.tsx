@@ -512,7 +512,12 @@ export const DevicesPanel = ({ devices, settings, recording, onChanged }: Props)
             {respeaker.connected && respeaker.failed && respeaker.error ? (
               <p className="error">{respeaker.error}</p>
             ) : null}
-            {respeaker.failed || !respeaker.connected ? (
+            {respeaker.connected && respeaker.doa_error ? (
+              <p className="note" title={respeaker.doa_error}>
+                Direction unavailable: {respeaker.doa_error.split('\n')[0]}
+              </p>
+            ) : null}
+            {respeaker.failed || respeaker.doa_error || !respeaker.connected ? (
               <ReconnectButton name="respeaker" recording={recording} />
             ) : null}
             {listenError ? <p className="error">{listenError}</p> : null}

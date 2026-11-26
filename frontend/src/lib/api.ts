@@ -113,8 +113,7 @@ export type RespeakerDeviceStatus = {
   host_api: string | null;
   channels: number | null;
   rate: number | null;
-  /** Whether the audio stream or the direction readings failed. See
-   * `reconnectDevice`. */
+  /** Whether the audio stream failed. See `reconnectDevice`. */
   failed: boolean;
   error: string | null;
   recording: boolean;
@@ -125,6 +124,8 @@ export type RespeakerDeviceStatus = {
   doa_poll_hz: number;
   /** Whether a recording of the array records the direction too. */
   doa_recorded: boolean;
+  /** Why the direction readout failed, or null. The audio is unaffected. */
+  doa_error: string | null;
 };
 
 /** A device the page can ask the server to reconnect. */

@@ -72,20 +72,21 @@ def _realsense_device() -> dict[str, Any]:
 def _respeaker_device() -> dict[str, Any]:
     """Describe the array as PortAudio currently sees it, recording or not.
 
-    ``failed`` covers both the audio and the direction taps.
+    ``failed`` and ``error`` are the audio's alone; the direction's failure is
+    ``doa_error``, so a readout that cannot work here does not mark the array
+    failed while its audio records.
     """
     found = probe_audio(recording_config.AUDIO_DEVICE)
     tap = state.recorder.tap
     doa = state.recorder.doa
-    failures = [t.error for t in (tap, doa) if t.failed]
     return {
         "connected": found.connected,
         "name": found.name,
         "host_api": found.host_api,
         "channels": found.channels,
         "rate": found.rate,
-        "failed": bool(failures),
-        "error": failures[0] if failures else found.error,
+        "failed": tap.failed,
+        "error": tap.error if tap.failed else found.error,
         # Open is not recorded: the page's level meter opens the array too.
         "recording": state.recorder.recording and tap.active,
         "overruns": tap.overruns,
@@ -93,6 +94,7 @@ def _respeaker_device() -> dict[str, Any]:
         "block_size": tap.block_size,
         "doa_poll_hz": recording_config.DOA_POLL_HZ,
         "doa_recorded": state.recorder.record_doa,
+        "doa_error": doa.error if doa.failed else None,
     }
 
 

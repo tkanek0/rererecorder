@@ -221,7 +221,12 @@ export type Settings = {
   codecs: Record<string, string>;
   /** Whether the next recording records the array. */
   audio: boolean;
+  /** Whether a recording of the array records the chip's direction too. */
+  doa: boolean;
 };
+
+/** A part of the array the page can choose to record or not. */
+export type RecordedPart = 'audio' | 'doa';
 
 /** A stream whose archive codec can be chosen from the page. */
 export type StreamName = 'color' | 'depth' | 'infrared';
@@ -333,15 +338,17 @@ export const setStreams = (
   });
 
 /**
- * Choose whether the next recording records the array. The live view of it
- * stays either way.
+ * Choose whether the next recording records the array, or its direction.
+ * The live view stays either way. A direction left off is not attempted:
+ * the session gets `doa: false` and no `doa.jsonl`.
  *
- * @param audio Whether to record it. Refused while recording.
+ * @param part What to record or not.
+ * @param recorded Whether to record it. Refused while recording.
  */
-export const setRecordAudio = (audio: boolean): Promise<Settings> =>
+export const setRecorded = (part: RecordedPart, recorded: boolean): Promise<Settings> =>
   request<Settings>('/api/settings', {
     method: 'PUT',
-    body: JSON.stringify({ audio }),
+    body: JSON.stringify({ [part]: recorded }),
   });
 
 /**

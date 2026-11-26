@@ -156,7 +156,8 @@ README.
   Only a stream being captured, and so recorded, can be previewed.
 - **The array** - each microphone's level, the chip's direction estimate
   (drawn in the same unmeasured convention as the microphones, so its zero is a
-  guess), and whether the next recording records the array at all. Its sound
+  guess), and whether the next recording records the array at all and, if so,
+  its direction. Its sound
   can be listened to live, muted until the speaker button in the card's corner
   is pressed: one channel at a time, chosen by clicking a microphone's circle
   on the diagram or the centre one for the processed channel, and outlined
@@ -291,6 +292,9 @@ known. Two seconds without a block count as a failure: the recording carries on
 with the camera, `session.json` names the error, and the page's Reconnect opens
 the array again once the recording is stopped. A failed direction readout is
 named in `errors` the same way, and so is anything else a device reports.
+That keeps the two cases apart in `session.json`: a direction left off is
+`doa: false` with no `doa.jsonl`, one attempted and failed is `doa: true` with
+an empty `doa.jsonl` and the reason in `errors`.
 
 ## Marks
 
@@ -426,7 +430,8 @@ without a WAV is an error, not a silent omission.
 ## Configuration
 
 Everything is read from the environment once, at start; the page can change the
-streams, codecs, directory and whether the array is recorded between recordings.
+streams, codecs, directory and whether the array and its direction are recorded
+between recordings.
 Flags take `1`/`0`. In the container, `compose.yaml` passes each of these
 through when it is set.
 
@@ -440,7 +445,7 @@ through when it is set.
 | `RRR_EMITTER` | `on` | `on`, `off` or `alternating` ([The projector](#the-projector)) |
 | `RRR_DEPTH_CODEC`, `RRR_COLOR_CODEC`, `RRR_INFRARED_CODEC` | `compressed` | `compressed` or `raw` (decision 22) |
 | `RRR_SERIAL` | first found | which camera to open |
-| `RRR_VIDEO`, `RRR_AUDIO`, `RRR_DOA` | `1` | whether each is recorded at all; the page can change the audio's. The live views work either way |
+| `RRR_VIDEO`, `RRR_AUDIO`, `RRR_DOA` | `1` | whether each is recorded at all; the page can change the audio's and the direction's. The live views work either way |
 | `RRR_AUDIO_DEVICE` | `ReSpeaker` | part of the array's name as PortAudio lists it |
 | `RRR_AUDIO_BLOCK_SIZE`, `RRR_AUDIO_WINDOW_S` | `256`, `10` | samples per capture block; seconds kept in memory |
 | `RRR_AUDIO_DOA_POLL_HZ` | `15` | how often the direction is read |

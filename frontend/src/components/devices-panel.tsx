@@ -7,7 +7,7 @@ import {
   previewUrl,
   reconnectDevice,
   setCodecs,
-  setRecordAudio,
+  setRecorded,
   setStreams,
   type ArrayState,
   type AudioLevels,
@@ -16,6 +16,7 @@ import {
   type DeviceName,
   type Devices,
   type PreviewKind,
+  type RecordedPart,
   type Settings,
   type StreamName,
 } from '../lib/api';
@@ -261,7 +262,7 @@ const CaptureControls = ({
 };
 
 /**
- * Whether the array is recorded. Disabled while recording.
+ * Whether the array, and its direction, are recorded. Disabled while recording.
  */
 const ArrayControls = ({
   settings,
@@ -276,28 +277,37 @@ const ArrayControls = ({
 
   if (!settings) return null;
 
-  const toggleAudio = (audio: boolean) =>
+  const toggle = (part: RecordedPart) =>
     run(async () => {
-      await setRecordAudio(audio);
+      await setRecorded(part, !settings[part]);
       onChanged();
     });
+
+  const locked = !settings.writable || recording || busy;
+  // The direction is written beside the audio, so it needs the audio on.
+  const parts: { part: RecordedPart; label: string; disabled: boolean }[] = [
+    { part: 'audio', label: 'audio (6 ch WAV)', disabled: locked },
+    { part: 'doa', label: 'direction (chip DoA)', disabled: locked || !settings.audio },
+  ];
 
   return (
     <div className="capture">
       <div className="rows">
-        <div className="row">
-          <span className="label">
-            <label>
-              <input
-                type="checkbox"
-                checked={settings.audio}
-                disabled={!settings.writable || recording || busy}
-                onChange={() => void toggleAudio(!settings.audio)}
-              />{' '}
-              audio (6 ch WAV)
-            </label>
-          </span>
-        </div>
+        {parts.map(({ part, label, disabled }) => (
+          <div className="row" key={part}>
+            <span className="label">
+              <label>
+                <input
+                  type="checkbox"
+                  checked={settings[part]}
+                  disabled={disabled}
+                  onChange={() => void toggle(part)}
+                />{' '}
+                {label}
+              </label>
+            </span>
+          </div>
+        ))}
       </div>
 
       {recording ? (

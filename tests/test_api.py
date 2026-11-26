@@ -184,6 +184,8 @@ def test_settings_change_what_the_next_recording_does(client, tmp_path) -> None:
 
     assert client.put("/api/settings", json={"audio": False}).json()["audio"] is False
     assert recorder.record_audio is False
+    assert client.put("/api/settings", json={"doa": False}).json()["doa"] is False
+    assert recorder.record_doa is False
 
 
 @pytest.mark.parametrize(
@@ -198,6 +200,7 @@ def test_settings_change_what_the_next_recording_does(client, tmp_path) -> None:
         {"streams": {"depth": False, "infrared": True}},
         {"codecs": {"color": "lossy"}},
         {"audio": "no"},
+        {"doa": 0},
     ],
 )
 def test_an_unusable_setting_is_refused(client, body) -> None:
@@ -216,6 +219,7 @@ def test_an_unusable_setting_is_refused(client, body) -> None:
         ("PUT", "/api/settings", {"streams": {"depth": False}}),
         ("PUT", "/api/settings", {"codecs": {"color": "raw"}}),
         ("PUT", "/api/settings", {"audio": False}),
+        ("PUT", "/api/settings", {"doa": False}),
         # Removing the file being written is not a recoverable mistake.
         ("DELETE", "/api/sessions/live", None),
     ],

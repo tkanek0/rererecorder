@@ -372,6 +372,23 @@ class SessionRecorder:
         """Whether a recording of the array records its direction too."""
         return self._record_doa
 
+    @record_doa.setter
+    def record_doa(self, value: bool) -> None:
+        """Choose whether a recording of the array records its direction too.
+
+        Off means not attempted: no sidecar and ``doa: false``. A readout that
+        fails while on stays ``doa: true`` with the failure in ``errors``.
+
+        Args:
+            value: Whether to record it.
+
+        Raises:
+            RecorderBusy: If a recording is running.
+        """
+        if self.recording:
+            raise RecorderBusy("cannot change the direction while recording")
+        self._record_doa = value
+
     @property
     def tap(self) -> AudioTap:
         """The array's audio tap, recorded from and shared with the live view."""

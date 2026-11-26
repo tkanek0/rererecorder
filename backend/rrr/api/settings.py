@@ -33,7 +33,12 @@ def get_settings() -> dict[str, Any]:
         "streams": state.streams.as_dict(),
         "codecs": state.codecs,
         "audio": state.recorder.record_audio,
+        "doa": state.recorder.record_doa,
     }
+
+
+#: Boolean settings, by request key, and the recorder attribute each sets.
+_FLAGS = {"audio": "record_audio", "doa": "record_doa"}
 
 
 @router.put("/api/settings")
@@ -49,6 +54,7 @@ async def put_settings(request: Request) -> dict[str, Any]:
                 ``infrared`` mapped to ``"compressed"`` or ``"raw"``. See
                 ``rrr.recorder.config.with_codecs``.
             ``audio``: whether to record the array.
+            ``doa``: whether a recording of the array records its direction.
 
     Returns:
         The settings afterwards.
@@ -62,7 +68,7 @@ async def put_settings(request: Request) -> dict[str, Any]:
 
     body = await request.json()
     changing = [
-        key for key in ("sessions_dir", "streams", "codecs", "audio") if key in body
+        key for key in ("sessions_dir", "streams", "codecs", *_FLAGS) if key in body
     ]
     if not changing:
         raise HTTPException(status_code=400, detail="nothing to change")
@@ -78,11 +84,12 @@ async def put_settings(request: Request) -> dict[str, Any]:
         _apply_streams(body["streams"])
     if "codecs" in body:
         _apply_codecs(body["codecs"])
-    if "audio" in body:
-        if not isinstance(body["audio"], bool):
-            raise HTTPException(status_code=400, detail="audio must be a boolean")
-        state.recorder.record_audio = body["audio"]
-        logger.info("audio now %s", "recorded" if body["audio"] else "not recorded")
+    for key, attribute in _FLAGS.items():
+        if key in body:
+            if not isinstance(body[key], bool):
+                raise HTTPException(status_code=400, detail=f"{key} must be a boolean")
+            setattr(state.recorder, attribute, body[key])
+            logger.info("%s now %s", key, "recorded" if body[key] else "not recorded")
     return get_settings()
 
 
